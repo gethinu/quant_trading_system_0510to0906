@@ -33,19 +33,13 @@ from typing import Optional
 import pandas as pd
 
 from common.io_utils import df_to_csv, write_json
+from common.signal_io import find_latest_final_signals, get_signals_dir
 
 
 def find_latest_snapshot(dirpath: Path) -> Optional[Path]:
     if not dirpath.exists():
         return None
     files = sorted(dirpath.glob("diagnostics_snapshot_*.json"))
-    return files[-1] if files else None
-
-
-def find_latest_final_signals(signals_dir: Path) -> Optional[Path]:
-    if not signals_dir.exists():
-        return None
-    files = sorted(signals_dir.glob("signals_final_*.csv"))
     return files[-1] if files else None
 
 
@@ -65,7 +59,10 @@ def main() -> int:
 
     snapshot_dir = repo_root / "results_csv_test" / "diagnostics_test"
     per_system_dir = repo_root / "results_csv_test"
-    signals_dir = repo_root / "data_cache" / "signals"
+    try:
+        signals_dir = get_signals_dir(create_dirs=False)
+    except Exception:
+        signals_dir = repo_root / "data_cache" / "signals"
     logs_dir = repo_root / "logs"
 
     outdir = Path(args.out)

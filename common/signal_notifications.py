@@ -12,7 +12,6 @@ from __future__ import annotations
 from datetime import datetime
 import logging
 from pathlib import Path
-from typing import Iterable
 
 from PIL import Image
 import pandas as pd
@@ -22,9 +21,7 @@ from common.notifier import chunk_fields, create_notifier, now_jst_str
 from common.price_chart import save_price_chart
 from common.position_tracker import update_positions_from_signals
 from common.trade_cache import pop_entry, store_entry
-from config.settings import get_settings
-
-_EXIT_FILENAME_PREFIX = "signals_exit_"
+from common.signal_io import get_signals_dir, read_signal_frames, select_signal_files
 
 
 def _combine_images(paths: list[str]) -> str:
@@ -65,54 +62,25 @@ def _infer_action(row: pd.Series) -> str:
     return ""
 
 
-def _select_signal_files(signals_dir: Path, date_str: str) -> list[Path]:
-    def _sort(paths: Iterable[Path]) -> list[Path]:
-        return sorted(list(paths), key=lambda p: p.stat().st_mtime if p.exists() else 0)
-
-    final_files = _sort(signals_dir.glob(f"signals_final_{date_str}*.csv"))
-    if final_files:
-        return [final_files[-1]]
-
-    system_files = _sort(signals_dir.glob(f"signals_system*_{date_str}*.csv"))
-    if system_files:
-        return system_files
-
-    # Fallback: any signals_* for the date except exit outputs
-    fallback = [
-        p
-        for p in _sort(signals_dir.glob(f"signals_*{date_str}*.csv"))
-        if _EXIT_FILENAME_PREFIX not in p.name
-    ]
-    return fallback
-
-
-def _load_signal_frames(files: list[Path]) -> list[pd.DataFrame]:
-    frames: list[pd.DataFrame] = []
-    for f in files:
-        try:
-            df = pd.read_csv(f)
-            frames.append(df)
-            logging.info("シグナル: %s (%d 件)", f.name, len(df))
-        except Exception:
-            logging.exception("シグナルCSVの読み込みに失敗: %s", f)
-    return frames
-
-
 def notify_signals() -> None:
-    settings = get_settings(create_dirs=True)
-    sig_dir = Path(settings.outputs.signals_dir)
+    sig_dir = get_signals_dir(create_dirs=True)
     if not sig_dir.exists():
         logging.info("signals ディレクトリが存在しません: %s", sig_dir)
         return
 
     today_str = datetime.today().strftime("%Y-%m-%d")
-    files = _select_signal_files(sig_dir, today_str)
+    files = select_signal_files(sig_dir, today_str)
     if not files:
         logging.info("本日の新規シグナルCSVは見つかりませんでした。")
         _send_exit_notifications(sig_dir, today_str)
         return
 
-    frames = _load_signal_frames(files)
+    frames = read_signal_frames(files)
+    for f, df in zip(files, frames, strict=False):
+        try:
+            logging.info("シグナル: %s (%d 件)", f.name, len(df))
+        except Exception:
+            pass
     total = sum(len(df) for df in frames)
     logging.info("本日の合計シグナル件数: %d", total)
     if frames:
@@ -233,15 +201,14 @@ def _save_exit_signals(
     if exit_df is None or getattr(exit_df, "empty", True):
         return
     if signals_dir is None:
-        settings = get_settings(create_dirs=True)
-        signals_dir = Path(settings.outputs.signals_dir)
+        signals_dir = get_signals_dir(create_dirs=True)
     if date_str is None:
         date_str = datetime.today().strftime("%Y-%m-%d")
     try:
         signals_dir.mkdir(parents=True, exist_ok=True)
     except Exception:
         pass
-    out_path = signals_dir / f"{_EXIT_FILENAME_PREFIX}{date_str}.csv"
+    out_path = signals_dir / f"signals_exit_{date_str}.csv"
     try:
         from common.io_utils import df_to_csv
 

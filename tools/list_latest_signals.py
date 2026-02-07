@@ -16,6 +16,11 @@ try:
 except Exception:
     get_settings = None  # fallback later
 
+try:
+    from common.signal_io import get_signals_dir
+except Exception:
+    get_signals_dir = None
+
 
 def _safe_count_data_rows(csv_path: Path) -> int:
     """Count data rows (excluding header) from a CSV file.
@@ -70,7 +75,13 @@ def main() -> int:
     results_dir: Path
     if get_settings is not None:
         s = get_settings(create_dirs=False)
-        signals_dir = Path(s.outputs.signals_dir)
+        if get_signals_dir is not None:
+            try:
+                signals_dir = get_signals_dir(create_dirs=False)
+            except Exception:
+                signals_dir = Path(s.outputs.signals_dir)
+        else:
+            signals_dir = Path(s.outputs.signals_dir)
         results_dir = Path(s.outputs.results_csv_dir)
     else:
         # Fallback defaults
