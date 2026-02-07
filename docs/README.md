@@ -127,6 +127,14 @@
 
 **新規ファイル追加・リファクタリング時の Context Note 記載ガイド**: [Context Note 追記ガイド](./context_note_guide.md)
 
+### 🤖 LLM Reference
+
+- [LLM Reference Index](./llm/README.md) - 常時参照の入口
+- [LLM Spec](./llm/SPEC.md) - 目的・スコープ・不変条件
+- [LLM Architecture](./llm/ARCHITECTURE.md) - 構成とデータフロー
+- [LLM Interfaces](./llm/INTERFACES.md) - CLI/UI/API/出力の契約
+- [LLM State](./llm/STATE.md) - 状態管理と保存場所
+
 ### 🔗 関連リンク
 
 - [メイン README](../README.md) - プロジェクト全体概要

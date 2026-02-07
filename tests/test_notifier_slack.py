@@ -22,3 +22,13 @@ def test_slack_send_text_only_once(monkeypatch):
     n = notifier.SimpleSlackNotifier()
     assert n._slack_send_text("hello") is True
     assert call_count == 1
+
+
+def test_create_notifier_falls_back_to_discord(monkeypatch):
+    monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
+    monkeypatch.setenv("DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/test")
+
+    n = notifier.create_notifier(platform="slack", fallback=True)
+
+    assert isinstance(n, notifier.Notifier)
+    assert n.platform == "discord"

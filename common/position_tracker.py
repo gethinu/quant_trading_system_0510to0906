@@ -118,17 +118,79 @@ def update_positions_from_signals(
     tracker = load_tracker(path)
     updated_count = 0
 
+    def _coerce_float(val: Any) -> float | None:
+        if val is None:
+            return None
+        try:
+            if isinstance(val, str) and not val.strip():
+                return None
+            return float(val)
+        except Exception:
+            return None
+
+    def _coerce_bool(val: Any) -> bool | None:
+        if val is None:
+            return None
+        if isinstance(val, bool):
+            return val
+        try:
+            s = str(val).strip().lower()
+        except Exception:
+            return None
+        if s in {"1", "true", "yes", "on"}:
+            return True
+        if s in {"0", "false", "no", "off"}:
+            return False
+        return None
+
+    def _pick(row: pd.Series, keys: list[str]) -> Any:
+        for key in keys:
+            try:
+                val = row.get(key)
+            except Exception:
+                val = None
+            if val is None or (isinstance(val, float) and pd.isna(val)):
+                continue
+            if isinstance(val, str) and not val.strip():
+                continue
+            return val
+        return None
+
+    def _normalize_side(raw: Any) -> str | None:
+        if raw is None:
+            return None
+        try:
+            val = str(raw).strip().lower()
+        except Exception:
+            return None
+        if not val:
+            return None
+        if val in {"long", "buy"}:
+            return "long"
+        if val in {"short", "sell"}:
+            return "short"
+        return None
+
     for _, row in signals_df.iterrows():
         try:
             symbol = str(row.get("symbol", "")).upper()
             if not symbol:
                 continue
 
-            system = str(row.get("system", ""))
-            entry_date = row.get("entry_date")
-            entry_price = row.get("entry_price")
+            system = str(row.get("system", "")).lower()
+            entry_date = _pick(row, ["entry_date", "signal_date"])
+            entry_price = _pick(
+                row,
+                [
+                    "entry_price",
+                    "entry_price_final",
+                    "entry_order_price",
+                    "price",
+                ],
+            )
+            entry_price_val = _coerce_float(entry_price)
 
-            if not all([system, entry_date is not None, entry_price]):
+            if not all([system, entry_date is not None, entry_price_val]):
                 logger.warning(f"Skipping {symbol}: missing required fields")
                 continue
 
@@ -143,19 +205,66 @@ def update_positions_from_signals(
             atr20 = row.get("atr20")
             atr40 = row.get("atr40")
 
-            # Calculate profit target if applicable
-            profit_target_price = None
-            # This would require trade_management rules integration
-            # For now, set to None and calculate in run_auto_rule_enhanced
+            # Optional trade metadata (if present in signals)
+            side = _normalize_side(_pick(row, ["side"]))
+            if side is None:
+                side = _normalize_side(_pick(row, ["signal_type", "action"]))
+            stop_price = _coerce_float(_pick(row, ["stop_price", "initial_stop_price"]))
+            profit_target_price = _coerce_float(
+                _pick(row, ["profit_target_price", "target_price"])
+            )
+            trailing_stop_pct = _coerce_float(_pick(row, ["trailing_stop_pct"]))
+            use_trailing_stop = _coerce_bool(_pick(row, ["use_trailing_stop"]))
+            max_holding_days = _pick(row, ["max_holding_days"])
+            try:
+                max_holding_days = (
+                    int(float(max_holding_days))
+                    if max_holding_days is not None
+                    else None
+                )
+            except Exception:
+                max_holding_days = None
+            max_exit_date = _pick(row, ["max_exit_date"])
+            if isinstance(max_exit_date, (datetime, pd.Timestamp)):
+                max_exit_date_str = max_exit_date.isoformat()
+            elif max_exit_date is not None:
+                max_exit_date_str = str(max_exit_date)
+            else:
+                max_exit_date_str = None
+
+            existing = tracker.get(symbol, {})
 
             tracker[symbol] = {
+                **existing,
                 "system": system,
+                "side": side or existing.get("side"),
                 "entry_date": entry_date_str,
-                "entry_price": float(entry_price),
-                "profit_target_price": profit_target_price,
-                "atr10": float(atr10) if atr10 and pd.notna(atr10) else None,
-                "atr20": float(atr20) if atr20 and pd.notna(atr20) else None,
-                "atr40": float(atr40) if atr40 and pd.notna(atr40) else None,
+                "entry_price": float(entry_price_val),
+                "stop_price": stop_price if stop_price is not None else existing.get("stop_price"),
+                "profit_target_price": (
+                    profit_target_price
+                    if profit_target_price is not None
+                    else existing.get("profit_target_price")
+                ),
+                "trailing_stop_pct": (
+                    trailing_stop_pct
+                    if trailing_stop_pct is not None
+                    else existing.get("trailing_stop_pct")
+                ),
+                "use_trailing_stop": (
+                    use_trailing_stop
+                    if use_trailing_stop is not None
+                    else existing.get("use_trailing_stop")
+                ),
+                "max_holding_days": (
+                    max_holding_days
+                    if max_holding_days is not None
+                    else existing.get("max_holding_days")
+                ),
+                "max_exit_date": max_exit_date_str or existing.get("max_exit_date"),
+                "atr10": float(atr10) if atr10 and pd.notna(atr10) else existing.get("atr10"),
+                "atr20": float(atr20) if atr20 and pd.notna(atr20) else existing.get("atr20"),
+                "atr40": float(atr40) if atr40 and pd.notna(atr40) else existing.get("atr40"),
                 "last_update": datetime.now().isoformat(),
             }
             updated_count += 1

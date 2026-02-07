@@ -56,6 +56,12 @@ CI（推奨）
 - [ ] `python -m black .` を実行した
 - [ ] `python -m ruff format .` を実行した
 - [ ] `pre-commit run --all-files` を通した
+- [ ] 仕様/構成/インターフェース/状態に影響する変更がある場合、`docs/llm/*` を更新した
+
+LLM reference guard（pre-push）
+
+- `tools/llm_reference_guard.py` が、主要ファイルの変更時に `docs/llm/*` 更新を促します。
+- 更新不要な場合は `LLM_REF_GUARD_SKIP=1` を指定して一時的にバイパスできます。
 
 サポート
 

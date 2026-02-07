@@ -13,6 +13,10 @@ description: Project context and reference documentation for AI coding assistanc
 1. **プロジェクト概要**: `docs/README.md` - システム構成、テスト、運用ガイド
 2. **技術仕様**: `docs/TECHNICAL_SPECS.md` - System1-7 の詳細仕様
 3. **環境変数**: `docs/technical/environment_variables.md`
+4. **LLM Spec**: `docs/llm/SPEC.md` - Product intent and invariants
+5. **LLM Architecture**: `docs/llm/ARCHITECTURE.md` - System structure and data flow
+6. **LLM Interfaces**: `docs/llm/INTERFACES.md` - CLI, UI, and API contracts
+7. **LLM State**: `docs/llm/STATE.md` - State locations and lifecycle
 
 ## プロジェクト構造
 

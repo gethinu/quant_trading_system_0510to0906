@@ -1319,6 +1319,7 @@ def create_notifier(
         "on",
     }
     have_token = bool(os.getenv("SLACK_BOT_TOKEN"))
+    discord_url = os.getenv("DISCORD_WEBHOOK_URL", "").strip()
     # fallback=True かつ Slack Bot Token があれば Simple/Rich Slack Notifier を優先
     if fallback and have_token:
         slack_instance: Notifier = (
@@ -1326,16 +1327,16 @@ def create_notifier(
         )
         if broadcast:
             notifiers: list[Notifier] = [slack_instance]
-            discord_url = os.getenv("DISCORD_WEBHOOK_URL")
             if discord_url:
                 notifiers.append(Notifier(platform="discord", webhook_url=discord_url))
             if len(notifiers) == 1:
                 return notifiers[0]
             return BroadcastNotifier(notifiers)
         return slack_instance
+    if fallback and platform == "slack" and discord_url:
+        return Notifier(platform="discord", webhook_url=discord_url)
     if broadcast:
         notifiers: list[Notifier] = []
-        discord_url = os.getenv("DISCORD_WEBHOOK_URL")
         if platform in {"auto", "both", "broadcast", "all"}:
             if discord_url:
                 notifiers.append(Notifier(platform="discord", webhook_url=discord_url))

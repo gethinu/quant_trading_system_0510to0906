@@ -52,6 +52,14 @@ repos:
         exclude: ^(tests/|tools/check_project_rules\.py|e2e/)
         stages: [pre-push] # より厳格に pre-push で実行
 
+      - id: llm-reference-guard
+        name: LLM reference guard
+        entry: python tools/llm_reference_guard.py --strict
+        language: system
+        pass_filenames: true
+        files: ^(core/|common/|strategies/|scripts/|apps/|config/|docs/|README\.md|\.github/|\.agent/)
+        stages: [pre-push]
+
       - id: auto-benchmark
         name: Performance Regression Check
         entry: python tools/auto_benchmark.py --threshold 0.10 --confirm
