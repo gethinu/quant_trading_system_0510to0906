@@ -201,8 +201,13 @@ def _format_unrealized(
     text = f"{sign}{pnl_pct:.1f}%"
     if qty is not None and qty > 0:
         pnl_abs = diff * qty
-        sign_abs = "+" if pnl_abs >= 0 else ""
-        text = f"{text} ({sign_abs}${abs(pnl_abs):,.0f})"
+        if pnl_abs > 0:
+            amt_text = f"+${pnl_abs:,.0f}"
+        elif pnl_abs < 0:
+            amt_text = f"-${abs(pnl_abs):,.0f}"
+        else:
+            amt_text = "+$0"
+        text = f"{text} ({amt_text})"
     return text
 
 
@@ -1134,7 +1139,7 @@ def _send_exit_radar_notifications() -> None:
     except Exception:
         cache_manager = None
 
-    rows: list[list[str]] = []
+    items: list[dict[str, object]] = []
     for sym, info in sorted(tracker.items()):
         symbol = str(sym).upper()
         if not symbol:
@@ -1161,10 +1166,12 @@ def _send_exit_radar_notifications() -> None:
             except Exception:
                 trailing_pct = None
 
+        exit_date = None
         if max_exit_date is not None:
             due, when = decide_exit_schedule(system, max_exit_date, max_exit_date)
             exit_date_str = max_exit_date.strftime("%Y-%m-%d")
             exit_when = when if when else ("today_close" if due else "")
+            exit_date = max_exit_date
         else:
             exit_date_str, exit_when = compute_time_exit_date(
                 system, entry_date, max_holding_days
@@ -1222,32 +1229,73 @@ def _send_exit_radar_notifications() -> None:
         exit_price_text = " / ".join(trigger_parts) if trigger_parts else "-"
 
         pnl_text = _format_unrealized(entry_price, current_price, qty, side)
-        rows.append(
-            [
-                symbol,
-                side or "-",
-                f"{entry_price:.2f}" if entry_price is not None else "-",
-                stop_text,
-                target_text,
-                trail_text,
-                exit_text,
-                exit_price_text,
-                pnl_text or "-",
-            ]
+        pnl_sign = None
+        try:
+            if entry_price is not None and current_price is not None and entry_price != 0:
+                diff = current_price - entry_price
+                if side == "short":
+                    diff = -diff
+                if diff > 0:
+                    pnl_sign = 1
+                elif diff < 0:
+                    pnl_sign = -1
+                else:
+                    pnl_sign = 0
+        except Exception:
+            pnl_sign = None
+
+        if exit_date is None and exit_date_str:
+            try:
+                exit_date = pd.Timestamp(exit_date_str).normalize()
+            except Exception:
+                exit_date = None
+
+        items.append(
+            {
+                "symbol": symbol,
+                "system": system,
+                "side": side or "-",
+                "entry": f"{entry_price:.2f}" if entry_price is not None else "-",
+                "stop": stop_text,
+                "target": target_text,
+                "trail": trail_text,
+                "exit_text": exit_text,
+                "trigger": exit_price_text,
+                "pnl": pnl_text or "-",
+                "pnl_sign": pnl_sign,
+                "exit_date": exit_date,
+                "exit_when": exit_when or "",
+            }
         )
 
-    if not rows:
+    if not items:
         logging.info("exit radar notification skipped (no valid rows)")
         return
 
     title = f"Exit Radar ・ {now_jst_str()}"
-    summary = f"保有ポジション: {len(rows)}"
+    summary = f"保有ポジション: {len(items)}"
     format_mode = os.getenv("EXIT_RADAR_FORMAT", "compact").strip().lower()
     if format_mode == "table":
+        table_rows = [
+            [
+                str(it.get("symbol", "")),
+                _short_system_label(it.get("system", "")),
+                str(it.get("side", "")),
+                str(it.get("entry", "")),
+                str(it.get("stop", "")),
+                str(it.get("target", "")),
+                str(it.get("trail", "")),
+                str(it.get("exit_text", "")),
+                str(it.get("trigger", "")),
+                str(it.get("pnl", "")),
+            ]
+            for it in items
+        ]
         table = format_table(
-            rows,
+            table_rows,
             headers=[
                 "Symbol",
+                "System",
                 "Side",
                 "Entry",
                 "Stop",
@@ -1261,19 +1309,99 @@ def _send_exit_radar_notifications() -> None:
         )
         message = summary + (f"\n{table}" if table else "")
     else:
+        now = pd.Timestamp.now(tz="America/New_York").normalize().tz_localize(None)
+        tomorrow = now + pd.Timedelta(days=1)
+        week_end = now + pd.Timedelta(days=7)
+
+        def _bucket(ts: pd.Timestamp | None) -> str:
+            if ts is None or pd.isna(ts):
+                return "⏱(DUE) 未定"
+            if ts <= tomorrow:
+                return "⏱(DUE) 今日/明日"
+            if ts <= week_end:
+                return "⏱(DUE) 今週"
+            return "⏱(DUE) それ以降"
+
+        grouped: dict[str, list[dict[str, object]]] = {}
+        for it in items:
+            ts = it.get("exit_date")
+            bucket = _bucket(ts if isinstance(ts, pd.Timestamp) else None)
+            grouped.setdefault(bucket, []).append(it)
+
+        order = [
+            "⏱(DUE) 今日/明日",
+            "⏱(DUE) 今週",
+            "⏱(DUE) それ以降",
+            "⏱(DUE) 未定",
+        ]
         lines: list[str] = []
-        for row in rows:
-            symbol, side, entry, _stop, _target, _trail, _time_exit, trigger, pnl = row
-            side_label = "L" if side == "long" else ("S" if side == "short" else side)
-            base = f"{symbol} {side_label}"
-            if entry and entry != "-":
-                base = f"{base} entry {entry}"
-            if pnl and pnl != "-":
-                base = f"{base} pnl {pnl}"
-            lines.append(base)
-            trig = trigger if trigger and trigger != "-" else ""
-            if trig:
-                lines.append(f"  trigger {trig}")
+        for bucket in order:
+            rows_b = grouped.get(bucket) or []
+            if not rows_b:
+                continue
+            lines.append(bucket)
+            for it in rows_b:
+                symbol = str(it.get("symbol", "")).upper()
+                sys_label = _short_system_label(it.get("system", ""))
+                side = str(it.get("side", ""))
+                entry = str(it.get("entry", ""))
+                pnl = str(it.get("pnl", ""))
+                exit_text = str(it.get("exit_text", ""))
+                stop = str(it.get("stop", ""))
+                target = str(it.get("target", ""))
+                trail = str(it.get("trail", ""))
+                exit_when = str(it.get("exit_when", "")).lower()
+
+                side_icon = (
+                    "🟢(LONG)"
+                    if side == "long"
+                    else ("🔴(SHORT)" if side == "short" else "⚪(SIDE)")
+                )
+                pnl_sign = it.get("pnl_sign")
+                if pnl_sign == 1:
+                    pnl_icon = "🟩(+PnL)"
+                elif pnl_sign == -1:
+                    pnl_icon = "🟥(-PnL)"
+                else:
+                    pnl_icon = "⬜(PnL)"
+
+                when_short = ""
+                if "open" in exit_when:
+                    when_short = "OPEN"
+                elif "close" in exit_when:
+                    when_short = "CLOSE"
+                exit_date_short = ""
+                if exit_text and exit_text != "-":
+                    try:
+                        exit_date_short = exit_text.split()[0]
+                    except Exception:
+                        exit_date_short = exit_text
+
+                if sys_label:
+                    base = f"{symbol}({sys_label}) {side_icon}"
+                else:
+                    base = f"{symbol} {side_icon}"
+                if entry and entry != "-":
+                    base = f"{base} entry {entry}"
+                if pnl and pnl != "-":
+                    base = f"{base} pnl {pnl} {pnl_icon}"
+                if exit_date_short:
+                    date_only = exit_date_short.replace(" ", "")
+                    if len(date_only) == 10:
+                        date_only = date_only[5:]
+                    base = f"{base} ⏱(EXIT) {date_only} {when_short}".strip()
+                lines.append(base)
+
+                trigger_parts: list[str] = []
+                if stop != "-":
+                    trigger_parts.append(f"🛑(STOP){stop}")
+                if target != "-":
+                    trigger_parts.append(f"🎯(TARGET){target}")
+                if trail != "-":
+                    trigger_parts.append(f"🧵(TRAIL){trail}")
+                if trigger_parts:
+                    lines.append("  " + " ".join(trigger_parts))
+
         message = summary + ("\n" + "\n".join(lines) if lines else "")
 
     if slack_ch:
