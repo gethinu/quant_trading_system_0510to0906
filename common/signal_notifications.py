@@ -36,6 +36,7 @@ from common.notifier import (
 from common.price_chart import save_price_chart
 from common.position_tracker import load_tracker, remove_positions, update_positions_from_signals
 from common.trade_cache import pop_entry, store_entry
+from common.trade_management import SYSTEM_TRADE_RULES
 from common.signal_io import get_signals_dir, read_signal_frames, select_signal_files
 from common.today_filters import _pick_series
 from config.environment import get_env_config
@@ -106,6 +107,22 @@ def _safe_int(val) -> int | None:
     except Exception:
         return None
     return num
+
+
+def _safe_bool(val) -> bool | None:
+    if val is None:
+        return None
+    if isinstance(val, bool):
+        return val
+    try:
+        s = str(val).strip().lower()
+    except Exception:
+        return None
+    if s in {"1", "true", "yes", "on"}:
+        return True
+    if s in {"0", "false", "no", "off"}:
+        return False
+    return None
 
 
 def _safe_date(val) -> pd.Timestamp | None:
@@ -187,6 +204,137 @@ def _format_unrealized(
         sign_abs = "+" if pnl_abs >= 0 else ""
         text = f"{text} ({sign_abs}${abs(pnl_abs):,.0f})"
     return text
+
+
+def _normalize_price_df(df: pd.DataFrame) -> pd.DataFrame | None:
+    if df is None or getattr(df, "empty", True):
+        return None
+    try:
+        work = df.copy()
+    except Exception:
+        return None
+    try:
+        work.columns = [str(c) for c in work.columns]
+    except Exception:
+        pass
+    if "Date" in work.columns:
+        idx = pd.to_datetime(work["Date"], errors="coerce")
+    elif "date" in work.columns:
+        idx = pd.to_datetime(work["date"], errors="coerce")
+    else:
+        idx = pd.to_datetime(work.index, errors="coerce")
+    work = work.assign(_idx=idx).dropna(subset=["_idx"])
+    work = work.sort_values("_idx")
+    work = work.set_index("_idx")
+    work.index = pd.to_datetime(work.index).normalize()
+    return work
+
+
+def _pick_atr(info: dict, period: int) -> float | None:
+    if period <= 0:
+        return None
+    key = f"atr{int(period)}"
+    val = _safe_float(info.get(key))
+    if val is not None and val > 0:
+        return val
+    key2 = f"ATR{int(period)}"
+    val2 = _safe_float(info.get(key2))
+    if val2 is not None and val2 > 0:
+        return val2
+    return None
+
+
+def _compute_stop_price(
+    info: dict,
+    entry_price: float | None,
+    side: str,
+    system: str,
+) -> float | None:
+    stop_price = _safe_float(info.get("stop_price"))
+    if stop_price is not None and stop_price > 0:
+        return stop_price
+    if entry_price is None or entry_price <= 0:
+        return None
+    rules = SYSTEM_TRADE_RULES.get(system)
+    if rules is None:
+        return None
+    atr_val = _pick_atr(info, int(rules.stop_atr_period or 0))
+    if atr_val is None or atr_val <= 0:
+        return None
+    dist = float(rules.stop_atr_multiplier or 0.0) * atr_val
+    if side == "short":
+        return entry_price + dist
+    return entry_price - dist
+
+
+def _compute_target_price(
+    info: dict,
+    entry_price: float | None,
+    side: str,
+    system: str,
+) -> float | None:
+    target_price = _safe_float(info.get("profit_target_price"))
+    if target_price is not None and target_price > 0:
+        return target_price
+    if entry_price is None or entry_price <= 0:
+        return None
+    rules = SYSTEM_TRADE_RULES.get(system)
+    if rules is None:
+        return None
+    if rules.profit_target_type == "percentage":
+        pct = float(rules.profit_target_value or 0.0) / 100.0
+        if pct <= 0:
+            return None
+        if side == "short":
+            return entry_price / (1.0 + pct)
+        return entry_price * (1.0 + pct)
+    if rules.profit_target_type == "atr":
+        atr_period = int(rules.profit_target_atr_period or rules.stop_atr_period or 0)
+        atr_val = _pick_atr(info, atr_period)
+        if atr_val is None or atr_val <= 0:
+            return None
+        dist = atr_val * float(rules.profit_target_value or 0.0)
+        if side == "short":
+            return entry_price - dist
+        return entry_price + dist
+    return None
+
+
+def _compute_trailing_stop_price(
+    df: pd.DataFrame | None,
+    entry_date: pd.Timestamp | None,
+    side: str,
+    trailing_pct: float | None,
+) -> float | None:
+    if df is None or trailing_pct is None:
+        return None
+    if trailing_pct <= 0:
+        return None
+    seg = df
+    if entry_date is not None and entry_date in df.index:
+        try:
+            seg = df.loc[df.index >= entry_date]
+        except Exception:
+            seg = df
+    if seg is None or getattr(seg, "empty", True):
+        seg = df
+    if side == "short":
+        series = _pick_series(seg, ["Low", "low", "Close", "close"])
+        if series is None or getattr(series, "empty", True):
+            return None
+        try:
+            min_low = float(series.min())
+        except Exception:
+            return None
+        return min_low * (1.0 + trailing_pct)
+    series = _pick_series(seg, ["High", "high", "Close", "close"])
+    if series is None or getattr(series, "empty", True):
+        return None
+    try:
+        max_high = float(series.max())
+    except Exception:
+        return None
+    return max_high * (1.0 - trailing_pct)
 
 
 def _format_stop_price_floor_note() -> str | None:
@@ -994,11 +1142,24 @@ def _send_exit_radar_notifications() -> None:
         system = str(info.get("system", "")).lower()
         side = _resolve_side(info, system)
         entry_price = _safe_float(info.get("entry_price"))
-        stop_price = _safe_float(info.get("stop_price"))
         qty = _safe_float(info.get("qty"))
         entry_date = _safe_date(info.get("entry_date"))
         max_exit_date = _safe_date(info.get("max_exit_date"))
         max_holding_days = _safe_int(info.get("max_holding_days"))
+
+        rules = SYSTEM_TRADE_RULES.get(system) if system else None
+        stop_price = _compute_stop_price(info, entry_price, side, system)
+        target_price = _compute_target_price(info, entry_price, side, system)
+
+        use_trailing_stop = _safe_bool(info.get("use_trailing_stop"))
+        trailing_pct = _safe_float(info.get("trailing_stop_pct"))
+        if use_trailing_stop is False:
+            trailing_pct = None
+        if trailing_pct is None and rules and rules.use_trailing_stop:
+            try:
+                trailing_pct = float(rules.trailing_stop_pct or 0.0)
+            except Exception:
+                trailing_pct = None
 
         if max_exit_date is not None:
             due, when = decide_exit_schedule(system, max_exit_date, max_exit_date)
@@ -1010,19 +1171,63 @@ def _send_exit_radar_notifications() -> None:
             )
 
         exit_text = _format_time_exit_text(exit_date_str, exit_when)
-        current_price = (
-            _latest_close(cache_manager, symbol)
-            if cache_manager is not None
-            else None
+        price_df_raw = None
+        if cache_manager is not None:
+            try:
+                price_df_raw = cache_manager.read(symbol, "rolling")
+            except Exception:
+                price_df_raw = None
+            if price_df_raw is None or getattr(price_df_raw, "empty", True):
+                try:
+                    price_df_raw = cache_manager.read(symbol, "base")
+                except Exception:
+                    price_df_raw = price_df_raw
+        price_df = _normalize_price_df(price_df_raw) if price_df_raw is not None else None
+        current_price = None
+        if price_df is not None:
+            series = _pick_series(price_df, ["Close", "close", "CLOSE"])
+            try:
+                if series is not None and not getattr(series, "empty", True):
+                    val = series.iloc[-1]
+                    if pd.isna(val):
+                        val = series.dropna().iloc[-1]
+                    current_price = float(val)
+            except Exception:
+                current_price = None
+        if current_price is None and cache_manager is not None:
+            current_price = _latest_close(cache_manager, symbol)
+
+        trailing_stop_price = _compute_trailing_stop_price(
+            price_df, entry_date, side, trailing_pct
         )
+
+        stop_text = f"{stop_price:.2f}" if stop_price is not None else "-"
+        target_text = f"{target_price:.2f}" if target_price is not None else "-"
+        trail_text = (
+            f"{trailing_stop_price:.2f}" if trailing_stop_price is not None else "-"
+        )
+
+        exit_price_text = "-"
+        if target_price is not None:
+            exit_price_text = f"target {target_price:.2f}"
+        elif trailing_stop_price is not None:
+            exit_price_text = f"trail {trailing_stop_price:.2f}"
+        elif stop_price is not None:
+            exit_price_text = f"stop {stop_price:.2f}"
+        elif exit_text and exit_text != "-":
+            exit_price_text = "close"
+
         pnl_text = _format_unrealized(entry_price, current_price, qty, side)
         rows.append(
             [
                 symbol,
                 side or "-",
                 f"{entry_price:.2f}" if entry_price is not None else "-",
-                f"{stop_price:.2f}" if stop_price is not None else "-",
+                stop_text,
+                target_text,
+                trail_text,
                 exit_text,
+                exit_price_text,
                 pnl_text or "-",
             ]
         )
@@ -1035,8 +1240,8 @@ def _send_exit_radar_notifications() -> None:
     summary = f"保有ポジション: {len(rows)}"
     table = format_table(
         rows,
-        headers=["Symbol", "Side", "Entry", "Stop", "TimeExit", "PnL"],
-        max_width=140,
+        headers=["Symbol", "Side", "Entry", "Stop", "Target", "Trail", "TimeExit", "ExitPx", "PnL"],
+        max_width=180,
     )
     message = summary + (f"\n{table}" if table else "")
 
