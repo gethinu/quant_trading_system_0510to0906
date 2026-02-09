@@ -2,7 +2,7 @@
 
 プロジェクト全体で使用される環境変数を網羅的に一覧化し、各変数の目的・デフォルト値・影響範囲を明示します。
 
-**最終更新**: 2025-10-10
+**最終更新**: 2026-02-07
 **対象バージョン**: branch0906
 
 > **真偽値の判定ルール**: "1" / "true" / "yes" / "on" を真、それ以外を偽と見なします（大文字小文字不問）。
@@ -287,6 +287,15 @@
 - **説明**: 全履歴をスキャン（`latest_only=False`）。デバッグ用。
 - **参照**: `scripts/run_all_systems_today.py` L4419
 
+### `SKIP_EXTERNAL_APIS`
+
+- **デフォルト**: `0`
+- **設定値**: `0` / `1`
+- **対象**: `scripts/run_all_systems_today.py`, `common/today_signals.py`
+- **説明**: 外部API呼び出しをスキップ。`1` の場合、ショート可否（Alpaca Asset API）チェックを省略して高速化する。
+- **使用例**: `SKIP_EXTERNAL_APIS=1 python scripts/run_all_systems_today.py --skip-external`
+- **参照**: `config/environment.py` の `EnvironmentConfig.skip_external_apis`
+
 ### `ALLOW_CRITICAL_CHANGES`
 
 - **デフォルト**: (未設定)
@@ -388,6 +397,75 @@
 - **説明**: Discord Webhook URL。
 - **⚠️ 機密情報**: `.env` ファイルで管理
 
+### `DISCORD_WEBHOOK_URL_SIGNALS`
+
+- **デフォルト**: (未設定)
+- **設定値**: URL
+- **対象**: Discord 通知（シグナル）
+- **説明**: エントリー/エグジット/サマリーなどシグナル通知の送信先。未設定時は `DISCORD_WEBHOOK_URL` にフォールバック。
+- **⚠️ 機密情報**: `.env` ファイルで管理
+
+### `DISCORD_WEBHOOK_URL_SUMMARY`
+
+- **デフォルト**: (未設定)
+- **設定値**: URL
+- **対象**: Discord 通知（日次サマリー）
+- **説明**: 日次サマリー（本日のやること含む）の送信先。未設定時は `DISCORD_WEBHOOK_URL_SIGNALS` / `DISCORD_WEBHOOK_URL` にフォールバック。
+- **⚠️ 機密情報**: `.env` ファイルで管理
+
+### `DISCORD_WEBHOOK_URL_SYSTEM1` / `DISCORD_WEBHOOK_URL_SYSTEM2` / `DISCORD_WEBHOOK_URL_SYSTEM3` / `DISCORD_WEBHOOK_URL_SYSTEM4` / `DISCORD_WEBHOOK_URL_SYSTEM5` / `DISCORD_WEBHOOK_URL_SYSTEM6` / `DISCORD_WEBHOOK_URL_SYSTEM7`
+
+- **デフォルト**: (未設定)
+- **設定値**: URL
+- **対象**: Discord 通知（システム別シグナル）
+- **説明**: system1〜system7 のシグナル送信先。未設定時は `DISCORD_WEBHOOK_URL_SIGNALS` / `DISCORD_WEBHOOK_URL` にフォールバック。
+- **⚠️ 機密情報**: `.env` ファイルで管理
+
+### `DISCORD_WEBHOOK_URL_EQUITY`
+
+- **デフォルト**: (未設定)
+- **設定値**: URL
+- **対象**: Discord 通知（バックテスト/売買結果）
+- **説明**: バックテスト・売買結果・エクイティ関連の通知送信先。未設定時は `DISCORD_WEBHOOK_URL` にフォールバック。
+- **⚠️ 機密情報**: `.env` ファイルで管理
+
+### `DISCORD_WEBHOOK_URL_BACKTEST`
+
+- **デフォルト**: (未設定)
+- **設定値**: URL
+- **対象**: Discord 通知（バックテスト/売買結果）
+- **説明**: バックテストや売買結果の送信先。未設定時は `DISCORD_WEBHOOK_URL_EQUITY` / `DISCORD_WEBHOOK_URL` にフォールバック。
+- **⚠️ 機密情報**: `.env` ファイルで管理
+
+### `DISCORD_WEBHOOK_URL_LOGS`
+
+- **デフォルト**: (未設定)
+- **設定値**: URL
+- **対象**: Discord 通知（ログ/汎用）
+- **説明**: 汎用ログ通知の送信先。未設定時は `DISCORD_WEBHOOK_URL` にフォールバック。
+- **⚠️ 機密情報**: `.env` ファイルで管理
+
+### `POSITION_TRACKER_AUTO_UPDATE`
+
+- **デフォルト**: `1`
+- **設定値**: `0` / `1`
+- **対象**: position_tracker 自動更新
+- **説明**: `0` の場合、シグナル通知後に `data/position_tracker.json` を自動更新しない。
+
+### `POSITION_TRACKER_CONFIRM_AUTO_APPLY`
+
+- **デフォルト**: `1`
+- **設定値**: `0` / `1`
+- **対象**: 確認CSVの自動適用
+- **説明**: `1` の場合、`data/entry_confirmations_YYYY-MM-DD.csv` と `data/exit_confirmations_YYYY-MM-DD.csv` を自動で position_tracker に反映する。
+
+### `POSITION_TRACKER_CONFIRM_DIR`
+
+- **デフォルト**: `data`
+- **設定値**: パス
+- **対象**: 確認CSVの配置ディレクトリ
+- **説明**: 確認CSVを置くディレクトリ。日次通知の前にこの場所を参照する。
+
 ### `EODHD_API_KEY`
 
 - **デフォルト**: (未設定)
@@ -407,6 +485,14 @@
 - **設定値**: `0` / `1`
 - **対象**: 通知システム
 - **説明**: 通知をリッチカード形式で送信。
+
+### `SIGNALS_PLATFORM`
+
+- **デフォルト**: `slack`
+- **設定値**: `slack` / `discord` / `auto` / `both`
+- **対象**: シグナル通知
+- **説明**: シグナル通知の送信先プラットフォームを指定。
+- **補足**: `discord` を指定すると Slack を経由せず Discord へ直接送信します。
 
 ### `CACHE_HEALTH_SILENT`
 
@@ -452,6 +538,15 @@
 ---
 
 ## 8. その他
+
+### `STOP_PRICE_FLOOR`
+
+- **デフォルト**: `0.01`
+- **設定値**: 数値（最小ストップ価格）
+- **対象**: `common/today_signals.py`, `core/system1.py`
+- **説明**: stop_price の下限値。ATR 計算などで stop が 0 以下になった場合に下限へクランプする。
+- **使用例**: `STOP_PRICE_FLOOR=0.05`
+- **参照**: `config/settings.py` の `RiskConfig.stop_price_floor`
 
 ### `SCHEDULER_WORKERS` / `BULK_UPDATE_WORKERS`
 
@@ -634,5 +729,5 @@ TODAY_SYMBOL_LIMIT=10  # 高速テスト
 
 ---
 
-**最終更新**: 2025-10-10
+**最終更新**: 2026-02-07
 **メンテナー**: プロジェクトチーム

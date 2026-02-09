@@ -8,6 +8,8 @@ risk:
   max_positions: 10
   # 1トレードの最大ポジション比率（資金に対する%）
   max_pct: 0.10
+  # stop_price の最小値（0以下の異常値を防ぐ）
+  stop_price_floor: 0.01
 
 strategies:
   # 各システム固有パラメータ（必要に応じて追加）
@@ -100,8 +102,8 @@ data:
       workers: 4
       prune_chunk_days: 30
       meta_file: "_meta.json"
-      max_stale_days: 2
-      max_staleness_days: 2
+      max_stale_days: 30
+      max_staleness_days: 30
       round_decimals: 2
       # 適応制御（ワーカーの自動調整）
       adaptive_window_count: 8
@@ -140,17 +142,14 @@ scheduler:
       cron: "0 6 * * 1-5"
       task: update_tickers
     - name: bulk_last_day
-      cron: "45 6 * * 1-5"
+      cron: "20 6 * * 1-5" # 平日 06:20
       task: bulk_last_day
     - name: warm_cache
-      cron: "0 7 * * 1-5" # 平日 07:00
+      cron: "30 6 * * 1-5" # 平日 06:30
       task: cache_daily_data # python スクリプト/関数名の想定
     - name: precompute_shared_indicators
-      cron: "30 7 * * 1-5" # 平日 07:30（市場時間外のウォームアップ）
+      cron: "40 6 * * 1-5" # 平日 06:40（市場時間外のウォームアップ）
       task: precompute_shared_indicators
-    - name: send_signals
-      cron: "15 11 * * 1-5" # 平日 11:15 ← シグナル生成後に通知
-      task: notify_signals
     - name: update_trailing_stops
       cron: "45 8 * * 1-5"
       task: update_trailing_stops
@@ -161,7 +160,7 @@ scheduler:
       cron: "55 8 * * 1-5" # 平日 08:55（確認用レポート）
       task: build_metrics_report
     - name: run_today_signals
-      cron: "0 11 * * 1-5" # 平日 11:00 ← 前営業日終値ベースでシグナル生成
+      cron: "0 7 * * 1-5" # 平日 07:00 ← 前営業日終値ベースでシグナル生成 + 通知
       task: run_today_signals
     - name: run_auto_rule_market_open
       cron: "30 23 * * 1-5" # 平日 23:30 ← 市場オープン直後

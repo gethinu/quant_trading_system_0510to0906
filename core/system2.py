@@ -42,7 +42,11 @@ from common.system_candidates_utils import (
     normalize_dataframe_to_by_date,
     set_diagnostics_after_ranking,
 )
-from common.system_common import check_precomputed_indicators, get_total_days
+from common.system_common import (
+    check_precomputed_indicators,
+    get_total_days,
+    slice_latest_rows,
+)
 from common.system_constants import SYSTEM2_REQUIRED_INDICATORS
 from common.system_setup_predicates import validate_predicate_equivalence
 from common.utils import get_cached_data
@@ -53,8 +57,30 @@ MIN_DOLLAR_VOLUME_20 = 25_000_000  # Minimum 20-day dollar volume
 MIN_ATR_RATIO = 0.03  # Minimum ATR ratio for volatility filter
 RSI3_SPIKE_THRESHOLD = 90  # RSI3 overbought threshold for short entry
 DEFAULT_TOP_N = 10  # Default number of top candidates
+LATEST_ONLY_TAIL_ROWS = 5
+SYSTEM2_LATEST_ONLY_COLUMNS = (
+    "Open",
+    "High",
+    "Low",
+    "Close",
+    "Volume",
+    "rsi3",
+    "adx7",
+    "atr10",
+    "dollarvolume20",
+    "atr_ratio",
+    "twodayup",
+    "uptwodays",
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _numeric_or_nan(df: pd.DataFrame, column: str) -> pd.Series:
+    """Return a numeric series for column or NaN-filled series if missing."""
+    if column in df.columns:
+        return pd.to_numeric(df[column], errors="coerce")
+    return pd.Series([float("nan")] * len(df), index=df.index)
 
 
 def _apply_filter_conditions(df: pd.DataFrame) -> pd.Series:
@@ -69,14 +95,11 @@ def _apply_filter_conditions(df: pd.DataFrame) -> pd.Series:
         always reflect the latest thresholds.
     """
 
-    base = df.drop(columns=["filter"], errors="ignore")
-    computed = (
-        (pd.to_numeric(base["Close"], errors="coerce") >= MIN_PRICE)
-        & (
-            pd.to_numeric(base["dollarvolume20"], errors="coerce")
-            > MIN_DOLLAR_VOLUME_20
-        )
-        & (pd.to_numeric(base["atr_ratio"], errors="coerce") > MIN_ATR_RATIO)
+    close = _numeric_or_nan(df, "Close")
+    dv20 = _numeric_or_nan(df, "dollarvolume20")
+    atr_ratio = _numeric_or_nan(df, "atr_ratio")
+    computed = (close >= MIN_PRICE) & (dv20 > MIN_DOLLAR_VOLUME_20) & (
+        atr_ratio > MIN_ATR_RATIO
     )
 
     filter_series = computed.fillna(False)
@@ -88,7 +111,9 @@ def _apply_filter_conditions(df: pd.DataFrame) -> pd.Series:
     return filter_series.astype(bool)
 
 
-def _apply_setup_conditions(df: pd.DataFrame) -> pd.Series:
+def _apply_setup_conditions(
+    df: pd.DataFrame, filter_series: pd.Series | None = None
+) -> pd.Series:
     """Apply System2 setup conditions (filter + RSI spike + two-day up).
 
     Args:
@@ -101,9 +126,16 @@ def _apply_setup_conditions(df: pd.DataFrame) -> pd.Series:
         If df already has 'setup' column, it is preserved and returned as-is.
         This maintains backward compatibility with test fixtures.
     """
-    filter_pass = _apply_filter_conditions(df)
-    rsi_ok = pd.to_numeric(df["rsi3"], errors="coerce") > RSI3_SPIKE_THRESHOLD
-    two_day_up = pd.Series(df["twodayup"], index=df.index).fillna(False).astype(bool)
+    filter_pass = (
+        filter_series if filter_series is not None else _apply_filter_conditions(df)
+    )
+    rsi_ok = _numeric_or_nan(df, "rsi3") > RSI3_SPIKE_THRESHOLD
+    if "twodayup" in df.columns:
+        two_day_up = (
+            pd.Series(df["twodayup"], index=df.index).fillna(False).astype(bool)
+        )
+    else:
+        two_day_up = pd.Series([False] * len(df), index=df.index)
 
     setup_series = (filter_pass & rsi_ok & two_day_up).fillna(False)
 
@@ -137,8 +169,9 @@ def _compute_indicators(symbol: str) -> tuple[str, pd.DataFrame | None]:
 
         # Apply System2-specific filters and setup
         x = df.copy()
-        x["filter"] = _apply_filter_conditions(x)
-        x["setup"] = _apply_setup_conditions(x)
+        filter_series = _apply_filter_conditions(x)
+        x["filter"] = filter_series
+        x["setup"] = _apply_setup_conditions(x, filter_series=filter_series)
 
         return symbol, x
 
@@ -178,6 +211,7 @@ def prepare_data_vectorized_system2(
     Returns:
         Processed data dictionary
     """
+    latest_only = bool(kwargs.get("latest_only", False))
     # Fast path: reuse precomputed indicators
     if reuse_indicators and raw_data_dict:
         try:
@@ -190,9 +224,17 @@ def prepare_data_vectorized_system2(
                 # Apply System2-specific filters
                 prepared_dict = {}
                 for symbol, df in valid_data_dict.items():
-                    x = df.copy()
-                    x["filter"] = _apply_filter_conditions(x)
-                    x["setup"] = _apply_setup_conditions(x)
+                    if latest_only:
+                        x = slice_latest_rows(
+                            df,
+                            keep_columns=SYSTEM2_LATEST_ONLY_COLUMNS,
+                            tail_rows=LATEST_ONLY_TAIL_ROWS,
+                        )
+                    else:
+                        x = df.copy()
+                    filter_series = _apply_filter_conditions(x)
+                    x["filter"] = filter_series
+                    x["setup"] = _apply_setup_conditions(x, filter_series=filter_series)
                     prepared_dict[symbol] = x
 
                 if log_callback:

@@ -4,10 +4,16 @@
 import argparse
 import sys
 import time
+from pathlib import Path
 
 from dotenv import load_dotenv
 import pandas as pd
 import requests
+
+# Ensure project root is on sys.path so `import common` works when invoked directly.
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 import common  # noqa: F401
 from common.cache_manager import CacheManager
@@ -30,6 +36,22 @@ load_dotenv()
 
 # Initialize logger
 logger = get_trading_logger()
+
+
+def _log_trading_error_safe(trading_logger, err, context=None) -> None:
+    """Guard against older logger implementations missing helper methods."""
+    try:
+        if hasattr(trading_logger, "log_trading_error"):
+            trading_logger.log_trading_error(err, context)
+            return
+    except Exception:
+        pass
+    try:
+        if hasattr(trading_logger, "log_error"):
+            trading_logger.log_error(err, context)
+            return
+    except Exception:
+        pass
 
 
 def fetch_and_cache_spy_from_eodhd(folder=None, group=None):
@@ -68,7 +90,9 @@ def fetch_and_cache_spy_from_eodhd(folder=None, group=None):
             return True
 
         except TradingError as e:
-            logger.log_trading_error(e, {"operation": "spy_recovery", "symbol": symbol})
+            _log_trading_error_safe(
+                logger, e, {"operation": "spy_recovery", "symbol": symbol}
+            )
             print(f"❌ [{e.error_code.value}] {e.message}", file=sys.stderr)
             if e.retryable:
                 print("⚠️  このエラーは再試行可能です", file=sys.stderr)
@@ -87,7 +111,7 @@ def fetch_and_cache_spy_from_eodhd(folder=None, group=None):
                 context=error_ctx,
                 cause=e,
             )
-            logger.log_trading_error(trading_error)
+            _log_trading_error_safe(logger, trading_error)
             print(f"❌ [SYS002E] 予期しないエラー: {str(e)}", file=sys.stderr)
             return False
 

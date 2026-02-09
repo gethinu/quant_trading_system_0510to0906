@@ -728,7 +728,11 @@ def run_backtest_app(
                 import os as _os
 
                 if not (
-                    _os.getenv("DISCORD_WEBHOOK_URL") or _os.getenv("SLACK_BOT_TOKEN")
+                    _os.getenv("SLACK_BOT_TOKEN")
+                    or _os.getenv("DISCORD_WEBHOOK_URL")
+                    or _os.getenv("DISCORD_WEBHOOK_URL_SIGNALS")
+                    or _os.getenv("DISCORD_WEBHOOK_URL_EQUITY")
+                    or _os.getenv("DISCORD_WEBHOOK_URL_LOGS")
                 ):
                     st.caption(tr("Webhook/Bot 設定が未設定です（.env を確認）"))
             except Exception:

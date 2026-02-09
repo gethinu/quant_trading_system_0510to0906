@@ -9,6 +9,18 @@ from typing import overload
 from zoneinfo import ZoneInfo
 
 import pandas as pd
+
+# --- NYSE calendar cache ----------------------------------------------------
+_NYSE_CALENDAR = None
+_LATEST_NYSE_CACHE: dict[str, pd.Timestamp] = {}
+_NEXT_NYSE_CACHE: dict[str, pd.Timestamp] = {}
+
+
+def _get_nyse_calendar():
+    global _NYSE_CALENDAR  # noqa: PLW0603 - simple module cache
+    if _NYSE_CALENDAR is None:
+        _NYSE_CALENDAR = mcal.get_calendar("NYSE")
+    return _NYSE_CALENDAR
 import pandas_market_calendars as mcal
 import streamlit as st
 from ta.trend import SMAIndicator
@@ -263,21 +275,40 @@ def _normalize_to_naive_day(ts: pd.Timestamp | None) -> pd.Timestamp:
 
 
 def get_latest_nyse_trading_day(today: pd.Timestamp | None = None) -> pd.Timestamp:
-    nyse = mcal.get_calendar("NYSE")
     today_naive = _normalize_to_naive_day(today)
+    try:
+        cache_key = pd.Timestamp(today_naive).strftime("%Y-%m-%d")
+    except Exception:
+        cache_key = str(today_naive)
+    cached = _LATEST_NYSE_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    nyse = _get_nyse_calendar()
     sched = nyse.schedule(
         start_date=today_naive - pd.Timedelta(days=7),
         end_date=today_naive + pd.Timedelta(days=1),
     )
     valid_days = pd.to_datetime(sched.index).normalize()
-    return valid_days[valid_days <= today_naive].max()
+    latest = valid_days[valid_days <= today_naive].max()
+    try:
+        _LATEST_NYSE_CACHE[cache_key] = pd.Timestamp(latest).normalize()
+    except Exception:
+        _LATEST_NYSE_CACHE[cache_key] = latest
+    return latest
 
 
 def get_next_nyse_trading_day(current: pd.Timestamp | None = None) -> pd.Timestamp:
     """NY証券取引所の翌営業日を返す。"""
-
-    nyse = mcal.get_calendar("NYSE")
     current_naive = _normalize_to_naive_day(current)
+    try:
+        cache_key = pd.Timestamp(current_naive).strftime("%Y-%m-%d")
+    except Exception:
+        cache_key = str(current_naive)
+    cached = _NEXT_NYSE_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    nyse = _get_nyse_calendar()
     sched = nyse.schedule(
         start_date=current_naive,
         end_date=current_naive + pd.Timedelta(days=10),
@@ -286,7 +317,12 @@ def get_next_nyse_trading_day(current: pd.Timestamp | None = None) -> pd.Timesta
     future_days = valid_days[valid_days > current_naive]
     if future_days.empty:
         raise ValueError("No upcoming NYSE trading day found")
-    return future_days.min()
+    nxt = future_days.min()
+    try:
+        _NEXT_NYSE_CACHE[cache_key] = pd.Timestamp(nxt).normalize()
+    except Exception:
+        _NEXT_NYSE_CACHE[cache_key] = nxt
+    return nxt
 
 
 def get_signal_target_trading_day(now: pd.Timestamp | None = None) -> pd.Timestamp:

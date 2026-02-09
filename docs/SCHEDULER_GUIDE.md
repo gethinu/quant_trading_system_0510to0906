@@ -7,14 +7,13 @@
 | タスク名 | 実行時刻 | 説明 |
 |---------|---------|------|
 | update_tickers | 平日 06:00 | ティッカーリストの更新 |
-| bulk_last_day | 平日 06:45 | 前営業日データの一括更新 |
-| warm_cache | 平日 07:00 | キャッシュのウォームアップ |
-| precompute_shared_indicators | 平日 07:30 | 共有指標の事前計算 |
-| send_signals | 平日 08:30 | シグナル通知の送信 |
+| bulk_last_day | 平日 06:20 | 前営業日データの一括更新 |
+| warm_cache | 平日 06:30 | キャッシュのウォームアップ |
+| precompute_shared_indicators | 平日 06:40 | 共有指標の事前計算 |
 | update_trailing_stops | 平日 08:45 | トレーリングストップの更新 |
 | notify_metrics | 平日 08:50 | メトリクス通知の送信 |
 | build_metrics_report | 平日 08:55 | レポートの生成 |
-| **run_today_signals** | **平日 11:00** | **当日シグナルの生成** ⭐ |
+| **run_today_signals** | **平日 07:00** | **当日シグナルの生成 + 通知** ⭐ |
 | daily_run | 火-土 06:15 | 日次バッチ処理 |
 
 ※ タイムゾーン: Asia/Tokyo (JST)
@@ -60,7 +59,7 @@ scheduler:
   timezone: Asia/Tokyo
   jobs:
     - name: run_today_signals
-      cron: "0 11 * * 1-5"  # 平日 11:00
+      cron: "0 7 * * 1-5"  # 平日 07:00
       task: run_today_signals
 ```
 

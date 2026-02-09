@@ -532,6 +532,15 @@ def prepare_data_vectorized_system1(
                     "atr20",
                     "dollarvolume20",
                 }
+                required_fast = {
+                    "Close",
+                    "sma25",
+                    "sma50",
+                    "sma200",
+                    "roc200",
+                    "atr20",
+                    "dollarvolume20",
+                }
 
                 # OHLC 不足時にキャッシュから補完するヘルパ
                 def _augment_ohlc_if_missing(
@@ -598,10 +607,82 @@ def prepare_data_vectorized_system1(
                         return x2
                     return x2
 
+                def _fast_latest_frame(
+                    sym: str, df_in: pd.DataFrame
+                ) -> pd.DataFrame | None:
+                    try:
+                        x_fast = df_in
+                        if x_fast is None or getattr(x_fast, "empty", True):
+                            return None
+
+                        # Ensure OHLC column casing when available
+                        if "Close" not in x_fast.columns and "close" in x_fast.columns:
+                            x_fast = _rename_ohlcv(x_fast)
+
+                        cols = set(getattr(x_fast, "columns", []))
+                        if not required_fast.issubset(cols):
+                            return None
+
+                        try:
+                            row = x_fast.iloc[-1]
+                        except Exception:
+                            return None
+
+                        date_val = None
+                        if "Date" in cols:
+                            date_val = row.get("Date")
+                        elif "date" in cols:
+                            date_val = row.get("date")
+                        else:
+                            try:
+                                date_val = x_fast.index[-1]
+                            except Exception:
+                                date_val = None
+
+                        if date_val is None or pd.isna(date_val):
+                            return None
+
+                        try:
+                            date_norm = pd.Timestamp(date_val).normalize()
+                        except Exception:
+                            return None
+
+                        data: dict[str, Any] = {}
+                        for col in minimal_cols:
+                            if col in cols:
+                                try:
+                                    data[col] = row.get(col)
+                                except Exception:
+                                    data[col] = None
+                        if not data:
+                            return None
+
+                        out = pd.DataFrame([data], index=[date_norm])
+                        out.index.name = "Date"
+                        try:
+                            for col in list(data.keys()):
+                                if col in out.columns:
+                                    out[col] = pd.to_numeric(
+                                        out[col], errors="coerce"
+                                    )
+                        except Exception:
+                            pass
+                        out = _apply_filter_conditions(out)
+                        out = _apply_setup_conditions(out)
+                        return out
+                    except Exception:
+                        return None
+
                 for symbol, df in raw_data_dict.items():
                     try:
                         if df is None or getattr(df, "empty", True):
                             continue
+
+                        fast_frame = _fast_latest_frame(symbol, df)
+                        if fast_frame is not None and not fast_frame.empty:
+                            prepared_dict[symbol] = fast_frame
+                            continue
+
                         x = df.copy(deep=False)
 
                         # OHLCV 列名を正規化（小文字 → PascalCase）
@@ -851,6 +932,14 @@ def generate_candidates_system1(
 
     resolved_top_n = 20 if top_n is None else top_n
     mode = "latest_only" if latest_only else "full_scan"
+    try:
+        from config.settings import get_settings
+
+        stop_floor = float(get_settings(create_dirs=False).risk.stop_price_floor)
+    except Exception:
+        stop_floor = 0.01
+    if not math.isfinite(stop_floor) or stop_floor <= 0:
+        stop_floor = 0.01
 
     # Initialize or reuse diagnostics dict
     if diagnostics is not None and isinstance(diagnostics, dict):
@@ -943,6 +1032,7 @@ def generate_candidates_system1(
         try:
             rows: list[dict] = []
             date_counter: dict[pd.Timestamp, int] = {}
+            entry_date_cache: dict[pd.Timestamp, pd.Timestamp] = {}
             # Optional: orchestrator may specify a target trading date fallback
             target_date = None
             # Optional max lag (calendar days). If provided and latest bar is older than
@@ -1176,11 +1266,15 @@ def generate_candidates_system1(
                 # エントリー価格とストップ価格の計算
                 # System1: 翌日寄り付きで買い、損切りは買値 - 5*ATR20
                 entry_price = close_val if close_val > 0 else 0.0
-                stop_price = (
-                    entry_price - (STOP_ATR_MULTIPLE_SYSTEM1 * atr20_val)
-                    if (entry_price > 0 and atr20_val > 0)
-                    else 0.0
-                )
+                if entry_price > 0 and atr20_val > 0:
+                    stop_price = entry_price - (
+                        STOP_ATR_MULTIPLE_SYSTEM1 * atr20_val
+                    )
+                    if stop_price <= 0:
+                        # Guard against negative/zero stop prices (data anomalies).
+                        stop_price = stop_floor
+                else:
+                    stop_price = 0.0
 
                 # fallback時は target_date ラベルで集計（フィルタ時に消えないように）
                 raw_label_dt = (
@@ -1212,15 +1306,6 @@ def generate_candidates_system1(
                     except Exception:
                         pass
                     continue
-                # 明示エントリー日（翌営業日）
-                try:
-                    from common.utils_spy import (
-                        resolve_signal_entry_date as _resolve_entry,
-                    )
-
-                    entry_dt = _resolve_entry(label_dt)
-                except Exception:
-                    entry_dt = None
                 date_counter[label_dt] = date_counter.get(label_dt, 0) + 1
 
                 # ATR20 を配分計算用に保持
@@ -1235,7 +1320,7 @@ def generate_candidates_system1(
                 row_dict = {
                     "symbol": sym,
                     "date": label_dt,
-                    "entry_date": entry_dt,
+                    "entry_date": None,
                     "roc200": roc200_val,
                     "close": 0.0 if math.isnan(close_val) else close_val,
                     "entry_price": entry_price,
@@ -1308,16 +1393,7 @@ def generate_candidates_system1(
                         if filtered.empty:
                             tmp = df_all.copy()
                             tmp.loc[:, "date"] = target_date
-                            try:
-                                from common.utils_spy import (
-                                    resolve_signal_entry_date as _resolve_entry_dt,
-                                )
-
-                                tmp.loc[:, "entry_date"] = _resolve_entry_dt(
-                                    target_date
-                                )
-                            except Exception:
-                                tmp.loc[:, "entry_date"] = target_date
+                            tmp.loc[:, "entry_date"] = None
                             filtered = tmp
                             final_label_date = target_date
                 else:
@@ -1370,16 +1446,7 @@ def generate_candidates_system1(
                                 final_label_date = None
                         if final_label_date is not None:
                             extras_pool.loc[:, "date"] = final_label_date
-                            try:
-                                from common.utils_spy import (
-                                    resolve_signal_entry_date as _resolve_entry_dt2,
-                                )
-
-                                extras_pool.loc[:, "entry_date"] = _resolve_entry_dt2(
-                                    final_label_date
-                                )
-                            except Exception:
-                                extras_pool.loc[:, "entry_date"] = final_label_date
+                            extras_pool.loc[:, "entry_date"] = None
                         extras_take = extras_pool.head(missing)
                         top_cut = (
                             pd.concat([top_cut, extras_take], ignore_index=True)
@@ -1390,6 +1457,40 @@ def generate_candidates_system1(
                     pass
 
             df_all = top_cut
+            # Resolve entry_date once per label date (avoid per-row calendar calls)
+            try:
+                if "entry_date" in df_all.columns:
+                    label_dt: pd.Timestamp | None = final_label_date
+                    if label_dt is None:
+                        try:
+                            if "date" in df_all.columns and len(df_all) > 0:
+                                label_dt = pd.Timestamp(
+                                    df_all["date"].iloc[0]
+                                ).normalize()
+                        except Exception:
+                            label_dt = None
+
+                    if label_dt is not None:
+                        entry_dt = entry_date_cache.get(label_dt)
+                        if entry_dt is None:
+                            try:
+                                from common.utils_spy import (
+                                    resolve_signal_entry_date as _resolve_entry_cached,
+                                )
+
+                                entry_dt = _resolve_entry_cached(label_dt)
+                            except Exception:
+                                entry_dt = label_dt
+                            entry_date_cache[label_dt] = entry_dt
+                        df_all.loc[:, "entry_date"] = entry_dt
+                    else:
+                        # Fallback: keep entry_date aligned with date column
+                        try:
+                            df_all.loc[:, "entry_date"] = df_all.get("date")
+                        except Exception:
+                            pass
+            except Exception:
+                pass
             # Use common utility to set ranking diagnostics
             set_diagnostics_after_ranking(
                 diag, final_df=df_all, ranking_source="latest_only"

@@ -10,7 +10,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 import pandas as pd
 
@@ -89,6 +89,47 @@ def _normalize_index(df: pd.DataFrame) -> pd.DataFrame:
         pass
 
     return x
+
+
+def slice_latest_rows(
+    df: pd.DataFrame,
+    *,
+    keep_columns: Sequence[str] | None = None,
+    tail_rows: int = 5,
+) -> pd.DataFrame:
+    """Return a lightweight frame for latest-only processing.
+
+    - Optionally keeps only the requested columns (if present).
+    - Returns only the last N rows (tail_rows).
+    - Uses shallow copies to avoid mutating the source frame.
+    """
+    if df is None or getattr(df, "empty", True):
+        return df
+    x = df
+    try:
+        x = _rename_ohlcv(x)
+    except Exception:
+        pass
+    if keep_columns:
+        try:
+            cols = [c for c in keep_columns if c in x.columns]
+            # Preserve date columns if present so downstream freshness checks work
+            for date_col in ("Date", "date"):
+                if date_col in x.columns and date_col not in cols:
+                    cols.append(date_col)
+            if cols:
+                x = x.loc[:, cols]
+        except Exception:
+            pass
+    try:
+        if tail_rows and len(x) > int(tail_rows):
+            x = x.tail(int(tail_rows))
+    except Exception:
+        pass
+    try:
+        return x.copy()
+    except Exception:
+        return x
 
 
 def _prepare_source_frame(
@@ -329,6 +370,7 @@ def validate_data_frame_basic(
 __all__ = [
     "_rename_ohlcv",
     "_normalize_index",
+    "slice_latest_rows",
     "_prepare_source_frame",
     "get_total_days",
     "get_date_range",

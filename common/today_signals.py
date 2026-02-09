@@ -52,6 +52,7 @@ from strategies.constants import (
 # --- Module-level flags (one-time notices) ----------------------------------
 # テストモードの鮮度許容緩和ログは1プロセス中に1回だけ表示する
 _TEST_MODE_FRESHNESS_LOGGED: bool = False
+_SHORTABILITY_SKIP_LOGGED: bool = False
 
 
 # --- CLI用デフォルトログ関数 -----------------------------------------------
@@ -104,6 +105,28 @@ TODAY_SIGNAL_COLUMNS = [
 ]
 
 TODAY_TOP_N = 10
+
+# stop_price の下限（設定から取得・キャッシュ）
+_STOP_PRICE_FLOOR: float | None = None
+
+
+def _resolve_stop_price_floor() -> float:
+    global _STOP_PRICE_FLOOR
+    if _STOP_PRICE_FLOOR is not None:
+        return _STOP_PRICE_FLOOR
+    floor = None
+    try:
+        floor = getattr(get_settings(create_dirs=False).risk, "stop_price_floor", None)
+    except Exception:
+        floor = None
+    try:
+        floor_val = float(floor) if floor is not None else 0.01
+    except Exception:
+        floor_val = 0.01
+    if not math.isfinite(floor_val) or floor_val <= 0:
+        floor_val = 0.01
+    _STOP_PRICE_FLOOR = float(floor_val)
+    return _STOP_PRICE_FLOOR
 
 
 @dataclass(frozen=True)
@@ -338,15 +361,35 @@ def _slice_data_for_lookback(
         try:
             if df is None or getattr(df, "empty", True):
                 continue
-            x = df.copy()
+            x = df
             if "Date" in x.columns:
-                idx = pd.to_datetime(x["Date"], errors="coerce").dt.normalize()
-                x.index = pd.Index(idx)
+                fast_ok = False
+                try:
+                    fast_ok = bool(x["Date"].is_monotonic_increasing)
+                except Exception:
+                    fast_ok = False
+                if fast_ok:
+                    x_tail = x.tail(int(lookback_days)).copy()
+                    idx = pd.to_datetime(
+                        x_tail["Date"], errors="coerce"
+                    ).dt.normalize()
+                    x_tail.index = pd.Index(idx)
+                    x_tail = x_tail[~x_tail.index.isna()]
+                    sliced[sym] = x_tail
+                else:
+                    x_full = x.copy()
+                    idx = pd.to_datetime(x_full["Date"], errors="coerce").dt.normalize()
+                    x_full.index = pd.Index(idx)
+                    x_full = x_full[~x_full.index.isna()]
+                    x_full = x_full.sort_index()
+                    x_full = x_full.tail(int(lookback_days))
+                    sliced[sym] = x_full
             else:
-                x.index = pd.to_datetime(x.index, errors="coerce").normalize()
-            x = x[~x.index.isna()]
-            x = x.tail(int(lookback_days))
-            sliced[sym] = x
+                x_full = x.copy()
+                x_full.index = pd.to_datetime(x_full.index, errors="coerce").normalize()
+                x_full = x_full[~x_full.index.isna()]
+                x_full = x_full.tail(int(lookback_days))
+                sliced[sym] = x_full
         except Exception:
             sliced[sym] = df
     return sliced
@@ -602,6 +645,23 @@ def _apply_shortability_filter(
     skip_stats: SkipStats,
     log_callback: Callable[[str], None] | None,
 ) -> dict[str, pd.DataFrame] | pd.DataFrame | None:
+    try:
+        from config.environment import get_env_config
+
+        env = get_env_config()
+        if bool(getattr(env, "skip_external_apis", False)):
+            global _SHORTABILITY_SKIP_LOGGED
+            if log_callback and not _SHORTABILITY_SKIP_LOGGED:
+                try:
+                    log_callback(
+                        "⚡ 外部APIスキップ設定によりショート可否チェックを省略します"
+                    )
+                except Exception:
+                    pass
+                _SHORTABILITY_SKIP_LOGGED = True
+            return prepared
+    except Exception:
+        pass
     name = (system_name or "").lower()
     if name not in {"system2", "system6"}:
         return prepared
@@ -910,6 +970,11 @@ def _compute_setup_pass(
             items = [("", prepared)]
         else:
             items = []
+        try:
+            settings = get_settings(create_dirs=False)
+            max_stale_days = int(getattr(settings.cache.rolling, "max_staleness_days", 0))
+        except Exception:
+            max_stale_days = None
         latest_rows: dict[str, pd.Series] = {}
         for sym, df in items:
             if df is None or getattr(df, "empty", True):
@@ -977,7 +1042,13 @@ def _compute_setup_pass(
                 )
             except Exception:
                 spy_df = None
-            spy_gate_bool = _make_spy_gate(spy_df, column="sma100")
+            spy_gate_bool = _make_spy_gate(
+                spy_df,
+                column="sma100",
+                expected_date=prev_trading_day,
+                max_stale_days=max_stale_days,
+                log_callback=log_callback,
+            )
             if spy_gate_bool is True:
                 spy_gate = 1
             elif spy_gate_bool is False:
@@ -1110,7 +1181,10 @@ def _compute_setup_pass(
                 spy_with = None
             try:
                 spy_gate_val = _make_spy_gate(
-                    _normalize_daily_index(spy_with) if spy_with is not None else None
+                    _normalize_daily_index(spy_with) if spy_with is not None else None,
+                    expected_date=prev_trading_day,
+                    max_stale_days=max_stale_days,
+                    log_callback=log_callback,
                 )
                 if spy_gate_val is False:
                     spy_gate_val = 0
@@ -1132,81 +1206,32 @@ def _compute_setup_pass(
                     pass
         elif name == "system5":
             threshold_label = format_atr_pct_threshold_label()
-            s5_total = len(rows_list)
-            s5_av = 0
-            s5_dv = 0
-            s5_atr = 0
-            for row in rows_list:
-                try:
-                    av_val = row.get("AvgVolume50")
-                    if av_val is None or pd.isna(av_val) or float(av_val) <= 500_000:
-                        continue
-                    s5_av += 1
-                    dv_val = row.get("DollarVolume50")
-                    if dv_val is None or pd.isna(dv_val) or float(dv_val) <= 2_500_000:
-                        continue
-                    s5_dv += 1
-                    atr_pct_val = row.get("ATR_Pct")
-                    if (
-                        atr_pct_val is not None
-                        and not pd.isna(atr_pct_val)
-                        and float(atr_pct_val) > DEFAULT_ATR_PCT_THRESHOLD
-                    ):
-                        s5_atr += 1
-                except Exception:
-                    continue
-            if log_callback:
-                try:
-                    log_callback(
-                        "🧪 system5集計: "
-                        + f"対象={s5_total}, AvgVol50>500k: {s5_av}, "
-                        + f"DV50>2.5M: {s5_dv}, {threshold_label}: {s5_atr}"
-                    )
-                except Exception:
-                    pass
-
-            def _price_ok(row: pd.Series) -> bool:
-                try:
-                    c = to_float(row.get("Close"))
-                    row_map = cast(Mapping[str, Any], row)
-                    s = to_float(get_indicator(row_map, "sma100"))
-                    a = to_float(get_indicator(row_map, "atr10"))
-                    return (
-                        (("filter" not in row) or bool(row.get("filter")))
-                        and (not np.isnan(c) and not np.isnan(s) and not np.isnan(a))
-                        and (c > s + a)
-                    )
-                except Exception:
-                    return False
-
-            def _adx_ok(row: pd.Series) -> bool:
-                try:
-                    row_map = cast(Mapping[str, Any], row)
-                    vv = to_float(get_indicator(row_map, "adx7"))
-                    return (not np.isnan(vv)) and vv > 55
-                except Exception:
-                    return False
-
-            def _rsi_ok(row: pd.Series) -> bool:
-                try:
-                    row_map = cast(Mapping[str, Any], row)
-                    vv = to_float(get_indicator(row_map, "rsi3"))
-                    return (not np.isnan(vv)) and vv < 50
-                except Exception:
-                    return False
-
-            price_pass = _count_if(rows_list, _price_ok)
-            adx_pass = _count_if(rows_list, lambda r: _price_ok(r) and _adx_ok(r))
-            rsi_pass = _count_if(
-                rows_list, lambda r: _price_ok(r) and _adx_ok(r) and _rsi_ok(r)
+            from common.system_setup_predicates import (
+                system5_setup_predicate as _s5_pred,
             )
-            setup_pass = rsi_pass
+
+            filtered_rows = [
+                r for r in rows_list if ("filter" not in r) or bool(r.get("filter"))
+            ]
+            setup_pass = _count_if(
+                filtered_rows,
+                lambda r: (
+                    (
+                        False
+                        if r.get("setup") is None or pd.isna(r.get("setup"))
+                        else bool(r.get("setup"))
+                    )
+                    if "setup" in r
+                    else _s5_pred(r)
+                ),
+            )
             if log_callback:
                 try:
                     log_callback(
                         "🧩 system5セットアップ集計: "
-                        + f"フィルタ通過={filter_pass}, Close>SMA100+ATR10: {price_pass}, "
-                        + f"ADX7>55: {adx_pass}, RSI3<50: {rsi_pass}"
+                        + f"フィルタ通過={filter_pass}, "
+                        + f"setup(ADX/ATR)= {setup_pass}, "
+                        + f"ATR閾値 {threshold_label}"
                     )
                 except Exception:
                     pass
@@ -1590,6 +1615,29 @@ def _attach_entry_skip_attrs(frame: pd.DataFrame, stats: SkipStats) -> None:
         pass
 
 
+def _attach_stop_floor_attrs(
+    frame: pd.DataFrame,
+    clamp_count: int,
+    stop_floor: float,
+    samples: list[str],
+) -> None:
+    if frame is None or clamp_count <= 0:
+        return
+    try:
+        frame.attrs["stop_price_floor"] = float(stop_floor)
+    except Exception:
+        pass
+    try:
+        frame.attrs["stop_price_floor_clamp_count"] = int(clamp_count)
+    except Exception:
+        pass
+    try:
+        if samples:
+            frame.attrs["stop_price_floor_clamp_samples"] = list(samples)
+    except Exception:
+        pass
+
+
 def _build_today_signals_dataframe(
     strategy: Any,
     prepared: dict[str, pd.DataFrame] | pd.DataFrame | None,
@@ -1641,6 +1689,9 @@ def _build_today_signals_dataframe(
         return _empty_today_signals_frame(), 0
 
     entry_skip_stats = SkipStats()
+    stop_floor = _resolve_stop_price_floor()
+    clamped_count = 0
+    clamped_samples: list[str] = []
 
     rows: list[TodaySignal] = []
     date_cache: dict[str, np.ndarray] = {}
@@ -1731,6 +1782,15 @@ def _build_today_signals_dataframe(
             entry_skip_stats.record(str(sym), reason_label)
             continue
         entry, stop = comp
+        if debug_info.get("clamped_stop"):
+            clamped_count += 1
+            sym_label = str(sym)
+            if (
+                sym_label
+                and sym_label not in clamped_samples
+                and len(clamped_samples) < 5
+            ):
+                clamped_samples.append(sym_label)
         skey, sval, _asc = _score_from_candidate(system_name, c)
 
         try:
@@ -2065,6 +2125,7 @@ def _build_today_signals_dataframe(
         return frame_empty, 0
 
     out = pd.DataFrame([r.__dict__ for r in rows])
+    _attach_stop_floor_attrs(out, clamped_count, stop_floor, clamped_samples)
     _attach_entry_skip_attrs(out, entry_skip_stats)
     _log_entry_skip_summary(entry_skip_stats, system_name, log_callback)
 
@@ -2095,6 +2156,15 @@ def _build_today_signals_dataframe(
             log_callback(f"🧮 トレード候補選定完了（当日）：{final_count} 銘柄")
         except Exception:
             pass
+        if clamped_count > 0:
+            try:
+                sample_text = ", ".join(clamped_samples)
+                suffix = f" (例: {sample_text})" if sample_text else ""
+                log_callback(
+                    f"🧷 stop_price_floor={stop_floor:.4f} によりストップ補正: {clamped_count}件{suffix}"
+                )
+            except Exception:
+                pass
 
     return out, final_count
 
@@ -2113,9 +2183,11 @@ def _normalize_daily_index(df: pd.DataFrame) -> pd.DataFrame:
     x = df.copy()
     if "Date" in x.columns:
         idx = pd.to_datetime(x["Date"], errors="coerce").dt.normalize()
-        x.index = pd.Index(idx)
+    elif "date" in x.columns:
+        idx = pd.to_datetime(x["date"], errors="coerce").dt.normalize()
     else:
-        x.index = pd.to_datetime(x.index, errors="coerce").normalize()
+        idx = pd.to_datetime(x.index, errors="coerce").normalize()
+    x.index = pd.Index(idx)
     x = x[~x.index.isna()]
     try:
         x = x.sort_index()
@@ -2129,13 +2201,53 @@ def _normalize_daily_index(df: pd.DataFrame) -> pd.DataFrame:
     return x
 
 
-def _make_spy_gate(spy_df: pd.DataFrame | None, column: str = "SMA200") -> bool | None:
+def _make_spy_gate(
+    spy_df: pd.DataFrame | None,
+    column: str = "SMA200",
+    *,
+    expected_date: pd.Timestamp | None = None,
+    max_stale_days: int | None = None,
+    log_callback: Callable[[str], None] | None = None,
+) -> bool | None:
     if spy_df is None or getattr(spy_df, "empty", True):
         return None
     try:
         last_row = spy_df.iloc[-1]
     except Exception:
         return None
+    last_date: pd.Timestamp | None = None
+    try:
+        if "Date" in spy_df.columns:
+            series = pd.to_datetime(spy_df["Date"], errors="coerce").dropna()
+            if len(series):
+                last_date = pd.Timestamp(series.iloc[-1]).normalize()
+        elif "date" in spy_df.columns:
+            series = pd.to_datetime(spy_df["date"], errors="coerce").dropna()
+            if len(series):
+                last_date = pd.Timestamp(series.iloc[-1]).normalize()
+        else:
+            idx = pd.to_datetime(spy_df.index, errors="coerce")
+            if isinstance(idx, pd.DatetimeIndex) and len(idx):
+                last_date = pd.Timestamp(idx[-1]).normalize()
+    except Exception:
+        last_date = None
+    if expected_date is not None and last_date is not None and max_stale_days is not None:
+        try:
+            expected_norm = pd.Timestamp(expected_date).normalize()
+            lag_days = int((expected_norm - last_date).days)
+            if lag_days > int(max_stale_days):
+                if log_callback:
+                    try:
+                        log_callback(
+                            "⚠️ SPYゲート: キャッシュが古いため判定をスキップ "
+                            f"(last={last_date.date()}, expected={expected_norm.date()}, "
+                            f"lag={lag_days}日, max={int(max_stale_days)}日)"
+                        )
+                    except Exception:
+                        pass
+                return None
+        except Exception:
+            pass
     try:
         close_val = pd.to_numeric(
             pd.Series([last_row.get("Close")]), errors="coerce"
@@ -2369,10 +2481,21 @@ def _compute_entry_stop(
         if debug is not None and reason and "fallback_reason" not in debug:
             debug["fallback_reason"] = reason
 
+    def _record_clamped_stop(original: float, floor: float) -> None:
+        if debug is None:
+            return
+        debug["clamped_stop"] = True
+        details = debug.setdefault("details", {})
+        if "clamped_stop_before" not in details:
+            details["clamped_stop_before"] = original
+        if "clamped_stop_after" not in details:
+            details["clamped_stop_after"] = floor
+
     try:
         system_name = str(getattr(strategy, "SYSTEM_NAME", "")).lower()
     except Exception:
         system_name = ""
+    stop_floor = _resolve_stop_price_floor()
 
     # strategy 独自の compute_entry があれば優先
     try:
@@ -2387,6 +2510,13 @@ def _compute_entry_stop(
                 if e > 0 and (
                     (side == "short" and st > e) or (side == "long" and e > st)
                 ):
+                    if side == "long" and st <= 0:
+                        _set_reason("clamped_stop")
+                        _record_clamped_stop(st, stop_floor)
+                        st = stop_floor
+                    if side == "short" and st <= 0:
+                        _set_reason("invalid_stop")
+                        return None
                     return round(e, 4), round(st, 4)
         except Exception as exc:
             _record_detail("strategy_compute_entry_error", str(exc))
@@ -2691,6 +2821,10 @@ def _compute_entry_stop(
 
     mult = _resolve_stop_atr_multiple(strategy, system_name)
     stop = entry - mult * atr_val if side == "long" else entry + mult * atr_val
+    if side == "long" and stop <= 0:
+        _set_reason("clamped_stop")
+        _record_clamped_stop(stop, stop_floor)
+        stop = stop_floor
     if (side == "long" and stop >= entry) or (side == "short" and stop <= entry):
         _set_reason("invalid_stop")
         return None
@@ -2747,9 +2881,13 @@ def get_today_signals_for_strategy(
     except Exception:
         pass
 
-    t0 = _t.time()
+    t_wall_start = _t.time()
+    t_total_start = _t.perf_counter()
+    t_slice_start = _t.perf_counter()
     sliced_dict = _slice_data_for_lookback(raw_data_dict, lookback_days)
+    t_slice = _t.perf_counter() - t_slice_start
 
+    t_prepare_start = _t.perf_counter()
     prepare_result = _prepare_strategy_data(
         strategy,
         sliced_dict,
@@ -2759,12 +2897,22 @@ def get_today_signals_for_strategy(
         max_workers=max_workers,
         lookback_days=lookback_days,
     )
+    t_prepare = _t.perf_counter() - t_prepare_start
     if prepare_result.early_exit_frame is not None:
         if (log_callback is not None) and prepare_result.early_exit_reason:
             try:
                 log_callback(f"🛈 中断理由コード: {prepare_result.early_exit_reason}")
             except Exception:
                 pass
+        try:
+            timing = {
+                "slice_sec": round(float(t_slice), 6),
+                "prepare_sec": round(float(t_prepare), 6),
+                "total_sec": round(float(_t.perf_counter() - t_total_start), 6),
+            }
+            prepare_result.early_exit_frame.attrs["timing"] = timing
+        except Exception:
+            pass
         return prepare_result.early_exit_frame
 
     prepared: dict[str, pd.DataFrame] | pd.DataFrame | None = prepare_result.prepared
@@ -2778,7 +2926,7 @@ def get_today_signals_for_strategy(
         log_callback,
     )
 
-    _log_elapsed(log_callback, "⏱️ フィルター/前処理完了", t0)
+    _log_elapsed(log_callback, "⏱️ フィルター/前処理完了", t_wall_start)
     prepare_result.skip_stats.log_summary(system_name, log_callback)
 
     filter_pass = _compute_filter_pass(system_name, prepared, today_ts, log_callback)
@@ -2788,6 +2936,7 @@ def get_today_signals_for_strategy(
     except Exception:
         pass
 
+    t_candidates_start = _t.perf_counter()
     candidates = _generate_candidates_for_system(
         strategy,
         prepared,
@@ -2797,6 +2946,7 @@ def get_today_signals_for_strategy(
         progress_callback=progress_callback,
         log_callback=log_callback,
     )
+    t_candidates = _t.perf_counter() - t_candidates_start
     candidate_diagnostics = candidates.diagnostics
     if candidates.early_exit_frame is not None:
         try:
@@ -2805,11 +2955,22 @@ def get_today_signals_for_strategy(
                 stage_progress(100, filter_pass, None, 0, 0)
         except Exception:
             pass
+        try:
+            timing = {
+                "slice_sec": round(float(t_slice), 6),
+                "prepare_sec": round(float(t_prepare), 6),
+                "candidates_sec": round(float(t_candidates), 6),
+                "total_sec": round(float(_t.perf_counter() - t_total_start), 6),
+            }
+            candidates.early_exit_frame.attrs["timing"] = timing
+        except Exception:
+            pass
         return candidates.early_exit_frame
 
     market_df = candidates.market_df
     candidates_by_date = candidates.candidates_by_date
 
+    t_setup_start = _t.perf_counter()
     setup_pass = _compute_setup_pass(
         system_name,
         prepared,
@@ -2819,6 +2980,7 @@ def get_today_signals_for_strategy(
         log_callback,
         candidate_diagnostics,
     )
+    t_setup = _t.perf_counter() - t_setup_start
     try:
         setup_pass = int(setup_pass)
     except Exception:
@@ -2868,8 +3030,20 @@ def get_today_signals_for_strategy(
                 empty_frame.attrs["candidate_diagnostics"] = candidate_diagnostics
             except Exception:
                 pass
+        try:
+            timing = {
+                "slice_sec": round(float(t_slice), 6),
+                "prepare_sec": round(float(t_prepare), 6),
+                "candidates_sec": round(float(t_candidates), 6),
+                "setup_sec": round(float(t_setup), 6),
+                "total_sec": round(float(_t.perf_counter() - t_total_start), 6),
+            }
+            empty_frame.attrs["timing"] = timing
+        except Exception:
+            pass
         return empty_frame
 
+    t_select_start = _t.perf_counter()
     selection = _select_candidate_date(
         candidates_by_date,
         today_ts,
@@ -2877,6 +3051,7 @@ def get_today_signals_for_strategy(
         setup_pass,
         log_callback,
     )
+    t_select = _t.perf_counter() - t_select_start
     try:
         if stage_progress:
             stage_progress(
@@ -2889,6 +3064,7 @@ def get_today_signals_for_strategy(
     except Exception:
         pass
 
+    t_build_start = _t.perf_counter()
     signals_df, final_count = _build_today_signals_dataframe(
         strategy,
         prepared,
@@ -2899,6 +3075,7 @@ def get_today_signals_for_strategy(
         signal_type,
         log_callback,
     )
+    t_build = _t.perf_counter() - t_build_start
 
     # Emit diagnostic log if selection or extraction indicated zero candidates
     try:
@@ -2936,6 +3113,19 @@ def get_today_signals_for_strategy(
             signals_df.attrs["candidate_diagnostics"] = candidate_diagnostics
         except Exception:
             pass
+    try:
+        timing = {
+            "slice_sec": round(float(t_slice), 6),
+            "prepare_sec": round(float(t_prepare), 6),
+            "candidates_sec": round(float(t_candidates), 6),
+            "setup_sec": round(float(t_setup), 6),
+            "select_sec": round(float(t_select), 6),
+            "build_sec": round(float(t_build), 6),
+            "total_sec": round(float(_t.perf_counter() - t_total_start), 6),
+        }
+        signals_df.attrs["timing"] = timing
+    except Exception:
+        pass
 
     return signals_df
 

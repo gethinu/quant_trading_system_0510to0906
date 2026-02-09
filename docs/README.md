@@ -207,7 +207,9 @@ npm run dev -- --port 3000
   - `date`: NYSE 最新営業日
   - `system`: `system1`〜`system7`
   - `prefilter_pass`: 事前フィルター通過銘柄数（system7 は SPY の有無で 1/0）
+  - `setup_pass`: セットアップ条件通過銘柄数（最新行ベース）
   - `candidates`: 当日候補数（最終スコアリング前のシステム別集計）
+  - `entries`: 配分後のエントリー件数（system別）
 - 用途: 事前フィルターの通過数と候補数の推移を日次で可視化し、データ品質やシグナル強度の変動を監視する。
 
 ### UI: Metrics タブ
@@ -216,7 +218,7 @@ npm run dev -- --port 3000
 
 ### 検証レポート（任意）
 
-- `tools/build_metrics_report.py` が最新日のメトリクスと各システムのシグナル CSV（`signals_systemX_YYYY-MM-DD.csv`）を突き合わせ、`results_csv/daily_metrics_report.csv` を生成する。件数の齟齬チェックやサンプル銘柄の目視確認に使う。
+- `tools/build_metrics_report.py` が最新日のメトリクスと各システムのシグナル CSV（`signals_systemX_YYYY-MM-DD.csv`）を突き合わせ、`results_csv/daily_metrics_report.csv` を生成する。前日差分や合計サマリの確認に使う。
 
 ### 📂 CSV・ログ出力先一覧
 

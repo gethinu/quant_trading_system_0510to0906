@@ -128,6 +128,16 @@ def update_positions_from_signals(
         except Exception:
             return None
 
+    def _coerce_int(val: Any) -> int | None:
+        if val is None:
+            return None
+        try:
+            if isinstance(val, str) and not val.strip():
+                return None
+            return int(float(val))
+        except Exception:
+            return None
+
     def _coerce_bool(val: Any) -> bool | None:
         if val is None:
             return None
@@ -189,6 +199,9 @@ def update_positions_from_signals(
                 ],
             )
             entry_price_val = _coerce_float(entry_price)
+            qty_val = _coerce_int(_pick(row, ["qty", "shares", "quantity", "size"]))
+            if qty_val is not None and qty_val <= 0:
+                qty_val = None
 
             if not all([system, entry_date is not None, entry_price_val]):
                 logger.warning(f"Skipping {symbol}: missing required fields")
@@ -240,6 +253,7 @@ def update_positions_from_signals(
                 "side": side or existing.get("side"),
                 "entry_date": entry_date_str,
                 "entry_price": float(entry_price_val),
+                "qty": qty_val if qty_val is not None else existing.get("qty"),
                 "stop_price": stop_price if stop_price is not None else existing.get("stop_price"),
                 "profit_target_price": (
                     profit_target_price

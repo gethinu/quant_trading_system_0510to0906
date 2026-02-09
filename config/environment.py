@@ -135,6 +135,11 @@ class EnvironmentConfig:
     )
     """NDJSON形式の構造化ログ出力。"""
 
+    skip_external_apis: bool = field(
+        default_factory=lambda: _get_bool_env("SKIP_EXTERNAL_APIS", False)
+    )
+    """外部API呼び出しをスキップ（短縮実行向け）。"""
+
     show_indicator_logs: bool = field(
         default_factory=lambda: _get_bool_env("SHOW_INDICATOR_LOGS", False)
     )
@@ -472,10 +477,95 @@ class EnvironmentConfig:
     )
     """Slack通知先チャンネル（シグナル）。"""
 
+    slack_channel_exit_radar: str = field(
+        default_factory=lambda: _get_str_env("SLACK_CHANNEL_EXIT_RADAR", "")
+    )
+    """Slack通知先チャンネル（Exit Radar）。"""
+
     discord_webhook_url: str = field(
         default_factory=lambda: _get_str_env("DISCORD_WEBHOOK_URL", "")
     )
     """⚠️機密情報。Discord Webhook URL。.envで管理。"""
+
+    discord_webhook_url_signals: str = field(
+        default_factory=lambda: _get_str_env("DISCORD_WEBHOOK_URL_SIGNALS", "")
+    )
+    """⚠️機密情報。Discord Webhook URL（シグナル）。.envで管理。"""
+
+    discord_webhook_url_exit_radar: str = field(
+        default_factory=lambda: _get_str_env("DISCORD_WEBHOOK_URL_EXIT_RADAR", "")
+    )
+    """⚠️機密情報。Discord Webhook URL（Exit Radar）。.envで管理。"""
+
+    discord_webhook_url_summary: str = field(
+        default_factory=lambda: _get_str_env("DISCORD_WEBHOOK_URL_SUMMARY", "")
+    )
+    """⚠️機密情報。Discord Webhook URL（日次サマリー）。.envで管理。"""
+
+    discord_webhook_url_system1: str = field(
+        default_factory=lambda: _get_str_env("DISCORD_WEBHOOK_URL_SYSTEM1", "")
+    )
+    """⚠️機密情報。Discord Webhook URL（system1）。.envで管理。"""
+
+    discord_webhook_url_system2: str = field(
+        default_factory=lambda: _get_str_env("DISCORD_WEBHOOK_URL_SYSTEM2", "")
+    )
+    """⚠️機密情報。Discord Webhook URL（system2）。.envで管理。"""
+
+    discord_webhook_url_system3: str = field(
+        default_factory=lambda: _get_str_env("DISCORD_WEBHOOK_URL_SYSTEM3", "")
+    )
+    """⚠️機密情報。Discord Webhook URL（system3）。.envで管理。"""
+
+    discord_webhook_url_system4: str = field(
+        default_factory=lambda: _get_str_env("DISCORD_WEBHOOK_URL_SYSTEM4", "")
+    )
+    """⚠️機密情報。Discord Webhook URL（system4）。.envで管理。"""
+
+    discord_webhook_url_system5: str = field(
+        default_factory=lambda: _get_str_env("DISCORD_WEBHOOK_URL_SYSTEM5", "")
+    )
+    """⚠️機密情報。Discord Webhook URL（system5）。.envで管理。"""
+
+    discord_webhook_url_system6: str = field(
+        default_factory=lambda: _get_str_env("DISCORD_WEBHOOK_URL_SYSTEM6", "")
+    )
+    """⚠️機密情報。Discord Webhook URL（system6）。.envで管理。"""
+
+    discord_webhook_url_system7: str = field(
+        default_factory=lambda: _get_str_env("DISCORD_WEBHOOK_URL_SYSTEM7", "")
+    )
+    """⚠️機密情報。Discord Webhook URL（system7）。.envで管理。"""
+
+    discord_webhook_url_equity: str = field(
+        default_factory=lambda: _get_str_env("DISCORD_WEBHOOK_URL_EQUITY", "")
+    )
+    """⚠️機密情報。Discord Webhook URL（バックテスト/売買結果）。.envで管理。"""
+
+    discord_webhook_url_backtest: str = field(
+        default_factory=lambda: _get_str_env("DISCORD_WEBHOOK_URL_BACKTEST", "")
+    )
+    """⚠️機密情報。Discord Webhook URL（バックテスト）。.envで管理。"""
+
+    discord_webhook_url_logs: str = field(
+        default_factory=lambda: _get_str_env("DISCORD_WEBHOOK_URL_LOGS", "")
+    )
+    """⚠️機密情報。Discord Webhook URL（ログ/汎用）。.envで管理。"""
+
+    position_tracker_auto_update: bool = field(
+        default_factory=lambda: _get_bool_env("POSITION_TRACKER_AUTO_UPDATE", True)
+    )
+    """シグナル通知後に position_tracker.json を自動更新するか。"""
+
+    position_tracker_confirm_auto_apply: bool = field(
+        default_factory=lambda: _get_bool_env("POSITION_TRACKER_CONFIRM_AUTO_APPLY", True)
+    )
+    """確認CSVの自動適用を有効化するか。"""
+
+    position_tracker_confirm_dir: str = field(
+        default_factory=lambda: _get_str_env("POSITION_TRACKER_CONFIRM_DIR", "data")
+    )
+    """確認CSVの配置ディレクトリ。"""
 
     eodhd_api_key: str = field(
         default_factory=lambda: _get_str_env("EODHD_API_KEY", "")
@@ -487,6 +577,11 @@ class EnvironmentConfig:
         default_factory=lambda: _get_bool_env("NOTIFY_USE_RICH", False)
     )
     """通知をリッチカード形式で送信。"""
+
+    signals_platform: str = field(
+        default_factory=lambda: _get_str_env("SIGNALS_PLATFORM", "slack").lower()
+    )
+    """シグナル通知の送信先プラットフォーム（slack / discord / auto / both）。"""
 
     cache_health_silent: bool = field(
         default_factory=lambda: _get_bool_env("CACHE_HEALTH_SILENT", False)

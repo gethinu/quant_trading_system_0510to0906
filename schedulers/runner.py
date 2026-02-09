@@ -163,17 +163,46 @@ def task_daily_run():
 
 def task_run_today_signals():
     try:
-        from scripts.run_all_systems_today import compute_today_signals
-        from tools.notify_signals import send_signal_notification
+        import scripts.run_all_systems_today as run_today
+        from tools.notify_signals import notify_signals
+        from tools.build_metrics_report import build_metrics_report
+        from tools.notify_metrics import notify_metrics
 
-        final_df, _ = compute_today_signals(None, save_csv=True, notify=False)
+        final_df, _ = run_today.compute_today_signals(None, save_csv=True, notify=False)
 
-        # Slack通知を送信
-        if final_df is not None and not final_df.empty:
-            send_signal_notification(final_df)
-            logging.info(f"シグナル生成完了: {len(final_df)}件 (Slack通知送信済み)")
-        else:
-            logging.info("シグナル生成完了: 0件")
+        if final_df is not None:
+            if not final_df.empty:
+                logging.info(f"シグナル生成完了: {len(final_df)}件")
+            else:
+                logging.info("シグナル生成完了: 0件")
+
+        # CSV保存（signals_dir に per-system/final/exit_plan など）
+        try:
+            per_system = dict(
+                getattr(run_today, "_LAST_PER_SYSTEM_FRAMES", {}) or {}
+            )
+            ctx = run_today._initialize_run_context(save_csv=True, notify=False)
+            run_today._save_and_notify_phase(
+                ctx,
+                final_df=final_df,
+                per_system=per_system,
+                order_1_7=[f"system{i}" for i in range(1, 8)],
+                metrics_summary_context=None,
+            )
+        except Exception:
+            logging.exception("save_and_notify_phase が失敗しました")
+
+        # signals_dir の CSV を基準に通知（エントリー+エグジット）
+        notify_signals()
+        # 日次メトリクスレポート & 通知
+        try:
+            build_metrics_report()
+        except Exception:
+            logging.exception("build_metrics_report タスクが失敗しました")
+        try:
+            notify_metrics()
+        except Exception:
+            logging.exception("notify_metrics タスクが失敗しました")
     except Exception:
         logging.exception("run_today_signals タスクが失敗しました")
 

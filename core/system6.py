@@ -34,12 +34,14 @@ from ta.volatility import AverageTrueRange
 from common.batch_processing import process_symbols_batch
 from common.i18n import tr
 from common.structured_logging import MetricsCollector
+from common.system_common import check_precomputed_indicators, slice_latest_rows
 from common.system_candidates_utils import (
     choose_mode_date_for_latest_only,
     finalize_ranking_and_diagnostics,
     normalize_dataframe_to_by_date,
     set_diagnostics_after_ranking,
 )
+from common.system_constants import SYSTEM6_REQUIRED_INDICATORS
 from common.system_setup_predicates import validate_predicate_equivalence
 from common.utils import resolve_batch_size
 
@@ -71,6 +73,20 @@ SYSTEM6_FEATURE_COLUMNS = [
 ]
 SYSTEM6_ALL_COLUMNS = SYSTEM6_BASE_COLUMNS + SYSTEM6_FEATURE_COLUMNS
 SYSTEM6_NUMERIC_COLUMNS = ["atr10", "dollarvolume50", "return_6d", "hv50"]
+LATEST_ONLY_TAIL_ROWS = 5
+SYSTEM6_LATEST_ONLY_COLUMNS = (
+    "Open",
+    "High",
+    "Low",
+    "Close",
+    "Volume",
+    "atr10",
+    "dollarvolume50",
+    "return_6d",
+    "uptwodays",
+    "UpTwoDays",
+    "hv50",
+)
 
 # System6 Setup Constants
 RETURN_6D_THRESHOLD = 0.20  # 6-day return threshold for setup
@@ -281,6 +297,7 @@ def prepare_data_vectorized_system6(
     log_callback: Callable[[str], None] | None = None,
     skip_callback: Callable[[str, str], None] | None = None,
     batch_size: int | None = None,
+    reuse_indicators: bool = True,
     use_process_pool: bool = False,
     max_workers: int | None = None,
     **kwargs: Any,
@@ -291,6 +308,87 @@ def prepare_data_vectorized_system6(
         if log_callback:
             log_callback("System6: No raw data provided, returning empty dict")
         return {}
+
+    latest_only = bool(kwargs.get("latest_only", False))
+
+    # Fast path: reuse precomputed indicators for latest_only
+    if reuse_indicators and latest_only:
+        try:
+            valid_data_dict, _error_symbols = check_precomputed_indicators(
+                raw_data_dict, SYSTEM6_REQUIRED_INDICATORS, "System6", skip_callback
+            )
+            prepared_dict: dict[str, pd.DataFrame] = {}
+            fallback_symbols: list[str] = []
+
+            for symbol, df in valid_data_dict.items():
+                if df is None or df.empty:
+                    continue
+                x = df
+                try:
+                    if "UpTwoDays" not in x.columns and "uptwodays" in x.columns:
+                        x = x.copy()
+                        x["UpTwoDays"] = x["uptwodays"]
+                    if "hv50" not in x.columns and "HV50" in x.columns:
+                        if x is df:
+                            x = x.copy()
+                        x["hv50"] = x["HV50"]
+                    if "return_6d" not in x.columns and "Return_6D" in x.columns:
+                        if x is df:
+                            x = x.copy()
+                        x["return_6d"] = x["Return_6D"]
+                except Exception:
+                    fallback_symbols.append(symbol)
+                    continue
+
+                # Ensure required columns exist before applying filters
+                required_cols = (
+                    "Low",
+                    "Close",
+                    "dollarvolume50",
+                    "return_6d",
+                    "atr10",
+                    "hv50",
+                )
+                if any(col not in x.columns for col in required_cols):
+                    fallback_symbols.append(symbol)
+                    continue
+
+                x = slice_latest_rows(
+                    x,
+                    keep_columns=SYSTEM6_LATEST_ONLY_COLUMNS,
+                    tail_rows=LATEST_ONLY_TAIL_ROWS,
+                )
+                x = _apply_filter_conditions(x)
+                x = _apply_setup_conditions(x)
+                prepared_dict[symbol] = x
+
+            # Fallback for symbols missing required columns
+            if fallback_symbols:
+                for symbol in fallback_symbols:
+                    df = raw_data_dict.get(symbol)
+                    if df is None or df.empty:
+                        continue
+                    try:
+                        prepared = _compute_indicators_from_frame(df)
+                        prepared_dict[symbol] = prepared
+                    except Exception:
+                        continue
+
+            if log_callback:
+                log_callback(
+                    "System6: Fast-path (latest_only) processed "
+                    f"{len(prepared_dict)} symbols"
+                )
+
+            return prepared_dict
+        except RuntimeError:
+            # Missing precomputed indicators should still fail fast
+            raise
+        except Exception:
+            if log_callback:
+                log_callback(
+                    "System6: Fast-path failed, falling back to normal processing"
+                )
 
     target_symbols = list(raw_data_dict.keys())
 

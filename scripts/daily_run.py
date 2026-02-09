@@ -49,8 +49,8 @@ def _task_cache_daily_data() -> None:
     cache_daily_data._cli_main()
 
 
-# 注: compute_today_signals は schedulers/runner.py で 11:00 に独立実行されます
-# daily_run ではデータ更新のみを行い、シグナル生成は11:00に一本化
+# 注: compute_today_signals は schedulers/runner.py で 07:00 に独立実行されます
+# daily_run ではデータ更新のみを行い、シグナル生成は07:00に一本化
 
 
 def _task_build_metrics_report() -> str:
@@ -76,7 +76,7 @@ def _task_notify_metrics() -> str:
 def run_daily_pipeline(settings: Settings) -> list[StepResult]:
     steps: Iterable[tuple[str, Callable[[], object]]] = [
         ("cache_daily_data", _task_cache_daily_data),
-        # compute_today_signals は 11:00 の独立タスクで実行（重複を避けるため除外）
+        # compute_today_signals は 07:00 の独立タスクで実行（重複を避けるため除外）
         ("build_metrics_report", _task_build_metrics_report),
         ("notify_metrics", _task_notify_metrics),
     ]

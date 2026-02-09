@@ -12,7 +12,9 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from contextlib import contextmanager
 from datetime import datetime
+import json
 import logging
 import os
 from pathlib import Path
@@ -192,7 +194,22 @@ def chunk_fields(
 def detect_default_platform() -> str:
     if os.getenv("SLACK_BOT_TOKEN"):
         return "slack"
-    if os.getenv("DISCORD_WEBHOOK_URL"):
+    if (
+        os.getenv("DISCORD_WEBHOOK_URL")
+        or os.getenv("DISCORD_WEBHOOK_URL_SIGNALS")
+        or os.getenv("DISCORD_WEBHOOK_URL_SUMMARY")
+        or os.getenv("DISCORD_WEBHOOK_URL_BACKTEST")
+        or os.getenv("DISCORD_WEBHOOK_URL_SYSTEM1")
+        or os.getenv("DISCORD_WEBHOOK_URL_SYSTEM2")
+        or os.getenv("DISCORD_WEBHOOK_URL_SYSTEM3")
+        or os.getenv("DISCORD_WEBHOOK_URL_SYSTEM4")
+        or os.getenv("DISCORD_WEBHOOK_URL_SYSTEM5")
+        or os.getenv("DISCORD_WEBHOOK_URL_SYSTEM6")
+        or os.getenv("DISCORD_WEBHOOK_URL_SYSTEM7")
+        or os.getenv("DISCORD_WEBHOOK_URL_EQUITY")
+        or os.getenv("DISCORD_WEBHOOK_URL_LOGS")
+        or os.getenv("DISCORD_WEBHOOK_URL_EXIT_RADAR")
+    ):
         return "discord"
     return "none"
 
@@ -265,6 +282,76 @@ class Notifier:
             self.webhook_url = webhook_url
         self.logger = _setup_logger()
 
+    def _resolve_discord_webhook(self, kind: str | None) -> str | None:
+        """Resolve Discord webhook URL by kind (summary/system/backtest/signals/logs)."""
+        kind_key = (kind or "").strip().lower()
+        if kind_key in {"summary", "daily", "daily_summary"}:
+            return (
+                os.getenv("DISCORD_WEBHOOK_URL_SUMMARY")
+                or os.getenv("DISCORD_WEBHOOK_URL_SIGNALS")
+                or os.getenv("DISCORD_WEBHOOK_URL")
+            )
+        if kind_key in {
+            "system1",
+            "system2",
+            "system3",
+            "system4",
+            "system5",
+            "system6",
+            "system7",
+        }:
+            env_key = f"DISCORD_WEBHOOK_URL_{kind_key.upper()}"
+            return (
+                os.getenv(env_key)
+                or os.getenv("DISCORD_WEBHOOK_URL_SIGNALS")
+                or os.getenv("DISCORD_WEBHOOK_URL")
+            )
+        if kind_key in {"backtest"}:
+            return (
+                os.getenv("DISCORD_WEBHOOK_URL_BACKTEST")
+                or os.getenv("DISCORD_WEBHOOK_URL_EQUITY")
+                or os.getenv("DISCORD_WEBHOOK_URL")
+            )
+        if kind_key in {"signals", "signal"}:
+            return (
+                os.getenv("DISCORD_WEBHOOK_URL_SIGNALS")
+                or os.getenv("DISCORD_WEBHOOK_URL")
+            )
+        if kind_key in {"exit_radar", "radar"}:
+            return (
+                os.getenv("DISCORD_WEBHOOK_URL_EXIT_RADAR")
+                or os.getenv("DISCORD_WEBHOOK_URL_SIGNALS")
+                or os.getenv("DISCORD_WEBHOOK_URL")
+            )
+        if kind_key in {"equity"}:
+            return (
+                os.getenv("DISCORD_WEBHOOK_URL_BACKTEST")
+                or os.getenv("DISCORD_WEBHOOK_URL_EQUITY")
+                or os.getenv("DISCORD_WEBHOOK_URL")
+            )
+        if kind_key in {"logs", "log"}:
+            return (
+                os.getenv("DISCORD_WEBHOOK_URL_LOGS")
+                or os.getenv("DISCORD_WEBHOOK_URL")
+            )
+        return os.getenv("DISCORD_WEBHOOK_URL")
+
+    @contextmanager
+    def _discord_webhook_override(self, kind: str | None):
+        if getattr(self, "platform", "") != "discord":
+            yield
+            return
+        target = self._resolve_discord_webhook(kind)
+        if not target or target == self.webhook_url:
+            yield
+            return
+        original = self.webhook_url
+        self.webhook_url = target
+        try:
+            yield
+        finally:
+            self.webhook_url = original
+
     def _post(self, payload: dict[str, Any]) -> None:
         if _notifications_disabled():
             self.logger.info("通知送信は無効化されています（テスト/CI/環境変数）")
@@ -290,6 +377,40 @@ class Notifier:
         masked = mask_secret(url)
         try:
             r = requests.post(url, json=payload, timeout=10)
+            if 200 <= r.status_code < 300:
+                return
+            self.logger.warning(
+                "送信失敗 status=%s body=%s", r.status_code, truncate(r.text, 100)
+            )
+        except Exception as e:  # pragma: no cover
+            self.logger.warning("送信エラー %s", e)
+        self.logger.error("送信に失敗しました: %s", masked)
+        raise RuntimeError("notification failed")
+
+    def _post_discord_file(self, payload: dict[str, Any], image_path: str) -> None:
+        if _notifications_disabled():
+            self.logger.info("通知送信は無効化されています（テスト/CI/環境変数）")
+            return
+        if not self.webhook_url:
+            self.logger.warning(
+                "webhook 未設定のため送信をスキップします platform=%s", self.platform
+            )
+            return
+        if not image_path or not os.path.exists(image_path):
+            self.logger.warning("image_path が存在しないため送信をスキップします")
+            return
+        url = self.webhook_url
+        masked = mask_secret(url)
+        filename = Path(image_path).name
+        try:
+            if payload.get("embeds"):
+                payload["embeds"][0]["image"] = {
+                    "url": f"attachment://{filename}"
+                }
+            data = {"payload_json": json.dumps(payload, ensure_ascii=False)}
+            with open(image_path, "rb") as fh:
+                files = {"file": (filename, fh)}
+                r = requests.post(url, data=data, files=files, timeout=20)
             if 200 <= r.status_code < 300:
                 return
             self.logger.warning(
@@ -359,6 +480,7 @@ class Notifier:
         image_url: str | None = None,
         color: int | None = None,
         channel: str | None = None,
+        discord_kind: str | None = None,
     ) -> None:
         desc = f"実行時刻 {now_jst_str()}"
         if message:
@@ -440,7 +562,9 @@ class Notifier:
         )
         if channel:
             payload["_channel"] = channel
-        self._post(payload)
+        kind = discord_kind or "logs"
+        with self._discord_webhook_override(kind):
+            self._post(payload)
 
     # メンション対応
     def send_with_mention(
@@ -452,6 +576,8 @@ class Notifier:
         color: int | None = None,
         mention: str | bool | None = None,
         channel: str | None = None,
+        image_path: str | None = None,
+        discord_kind: str | None = None,
     ) -> None:
         desc = f"実行時刻 {now_jst_str()}"
         if message:
@@ -555,11 +681,57 @@ class Notifier:
         )
         if channel:
             payload["_channel"] = channel
-        self._post(payload)
+        if image_path and getattr(self, "platform", "") == "slack":
+            try:
+                uploader = getattr(self, "_slack_upload_file", None)
+                if callable(uploader):
+                    if uploader(
+                        image_path,
+                        title=title,
+                        initial_comment=desc,
+                        channel=channel,
+                    ):
+                        return
+                token = os.getenv("SLACK_BOT_TOKEN", "").strip()
+                ch = (
+                    channel
+                    or os.getenv("SLACK_CHANNEL", "").strip()
+                    or os.getenv("SLACK_CHANNEL_ID", "").strip()
+                    or os.getenv("SLACK_CHANNEL_LOGS", "").strip()
+                    or os.getenv("SLACK_CHANNEL_SIGNALS", "").strip()
+                    or os.getenv("SLACK_CHANNEL_EQUITY", "").strip()
+                )
+                if token and ch and WebClient is not None:
+                    client = WebClient(token=token)
+                    client.files_upload_v2(
+                        channel=ch,
+                        initial_comment=desc,
+                        title=truncate(title, 80),
+                        file=image_path,
+                    )
+                    self.logger.info("slack_api: image uploaded via send_with_mention")
+                    return
+            except Exception as exc:  # pragma: no cover
+                self.logger.warning("send_with_mention image upload failed: %s", exc)
+        kind = discord_kind or getattr(self, "_discord_kind", None) or "logs"
+        with self._discord_webhook_override(kind):
+            if self.platform == "discord" and image_path:
+                self._post_discord_file(payload, image_path)
+            else:
+                self._post(payload)
 
     def send_signals(
-        self, system_name: str, signals: list[str], *, channel: str | None = None
+        self,
+        system_name: str,
+        signals: list[str],
+        *,
+        channel: str | None = None,
+        note: str | None = None,
+        display_count: int | None = None,
+        table: str | None = None,
+        discord_kind: str | None = None,
     ) -> None:
+        count = len(signals) if display_count is None else int(display_count)
         direction = SYSTEM_POSITION.get(system_name.lower(), "")
         color = (
             COLOR_LONG
@@ -570,8 +742,37 @@ class Notifier:
         ch = channel or (
             os.getenv("SLACK_CHANNEL_SIGNALS") if self.platform == "slack" else None
         )
+        if table:
+            summary_lines = [f"シグナル数: {count}"]
+            if note:
+                summary_lines.append(note)
+            summary_lines.append(table)
+            summary = "\n".join(summary_lines)
+            self.send(
+                title,
+                summary,
+                color=color,
+                channel=ch,
+                discord_kind=discord_kind or "signals",
+            )
+            self.logger.info(
+                "signals %s direction=%s count=%d",
+                system_name,
+                direction or "none",
+                count,
+            )
+            return
         if not signals:
-            self.send(title, "本日のシグナルはありません", color=color, channel=ch)
+            empty_msg = "本日のシグナルはありません"
+            if note:
+                empty_msg = f"{empty_msg}\n{note}"
+            self.send(
+                title,
+                empty_msg,
+                color=color,
+                channel=ch,
+                discord_kind=discord_kind or "signals",
+            )
             self.logger.info(
                 "signals %s direction=%s count=0", system_name, direction or "none"
             )
@@ -582,17 +783,25 @@ class Notifier:
         preview = ", ".join(signals[:10])
         if len(signals) > 10:
             preview += " ..."
-        summary = (
-            f"シグナル数: {len(signals)}\n{preview}"
-            if preview
-            else f"シグナル数: {len(signals)}"
+        summary_lines = [f"シグナル数: {count}"]
+        if note:
+            summary_lines.append(note)
+        if preview:
+            summary_lines.append(preview)
+        summary = "\n".join(summary_lines)
+        self.send(
+            title,
+            summary,
+            fields=fields,
+            color=color,
+            channel=ch,
+            discord_kind=discord_kind or "signals",
         )
-        self.send(title, summary, fields=fields, color=color, channel=ch)
         self.logger.info(
             "signals %s direction=%s count=%d",
             system_name,
             direction or "none",
-            len(signals),
+            count,
         )
 
     def send_backtest(
@@ -621,7 +830,7 @@ class Notifier:
         impact, groups = _group_trades_by_side(trades)
         if not any(g["rows"] for g in groups.values()):
             title = f"🧾 {system_name} 売買結果 ・ {impact}"
-            self.send(title, "本日の売買はありません")
+            self.send(title, "本日の売買はありません", discord_kind="backtest")
             self.logger.info("trade report %s count=0", system_name)
             return
         for side in ("BUY", "SELL"):
@@ -630,7 +839,7 @@ class Notifier:
                 continue
             title = f"🧾 {system_name} {side} 注文 ・ {impact}"
             table = format_table(g["rows"], headers=g["headers"])
-            self.send(title, table)
+            self.send(title, table, discord_kind="backtest")
             self.logger.info(
                 "trade report %s side=%s count=%d notional=%.2f",
                 system_name,
@@ -649,7 +858,7 @@ class Notifier:
     ) -> None:
         title = f"📊 {system_name} {period_type} サマリー ・ {period_label}, 実行日 ・ {now_jst_str()}"
         fields = {k: str(v) for k, v in summary.items()}
-        self.send(title, "", fields=fields, image_url=image_url)
+        self.send(title, "", fields=fields, image_url=image_url, discord_kind="backtest")
         self.logger.info(
             "summary %s %s keys=%d", system_name, period_type, len(summary)
         )
@@ -711,7 +920,13 @@ class Notifier:
             os.getenv("SLACK_CHANNEL_EQUITY") if self.platform == "slack" else None
         )
         self.send(
-            title, desc, fields=fields, color=color, image_url=image_url, channel=ch
+            title,
+            desc,
+            fields=fields,
+            color=color,
+            image_url=image_url,
+            channel=ch,
+            discord_kind="backtest",
         )
         summary = ", ".join(f"{k}={v}" for k, v in list(stats.items())[:3])
         self.logger.info(
@@ -906,13 +1121,35 @@ class SimpleSlackNotifier(Notifier):
         ch = self._resolve_channel("logs", None)
         self._slack_send_text(text, channel=ch)
 
-    def send_signals(self, system_name: str, signals: list[str], *, channel: str | None = None) -> None:  # type: ignore[override]
+    def send_signals(
+        self,
+        system_name: str,
+        signals: list[str],
+        *,
+        channel: str | None = None,
+        note: str | None = None,
+        display_count: int | None = None,
+        table: str | None = None,
+        discord_kind: str | None = None,
+    ) -> None:  # type: ignore[override]
+        count = len(signals) if display_count is None else int(display_count)
         preview = (
             ", ".join(signals[:10]) + (" ..." if len(signals) > 10 else "")
             if signals
             else "(none)"
         )
-        text = f"📢 {system_name} Signals {now_jst_str()}\ncount={len(signals)}\n{preview}"  # noqa: E501
+        lines = [f"📢 {system_name} Signals {now_jst_str()}", f"count={count}"]
+        if note:
+            lines.append(note)
+        if table:
+            lines.append(table)
+            text = "\n".join(lines)
+            ch = self._resolve_channel("signals", channel)
+            self._slack_send_text(text, channel=ch)
+            return
+        if preview:
+            lines.append(preview)
+        text = "\n".join(lines)
         ch = self._resolve_channel("signals", channel)
         self._slack_send_text(text, channel=ch)
 
@@ -1133,11 +1370,30 @@ class FallbackNotifier(SimpleSlackNotifier):  # type: ignore
             raise RuntimeError("notification failed (slack+discord)")
 
     def send_signals(
-        self, system_name: str, signals: list[str], *, channel: str | None = None
+        self,
+        system_name: str,
+        signals: list[str],
+        *,
+        channel: str | None = None,
+        note: str | None = None,
+        display_count: int | None = None,
+        table: str | None = None,
     ) -> None:
+        count = len(signals) if display_count is None else int(display_count)
         direction = SYSTEM_POSITION.get(system_name.lower(), "")
         title = f"📢 {system_name} 日次シグナル ・ {now_jst_str()}"
         ch = channel or os.getenv("SLACK_CHANNEL_SIGNALS") or None
+        if table:
+            lines = [f"シグナル数: {count}"]
+            if note:
+                lines.append(note)
+            lines.append(table)
+            text = f"{title}\n" + "\n".join(lines)
+            if self._slack_send_text(text, channel=ch):
+                return
+            if not self._discord_call("send_signals", system_name, signals):
+                raise RuntimeError("notification failed (slack+discord)")
+            return
         if not signals:
             text = f"{title}\n本日のシグナルはありません"
             if self._slack_send_text(text, channel=ch):
@@ -1153,9 +1409,9 @@ class FallbackNotifier(SimpleSlackNotifier):  # type: ignore
         if len(signals) > 10:
             preview += " ..."
         summary = (
-            f"シグナル数: {len(signals)}\n{preview}"
+            f"シグナル数: {count}\n{preview}"
             if preview
-            else f"シグナル数: {len(signals)}"
+            else f"シグナル数: {count}"
         )
         blocks: list[dict[str, Any]] = [
             {
@@ -1320,6 +1576,32 @@ def create_notifier(
     }
     have_token = bool(os.getenv("SLACK_BOT_TOKEN"))
     discord_url = os.getenv("DISCORD_WEBHOOK_URL", "").strip()
+    discord_signals = os.getenv("DISCORD_WEBHOOK_URL_SIGNALS", "").strip()
+    discord_summary = os.getenv("DISCORD_WEBHOOK_URL_SUMMARY", "").strip()
+    discord_backtest = os.getenv("DISCORD_WEBHOOK_URL_BACKTEST", "").strip()
+    discord_equity = os.getenv("DISCORD_WEBHOOK_URL_EQUITY", "").strip()
+    discord_logs = os.getenv("DISCORD_WEBHOOK_URL_LOGS", "").strip()
+    discord_exit_radar = os.getenv("DISCORD_WEBHOOK_URL_EXIT_RADAR", "").strip()
+    system_envs = [
+        os.getenv("DISCORD_WEBHOOK_URL_SYSTEM1", "").strip(),
+        os.getenv("DISCORD_WEBHOOK_URL_SYSTEM2", "").strip(),
+        os.getenv("DISCORD_WEBHOOK_URL_SYSTEM3", "").strip(),
+        os.getenv("DISCORD_WEBHOOK_URL_SYSTEM4", "").strip(),
+        os.getenv("DISCORD_WEBHOOK_URL_SYSTEM5", "").strip(),
+        os.getenv("DISCORD_WEBHOOK_URL_SYSTEM6", "").strip(),
+        os.getenv("DISCORD_WEBHOOK_URL_SYSTEM7", "").strip(),
+    ]
+    has_discord = bool(
+        discord_url
+        or discord_signals
+        or discord_summary
+        or discord_backtest
+        or discord_equity
+        or discord_logs
+        or discord_exit_radar
+        or any(system_envs)
+    )
+    discord_webhook = discord_url or None
     # fallback=True かつ Slack Bot Token があれば Simple/Rich Slack Notifier を優先
     if fallback and have_token:
         slack_instance: Notifier = (
@@ -1327,21 +1609,25 @@ def create_notifier(
         )
         if broadcast:
             notifiers: list[Notifier] = [slack_instance]
-            if discord_url:
-                notifiers.append(Notifier(platform="discord", webhook_url=discord_url))
+            if has_discord:
+                notifiers.append(
+                    Notifier(platform="discord", webhook_url=discord_webhook)
+                )
             if len(notifiers) == 1:
                 return notifiers[0]
             return BroadcastNotifier(notifiers)
         return slack_instance
-    if fallback and platform == "slack" and discord_url:
-        return Notifier(platform="discord", webhook_url=discord_url)
+    if fallback and platform == "slack" and has_discord:
+        return Notifier(platform="discord", webhook_url=discord_webhook)
     if broadcast:
         notifiers: list[Notifier] = []
         if platform in {"auto", "both", "broadcast", "all"}:
-            if discord_url:
-                notifiers.append(Notifier(platform="discord", webhook_url=discord_url))
-        elif platform == "discord" and discord_url:
-            notifiers.append(Notifier(platform="discord", webhook_url=discord_url))
+            if has_discord:
+                notifiers.append(
+                    Notifier(platform="discord", webhook_url=discord_webhook)
+                )
+        elif platform == "discord" and has_discord:
+            notifiers.append(Notifier(platform="discord", webhook_url=discord_webhook))
         if len(notifiers) >= 2:
             return BroadcastNotifier(notifiers)
         if len(notifiers) == 1:
@@ -1526,11 +1812,29 @@ class RichSlackNotifier(SimpleSlackNotifier):
         *,
         channel: str | None = None,
         image_path: str | None = None,
+        note: str | None = None,
+        display_count: int | None = None,
+        table: str | None = None,
     ) -> None:  # type: ignore[override]
+        count = len(signals) if display_count is None else int(display_count)
         run_id = os.getenv("BACKTEST_RUN_ID") or "-"
         title = f"📢 {system_name} Signals • {run_id}"
         lines: list[str] = []
-        lines.append(f"count={len(signals)} {now_jst_str()}")
+        lines.append(f"count={count} {now_jst_str()}")
+        if note:
+            lines.append(note)
+        if table:
+            lines.append(table)
+            self._post_blocks(title, lines, channel=channel)
+            if image_path:
+                self._upload_image(image_path, title=title, channel=channel)
+                if os.getenv("LAST_IMAGE_UPLOAD_OK") == "0":
+                    self._post_blocks(
+                        title + " (image upload failed)",
+                        ["画像アップロードに失敗しました"],
+                        channel=channel,
+                    )
+            return
         if signals:
             sample = signals[:60]
             # dict を含む場合は volume / score を取得

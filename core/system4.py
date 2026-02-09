@@ -43,7 +43,11 @@ from common.system_candidates_utils import (
     normalize_dataframe_to_by_date,
     set_diagnostics_after_ranking,
 )
-from common.system_common import check_precomputed_indicators, get_total_days
+from common.system_common import (
+    check_precomputed_indicators,
+    get_total_days,
+    slice_latest_rows,
+)
 from common.system_constants import SYSTEM4_REQUIRED_INDICATORS
 from common.system_setup_predicates import validate_predicate_equivalence
 from common.utils import get_cached_data
@@ -54,6 +58,19 @@ HV50_MIN = 10  # Historical Volatility 50-day minimum %
 HV50_MAX = 40  # Historical Volatility 50-day maximum %
 MAX_RSI4_THRESHOLD = 30.0  # RSI4 oversold threshold
 DEFAULT_TOP_N = 20  # Default number of top candidates
+LATEST_ONLY_TAIL_ROWS = 5
+SYSTEM4_LATEST_ONLY_COLUMNS = (
+    "Open",
+    "High",
+    "Low",
+    "Close",
+    "Volume",
+    "rsi4",
+    "sma200",
+    "atr40",
+    "hv50",
+    "dollarvolume50",
+)
 
 
 def _apply_filter_conditions(df: pd.DataFrame) -> pd.DataFrame:
@@ -155,6 +172,7 @@ def prepare_data_vectorized_system4(
     Returns:
         Processed data dictionary
     """
+    latest_only = bool(_unused_kwargs.get("latest_only", False))
     # Fast path: reuse precomputed indicators
     if reuse_indicators and raw_data_dict:
         try:
@@ -167,7 +185,14 @@ def prepare_data_vectorized_system4(
                 # Apply System4-specific filters using helper functions
                 prepared_dict = {}
                 for symbol, df in valid_data_dict.items():
-                    x = df.copy()
+                    if latest_only:
+                        x = slice_latest_rows(
+                            df,
+                            keep_columns=SYSTEM4_LATEST_ONLY_COLUMNS,
+                            tail_rows=LATEST_ONLY_TAIL_ROWS,
+                        )
+                    else:
+                        x = df.copy()
                     x = _apply_filter_conditions(x)
                     x = _apply_setup_conditions(x)
                     prepared_dict[symbol] = x

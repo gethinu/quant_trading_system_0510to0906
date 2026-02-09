@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+import math
 from functools import lru_cache
 import json
 import os
@@ -36,6 +37,7 @@ class RiskConfig:
     risk_pct: float = 0.02
     max_positions: int = 10
     max_pct: float = 0.10
+    stop_price_floor: float = 0.01
 
 
 @dataclass(frozen=True)
@@ -349,10 +351,18 @@ def _load_config_json_or_yaml_validated(project_root: Path) -> dict[str, Any]:
 def _build_risk_config(cfg: dict[str, Any]) -> RiskConfig:
     raw_max_pos = os.getenv("MAX_POSITIONS", cfg.get("max_positions", 10))
     max_pos_val = _coerce_int(raw_max_pos, 10)
+    raw_floor = os.getenv("STOP_PRICE_FLOOR", cfg.get("stop_price_floor", 0.01))
+    try:
+        stop_floor = float(raw_floor)
+    except Exception:
+        stop_floor = 0.01
+    if not math.isfinite(stop_floor) or stop_floor <= 0:
+        stop_floor = 0.01
     return RiskConfig(
         risk_pct=float(os.getenv("RISK_PCT", cfg.get("risk_pct", 0.02))),
         max_positions=max_pos_val,
         max_pct=float(os.getenv("MAX_PCT", cfg.get("max_pct", 0.10))),
+        stop_price_floor=stop_floor,
     )
 
 

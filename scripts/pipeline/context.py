@@ -47,6 +47,7 @@ class TodayRunContext:
     per_system_frames: dict[str, pd.DataFrame] = field(default_factory=dict)
     final_signals: pd.DataFrame | None = None
     system_diagnostics: dict[str, dict[str, Any]] = field(default_factory=dict)
+    freshness_summary: dict[str, Any] = field(default_factory=dict)
     # テスト高速化オプション
     test_mode: str | None = None  # mini/quick/sample
     skip_external: bool = False  # 外部API呼び出しをスキップ

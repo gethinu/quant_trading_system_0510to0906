@@ -48,7 +48,9 @@ def validate_trd_frame(
         errs.append(f"[{label}] frame is None")
         return ValidationResult(errs, warns)
     if getattr(df, "empty", True):
-        warns.append(f"[{label}] frame is empty")
+        allow_empty = label.lower() in {"system6", "system7"}
+        if not allow_empty:
+            warns.append(f"[{label}] frame is empty")
         return ValidationResult(errs, warns)
 
     # 必須列チェック

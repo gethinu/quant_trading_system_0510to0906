@@ -43,6 +43,18 @@ class RollingIssueAggregator:
         self._verbose_head = int(os.getenv("ROLLING_ISSUES_VERBOSE_HEAD", "5"))
         self._count_by_category: dict[str, int] = defaultdict(int)
 
+    def _refresh_config(self) -> None:
+        """Refresh compact settings from environment if they changed."""
+        compact = os.getenv("COMPACT_TODAY_LOGS") == "1"
+        try:
+            verbose_head = int(os.getenv("ROLLING_ISSUES_VERBOSE_HEAD", "5"))
+        except Exception:
+            verbose_head = self._verbose_head
+        if compact != self._compact_mode:
+            self._compact_mode = compact
+        if verbose_head != self._verbose_head:
+            self._verbose_head = verbose_head
+
     def report_issue(self, category: str, symbol: str, message: str = "") -> None:
         """
         rolling cache の未整備問題を報告する。
@@ -52,6 +64,11 @@ class RollingIssueAggregator:
             symbol: 対象シンボル
             message: 追加メッセージ（省略可）
         """
+        # Allow runtime changes of compact settings
+        try:
+            self._refresh_config()
+        except Exception:
+            pass
         if not self._compact_mode:
             # 通常モードでも has_issue() 判定を可能にするため内部リストへ登録する
             # （compact でない場合は冗長制御は不要だが、重複抑制ロジックが利用する）

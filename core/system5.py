@@ -44,7 +44,11 @@ from common.system_candidates_utils import (
     normalize_dataframe_to_by_date,
     set_diagnostics_after_ranking,
 )
-from common.system_common import check_precomputed_indicators, get_total_days
+from common.system_common import (
+    check_precomputed_indicators,
+    get_total_days,
+    slice_latest_rows,
+)
 from common.system_constants import SYSTEM5_REQUIRED_INDICATORS
 from common.system_setup_predicates import validate_predicate_equivalence
 from common.utils import get_cached_data
@@ -64,6 +68,18 @@ DEFAULT_ATR_PCT_THRESHOLD = 0.025  # 2.5% minimum ATR percentage
 
 # Ranking parameters
 DEFAULT_TOP_N = 20  # Default number of top candidates to extract
+LATEST_ONLY_TAIL_ROWS = 5
+SYSTEM5_LATEST_ONLY_COLUMNS = (
+    "Open",
+    "High",
+    "Low",
+    "Close",
+    "Volume",
+    "adx7",
+    "atr10",
+    "atr_pct",
+    "dollarvolume20",
+)
 
 
 def format_atr_pct_threshold_label(threshold: float | None = None) -> str:
@@ -198,6 +214,7 @@ def prepare_data_vectorized_system5(
     Returns:
         Processed data dictionary
     """
+    latest_only = bool(kwargs.get("latest_only", False))
     # Fast path: reuse precomputed indicators
     if reuse_indicators and raw_data_dict:
         try:
@@ -210,7 +227,14 @@ def prepare_data_vectorized_system5(
                 # Apply System5-specific filters using helpers
                 prepared_dict = {}
                 for symbol, df in valid_data_dict.items():
-                    x = df.copy()
+                    if latest_only:
+                        x = slice_latest_rows(
+                            df,
+                            keep_columns=SYSTEM5_LATEST_ONLY_COLUMNS,
+                            tail_rows=LATEST_ONLY_TAIL_ROWS,
+                        )
+                    else:
+                        x = df.copy()
                     x = _apply_filter_conditions(x)
                     x = _apply_setup_conditions(x)
                     prepared_dict[symbol] = x

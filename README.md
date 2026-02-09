@@ -221,7 +221,8 @@ pip install -r requirements.txt
 - `APCA_API_KEY_ID`, `APCA_API_SECRET_KEY`: Alpaca ブローカー連携用（**Paper Trading対応済み**）
 - `ALPACA_PAPER`: `true` でペーパートレード、`false` で本番取引（デフォルト: `true`）
 - `SLACK_WEBHOOK_URL` または `SLACK_BOT_TOKEN`+`SLACK_CHANNEL`: Slack 通知設定
-- `DISCORD_WEBHOOK_URL`: Discord 通知設定
+- `DISCORD_WEBHOOK_URL`: Discord 通知設定（共通フォールバック）
+- `DISCORD_WEBHOOK_URL_SIGNALS` / `DISCORD_WEBHOOK_URL_EQUITY` / `DISCORD_WEBHOOK_URL_LOGS`: Discord 送信先の役割別設定
 
 ### Bulk API 品質設定（2025-10-12 改善）
 

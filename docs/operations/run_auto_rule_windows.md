@@ -6,7 +6,7 @@
 
 - リポジトリは `C:\Repos\quant_trading_system` に配置されている想定。
 - Python 環境がインストール済みで、必要パッケージ（`requirements.txt`）がインストールされていること。
-- 環境変数（`APCA_API_KEY_ID` / `APCA_API_SECRET_KEY`、通知関連 `SLACK_BOT_TOKEN` / `DISCORD_WEBHOOK_URL` など）はタスク実行時に利用可能である必要があります。
+- 環境変数（`APCA_API_KEY_ID` / `APCA_API_SECRET_KEY`、通知関連 `SLACK_BOT_TOKEN` / `DISCORD_WEBHOOK_URL` / `DISCORD_WEBHOOK_URL_SIGNALS` など）はタスク実行時に利用可能である必要があります。
 
 おすすめ構成
 

@@ -1977,7 +1977,8 @@ def main() -> None:
 
             設定が完了したら環境変数またはWebhook URLを設定してください：
             - `SLACK_BOT_TOKEN`: Slack Bot Token （推奨）
-            - `DISCORD_WEBHOOK_URL`: Discord Webhook URL （フォールバック）
+            - `DISCORD_WEBHOOK_URL`: Discord Webhook URL （共通フォールバック）
+            - `DISCORD_WEBHOOK_URL_SIGNALS` / `DISCORD_WEBHOOK_URL_EQUITY` / `DISCORD_WEBHOOK_URL_LOGS`: 役割別Webhook（任意）
             """
             )
 

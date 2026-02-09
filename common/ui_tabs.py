@@ -341,6 +341,147 @@ def render_positions_tab(settings, notifier: Notifier | None = None) -> None:
     except Exception as e:  # noqa: BLE001
         st.warning(f"未約定注文の取得に失敗: {e}")
 
+    st.markdown("---")
+    st.subheader("ローカルポジション管理（手動/CSV）")
+    st.caption("Alpaca以外の口座や手動管理向けに data/position_tracker.json を更新します。")
+    from datetime import date as _date
+
+    from common import position_tracker as _pt
+
+    def _tracker_to_df(tracker: dict) -> _pd.DataFrame:
+        rows = []
+        for sym, info in tracker.items():
+            row = {"symbol": sym}
+            if isinstance(info, dict):
+                row.update(info)
+            rows.append(row)
+        df = _pd.DataFrame(rows)
+        if df.empty:
+            return df
+        preferred = [
+            "symbol",
+            "system",
+            "side",
+            "qty",
+            "entry_date",
+            "entry_price",
+            "stop_price",
+            "profit_target_price",
+            "trailing_stop_pct",
+            "max_holding_days",
+            "max_exit_date",
+            "last_update",
+        ]
+        cols = preferred + [c for c in df.columns if c not in preferred]
+        return df[cols]
+
+    tracker = _pt.load_tracker()
+    df_tracker = _tracker_to_df(tracker)
+    if not df_tracker.empty:
+        st.dataframe(df_tracker, width="stretch")
+        try:
+            csv_bytes = df_tracker.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                "📄 ローカルポジションCSV",
+                data=csv_bytes,
+                file_name="position_tracker.csv",
+                mime="text/csv",
+            )
+        except Exception:
+            pass
+    else:
+        st.info("ローカルポジションはありません")
+
+    with st.expander("追加 / 更新", expanded=False):
+        with st.form("pos_tracker_form", clear_on_submit=True):
+            col1, col2, col3 = st.columns(3)
+            symbol = col1.text_input("symbol", value="")
+            system = col2.selectbox(
+                "system",
+                [f"system{i}" for i in range(1, 8)],
+                index=0,
+            )
+            side = col3.selectbox("side", ["long", "short"], index=0)
+            col4, col5, col6 = st.columns(3)
+            entry_date = col4.date_input("entry_date", value=_date.today())
+            entry_price = col5.number_input(
+                "entry_price",
+                min_value=0.0,
+                value=0.0,
+                step=0.01,
+                format="%.2f",
+            )
+            qty = col6.number_input(
+                "qty",
+                min_value=0,
+                value=0,
+                step=1,
+            )
+            submitted = st.form_submit_button("追加/更新")
+        if submitted:
+            sym = symbol.strip().upper()
+            errors = []
+            if not sym:
+                errors.append("symbol は必須です")
+            if entry_price <= 0:
+                errors.append("entry_price は 0 より大きい値を入力してください")
+            if errors:
+                st.error(" / ".join(errors))
+            else:
+                row = {
+                    "symbol": sym,
+                    "system": system,
+                    "side": side,
+                    "entry_date": _pd.Timestamp(entry_date),
+                    "entry_price": float(entry_price),
+                }
+                if qty > 0:
+                    row["qty"] = int(qty)
+                _pt.update_positions_from_signals(_pd.DataFrame([row]))
+                st.success("ローカルポジションを更新しました")
+                st.rerun()
+
+    with st.expander("CSV取り込み", expanded=False):
+        st.caption(
+            "列名例: symbol, system, side, entry_date, entry_price, qty (小文字推奨)"
+        )
+        upload = st.file_uploader("CSVファイル", type=["csv"])
+        if upload is not None:
+            try:
+                df_csv = _pd.read_csv(upload)
+                df_csv.columns = [str(c).strip().lower() for c in df_csv.columns]
+                st.dataframe(df_csv.head(50), width="stretch")
+                if st.button("取り込み実行"):
+                    _pt.update_positions_from_signals(df_csv)
+                    st.success(f"{len(df_csv)} 件を取り込みました")
+                    st.rerun()
+            except Exception as e:  # noqa: BLE001
+                st.error(f"CSVの読み込みに失敗: {e}")
+
+    with st.expander("削除", expanded=False):
+        if df_tracker.empty:
+            st.info("削除対象がありません")
+        else:
+            del_syms = st.multiselect(
+                "削除するシンボル",
+                df_tracker["symbol"].astype(str).tolist(),
+                default=[],
+            )
+            col_d1, col_d2 = st.columns(2)
+            with col_d1:
+                if st.button("選択したシンボルを削除"):
+                    _pt.remove_positions(list(del_syms))
+                    st.success("削除しました")
+                    st.rerun()
+            with col_d2:
+                if st.button("全件クリア"):
+                    try:
+                        _pt.save_tracker({})
+                        st.success("全件クリアしました")
+                        st.rerun()
+                    except Exception as e:  # noqa: BLE001
+                        st.error(f"全件クリア失敗: {e}")
+
 
 def render_metrics_tab(settings) -> None:
     from pathlib import Path
@@ -563,7 +704,13 @@ def render_integrated_tab(settings, notifier: Notifier) -> None:
             st.toggle(_label_i, key=notify_key_i)
         else:
             st.checkbox(_label_i, key=notify_key_i)
-        if not (os.getenv("DISCORD_WEBHOOK_URL") or os.getenv("SLACK_BOT_TOKEN")):
+        if not (
+            os.getenv("SLACK_BOT_TOKEN")
+            or os.getenv("DISCORD_WEBHOOK_URL")
+            or os.getenv("DISCORD_WEBHOOK_URL_SIGNALS")
+            or os.getenv("DISCORD_WEBHOOK_URL_EQUITY")
+            or os.getenv("DISCORD_WEBHOOK_URL_LOGS")
+        ):
             st.caption(tr("Webhook/Bot 設定が未設定です（.env を確認）"))
     except Exception:
         pass

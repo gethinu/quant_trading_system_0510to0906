@@ -193,6 +193,7 @@ _NO_EMOJI_ENV = bool(_env.no_emoji)
 _COMPACT_LOG = bool(_env.compact_logs)
 
 _LOG_CALLBACK = None
+_FRESHNESS_SUMMARY: dict[str, Any] | None = None
 
 # Progress event settings (EnvironmentConfig 経由に寄せる)
 try:
@@ -229,6 +230,7 @@ def emit_progress_event(event_type: str, data: dict) -> None:
 
 
 _LOG_FORWARDING: ContextVar[bool] = ContextVar("_LOG_FORWARDING", default=False)
+_LAST_STAGE_LOG: dict[str, tuple[Any, ...]] = {}
 
 
 # NOTE: StrategyProtocol 一時撤去（戦略側の実装差異が大きく attr-defined 問題を誘発のため）
@@ -612,6 +614,20 @@ def _log_stage_progress_event(payload: Mapping[str, Any]) -> None:
         system = str(payload.get("system", "unknown"))
         progress = int(payload.get("progress", 0))
         phase = str(payload.get("phase", "対象読み込み"))
+        key = (
+            progress,
+            phase,
+            payload.get("filter_count"),
+            payload.get("setup_count"),
+            payload.get("candidate_count"),
+            payload.get("entry_count"),
+            payload.get("substage_name"),
+            payload.get("substage_progress"),
+            payload.get("substage_total"),
+        )
+        if _LAST_STAGE_LOG.get(system) == key:
+            return
+        _LAST_STAGE_LOG[system] = key
         extra_bits: list[str] = []
         for key in ("filter_count", "setup_count", "candidate_count", "entry_count"):
             if key in payload:
@@ -924,6 +940,81 @@ _SYSTEM1_REASON_LABELS = {
 }
 
 
+def _log_entry_skip_from_attrs(system_name: str, df: pd.DataFrame | None) -> None:
+    """Log entry/stop calculation skip reasons stored on DataFrame attrs."""
+    if df is None:
+        return
+    try:
+        attrs = getattr(df, "attrs", {})
+        counts = attrs.get("entry_skip_counts")
+        if not isinstance(counts, dict) or not counts:
+            return
+        sorted_items = sorted(counts.items(), key=lambda x: x[1], reverse=True)
+        top = sorted_items[:3]
+        summary = ", ".join([f"{k}: {v}" for k, v in top if v])
+        if summary:
+            _log(f"[{system_name}] entry計算スキップ内訳: {summary}")
+        samples = attrs.get("entry_skip_samples")
+        if isinstance(samples, dict):
+            for key, _cnt in top:
+                ex = samples.get(key) or []
+                if ex:
+                    _log(f"[{system_name}]  ↳ ({key}): {', '.join(ex[:5])}")
+    except Exception:
+        pass
+
+
+def _emit_stop_floor_clamp_from_attrs(system_name: str, df: pd.DataFrame | None) -> None:
+    """Emit stop_price_floor clamp info from DataFrame attrs (log + progress event)."""
+    if df is None:
+        return
+    try:
+        attrs = getattr(df, "attrs", {})
+        clamp_count = attrs.get("stop_price_floor_clamp_count")
+        if clamp_count is None:
+            return
+        clamp_count_int = int(clamp_count)
+    except Exception:
+        return
+    if clamp_count_int <= 0:
+        return
+    try:
+        floor_raw = attrs.get("stop_price_floor")
+        floor_val = float(floor_raw) if floor_raw is not None else None
+    except Exception:
+        floor_val = None
+    samples = []
+    try:
+        samples_raw = attrs.get("stop_price_floor_clamp_samples")
+        if isinstance(samples_raw, (list, tuple)):
+            samples = [str(s) for s in samples_raw if s]
+    except Exception:
+        samples = []
+
+    try:
+        floor_text = f"{floor_val:.4f}" if floor_val is not None else "?"
+        sample_text = ", ".join(samples[:5]) if samples else ""
+        suffix = f" (例: {sample_text})" if sample_text else ""
+        _log(
+            f"[{system_name}] 🧷 stop_price_floor={floor_text} 補正: {clamp_count_int}件{suffix}"
+        )
+    except Exception:
+        pass
+
+    try:
+        payload = {
+            "system": system_name,
+            "count": clamp_count_int,
+        }
+        if floor_val is not None:
+            payload["floor"] = float(floor_val)
+        if samples:
+            payload["samples"] = samples[:10]
+        emit_progress_event("stop_price_floor_clamp", payload)
+    except Exception:
+        pass
+
+
 def _log_zero_candidate_diagnostics(
     system_name: str,
     candidate_count: int,
@@ -1051,6 +1142,50 @@ def _log_zero_candidate_diagnostics(
                 pass
         except Exception:
             _log("[system3] 候補0件: 診断の解析中に例外が発生しました")
+        return
+
+    if name == "system5":
+        if not isinstance(diag_payload, Mapping):
+            _log("[system5] 候補0件: 診断情報がありません")
+            return
+        try:
+            ranking_source = diag_payload.get("ranking_source")
+            top_n = diag_payload.get("top_n") or diag_payload.get("top_n_requested")
+            setup_count = diag_payload.get("setup_predicate_count")
+            ranked_count = diag_payload.get("ranked_top_n_count")
+            predicate_only = diag_payload.get("predicate_only_pass_count")
+            mismatch_flag = diag_payload.get("mismatch_flag")
+            setup_unique = diag_payload.get("setup_unique_symbols")
+
+            parts: list[str] = []
+            if ranking_source:
+                parts.append(f"ranking_source={ranking_source}")
+            if top_n is not None:
+                parts.append(f"top_n={top_n}")
+            if setup_count is not None:
+                parts.append(f"setup_predicate_count={setup_count}")
+            if ranked_count is not None:
+                parts.append(f"ranked_top_n_count={ranked_count}")
+            if predicate_only is not None:
+                parts.append(f"predicate_only_pass_count={predicate_only}")
+            if mismatch_flag is not None:
+                parts.append(f"mismatch_flag={mismatch_flag}")
+            if setup_unique is not None:
+                parts.append(f"setup_unique_symbols={setup_unique}")
+
+            suffix = ", ".join(parts) if parts else "診断情報が空です"
+            _log(f"[system5] 候補0件診断: {suffix}")
+            if (
+                isinstance(setup_count, int)
+                and isinstance(ranked_count, int)
+                and setup_count > 0
+                and ranked_count > 0
+            ):
+                _log(
+                    "[system5] setup/rank では候補が出ています。entry/stop 計算で除外された可能性があります。"
+                )
+        except Exception:
+            _log("[system5] 候補0件: 診断の解析中に例外が発生しました")
         return
 
 
@@ -2147,6 +2282,27 @@ def _initialize_run_context(
 
         reset_env_config_cache()
 
+    # Parallel runs can be log-heavy; enable compact logs unless explicitly set
+    if parallel and "COMPACT_TODAY_LOGS" not in os.environ:
+        os.environ["COMPACT_TODAY_LOGS"] = "1"
+        try:
+            from config.environment import reset_env_config_cache
+
+            reset_env_config_cache()
+            globals()["_COMPACT_LOG"] = bool(get_env_config().compact_logs)
+        except Exception:
+            pass
+
+    # Skip external API calls (e.g., Alpaca shortability lookup) when requested
+    if skip_external and "SKIP_EXTERNAL_APIS" not in os.environ:
+        os.environ["SKIP_EXTERNAL_APIS"] = "1"
+        try:
+            from config.environment import reset_env_config_cache
+
+            reset_env_config_cache()
+        except Exception:
+            pass
+
     # Avoid directory creation side-effects during initialization; directories
     # are expected to exist or be created lazily by CacheManager/write ops.
     settings = get_settings(create_dirs=False)
@@ -2451,21 +2607,36 @@ def _load_universe_basic_data(
             + f"rolling取得済み {cov_have}/{cov_total} | missing={cov_missing}"
         )
         if cov_missing > 0:
-            missing_syms = [s for s in symbols if s not in basic_data]
-            # 10%ごとにバッチ表示
-            batch_size = max(1, int(cov_total * 0.1))
-            for i in range(0, len(missing_syms), batch_size):
-                batch = missing_syms[i : i + batch_size]
-                symbols_str = ", ".join(batch)
+            compact = bool(
+                _COMPACT_LOG
+                or os.environ.get("COMPACT_TODAY_LOGS") == "1"
+                or bool(getattr(ctx, "parallel", False))
+            )
+            if compact:
                 _log(
-                    f"⚠️ rolling未整備 ({i + 1}〜{min(i + batch_size, len(missing_syms))}/{len(missing_syms)}): {symbols_str}",
+                    f"⚠️ rolling未整備: {cov_missing}銘柄（詳細は省略）",
                     ui=False,
                 )
-            # 最後に集計メッセージ
-            _log(
-                f"💡 rolling未整備の計{cov_missing}銘柄は自動的にスキップされました（base/full_backupからの再試行は不要）",
-                ui=False,
-            )
+                _log(
+                    f"💡 rolling未整備の計{cov_missing}銘柄は自動的にスキップされました（base/full_backupからの再試行は不要）",
+                    ui=False,
+                )
+            else:
+                missing_syms = [s for s in symbols if s not in basic_data]
+                # 10%ごとにバッチ表示
+                batch_size = max(1, int(cov_total * 0.1))
+                for i in range(0, len(missing_syms), batch_size):
+                    batch = missing_syms[i : i + batch_size]
+                    symbols_str = ", ".join(batch)
+                    _log(
+                        f"⚠️ rolling未整備 ({i + 1}〜{min(i + batch_size, len(missing_syms))}/{len(missing_syms)}): {symbols_str}",
+                        ui=False,
+                    )
+                # 最後に集計メッセージ
+                _log(
+                    f"💡 rolling未整備の計{cov_missing}銘柄は自動的にスキップされました（base/full_backupからの再試行は不要）",
+                    ui=False,
+                )
     except Exception:
         pass
 
@@ -2760,10 +2931,34 @@ def _save_and_notify_phase(
                     out_df.to_csv(out_all, index=False)
                 except Exception:
                     pass
+        def _infer_per_system_columns(
+            df_local: pd.DataFrame | None, final_local: pd.DataFrame | None
+        ) -> list[str]:
+            if df_local is not None and list(getattr(df_local, "columns", [])):
+                return list(df_local.columns)
+            if final_local is not None and list(getattr(final_local, "columns", [])):
+                return list(final_local.columns)
+            return [
+                "symbol",
+                "system",
+                "side",
+                "signal_type",
+                "entry_date",
+                "entry_price",
+                "stop_price",
+                "score_key",
+                "score",
+            ]
+
         for name, df in per_system.items():
-            if df is None or getattr(df, "empty", True):
-                continue
             out = final_base / f"signals_{name}_{suffix}.csv"
+            df_write = df
+            if df_write is None or getattr(df_write, "empty", True):
+                try:
+                    cols = _infer_per_system_columns(df_write, final_df)
+                    df_write = pd.DataFrame(columns=cols)
+                except Exception:
+                    df_write = pd.DataFrame()
             try:
                 try:
                     round_dec = getattr(
@@ -2771,10 +2966,10 @@ def _save_and_notify_phase(
                     )
                 except Exception:
                     round_dec = None
-                out_df_per = round_dataframe(df, round_dec)
+                out_df_per = round_dataframe(df_write, round_dec)
             except Exception:
-                out_df_per = df
-            # write per-system CSV atomically
+                out_df_per = df_write
+            # write per-system CSV atomically (even when empty)
             try:
                 tmp_out = final_base / f".signals_{name}_{suffix}.{ctx.run_id}.tmp"
                 try:
@@ -2797,6 +2992,52 @@ def _save_and_notify_phase(
                     out_df_per.to_csv(out, index=False)
                 except Exception:
                     _log(f"⚠️ CSV書き込み失敗: {out}", ui=False)
+        # Exit plan CSV (entry-based plan summary)
+        try:
+            from common.exit_plan import build_exit_plan_from_signals
+
+            exit_plan_df = build_exit_plan_from_signals(final_df)
+        except Exception:
+            exit_plan_df = None
+        if exit_plan_df is not None and not getattr(exit_plan_df, "empty", True):
+            out_plan = final_base / f"signals_exit_plan_{suffix}.csv"
+            try:
+                try:
+                    round_dec = getattr(
+                        get_settings(create_dirs=True).cache, "round_decimals", None
+                    )
+                except Exception:
+                    round_dec = None
+                out_plan_df = round_dataframe(exit_plan_df, round_dec)
+            except Exception:
+                out_plan_df = exit_plan_df
+            try:
+                tmp_plan = final_base / f".signals_exit_plan_{suffix}.{ctx.run_id}.tmp"
+                try:
+                    from common.io_utils import df_to_csv
+
+                    df_to_csv(out_plan_df, tmp_plan, index=False)
+                except Exception:
+                    out_plan_df.to_csv(tmp_plan, index=False)
+                try:
+                    tmp_plan.replace(out_plan)
+                except Exception:
+                    import os as _os
+
+                    try:
+                        tmp_plan.replace(out_plan)
+                    except Exception:
+                        _os.replace(str(tmp_plan), str(out_plan))
+            except Exception:
+                try:
+                    from common.io_utils import df_to_csv
+
+                    df_to_csv(out_plan_df, out_plan, index=False)
+                except Exception:
+                    try:
+                        out_plan_df.to_csv(out_plan, index=False)
+                    except Exception:
+                        _log(f"⚠️ CSV書き込み失敗: {out_plan}", ui=False)
         try:
             _log(f"💾 保存: {final_base} にCSVを書き出しました")
         except Exception:
@@ -2813,6 +3054,14 @@ def _save_and_notify_phase(
             from common.trdlist_validator import build_validation_report
 
             report = build_validation_report(final_df, dict(per_system))
+            try:
+                freshness = getattr(ctx, "freshness_summary", None)
+                if not freshness:
+                    freshness = globals().get("_FRESHNESS_SUMMARY")
+                if isinstance(freshness, dict) and freshness:
+                    report["data_freshness"] = freshness
+            except Exception:
+                pass
             try:
                 _test_mode_val = getattr(ctx, "test_mode", None)
             except Exception:
@@ -3526,6 +3775,16 @@ def _resolve_spy_dataframe(basic_data: dict[str, pd.DataFrame]) -> pd.DataFrame 
     return None
 
 
+@dataclass(slots=True)
+class _SystemRunResult:
+    system_name: str
+    df: pd.DataFrame
+    diagnostics: dict[str, Any] | None
+    candidate_kwargs: dict[str, Any]
+    sys_t_prepare: float
+    sys_t_candidates: float | None
+
+
 @no_type_check
 def compute_today_signals(  # noqa: C901  # type: ignore[reportGeneralTypeIssues]
     symbols: list[str] | None,
@@ -3617,6 +3876,10 @@ def compute_today_signals(  # noqa: C901  # type: ignore[reportGeneralTypeIssues
 
     try:
         GLOBAL_STAGE_METRICS.reset()
+    except Exception:
+        pass
+    try:
+        _LAST_STAGE_LOG.clear()
     except Exception:
         pass
 
@@ -3885,6 +4148,7 @@ def compute_today_signals(  # noqa: C901  # type: ignore[reportGeneralTypeIssues
             except Exception:
                 pass
 
+            total_symbols_before = len(symbols) if symbols is not None else 0
             valid_symbols, stale_details = validate_latest_trading_day(
                 symbols=symbols,
                 expected_date=expected_base_day,
@@ -3895,6 +4159,7 @@ def compute_today_signals(  # noqa: C901  # type: ignore[reportGeneralTypeIssues
             )
 
             # 除外銘柄の詳細を CSV 保存
+            reason_counts: dict[str, int] = {}
             if stale_details:
                 try:
                     excluded_csv = save_excluded_symbols_csv(
@@ -3924,6 +4189,18 @@ def compute_today_signals(  # noqa: C901  # type: ignore[reportGeneralTypeIssues
             _log(
                 f"✅ Phase 0 完了: {len(symbols)} 銘柄が処理対象（{excluded_count} 銘柄を除外）"
             )
+            try:
+                summary_payload = {
+                    "expected_date": expected_base_day.date().isoformat(),
+                    "total_symbols": int(total_symbols_before),
+                    "valid_symbols": int(len(symbols)),
+                    "excluded_count": int(excluded_count),
+                    "exclusion_reasons": reason_counts,
+                }
+                ctx.freshness_summary = summary_payload
+                globals()["_FRESHNESS_SUMMARY"] = summary_payload
+            except Exception:
+                pass
 
             # 進捗イベント送出（Streamlit UI で可視化）
             if stale_details:
@@ -4014,6 +4291,8 @@ def compute_today_signals(  # noqa: C901  # type: ignore[reportGeneralTypeIssues
             trading_days_lag = _calculate_trading_days_lag(
                 pd.Timestamp(anchor_last), frozen_base
             )
+            rebuild_attempted = False
+            rebuild_success = False
 
             if pd.Timestamp(anchor_last).normalize() != frozen_base:
                 _log(
@@ -4034,8 +4313,67 @@ def compute_today_signals(  # noqa: C901  # type: ignore[reportGeneralTypeIssues
                         "💡 対策: scripts/cache_daily_data.py または "
                         "scripts/update_cache_all.ps1 でデータを更新してください。"
                     )
+                    # Try local rebuild from full cache before failing
+                    try:
+                        rebuild_attempted = True
+                        _log("🔧 SPY rolling を full から再構築を試行します…")
+                        try:
+                            target_len = int(
+                                ctx.settings.cache.rolling.base_lookback_days
+                                + ctx.settings.cache.rolling.buffer_days
+                            )
+                        except Exception:
+                            target_len = 0
+                        full_df = ctx.cache_manager.read("SPY", "full")
+                        rebuilt = None
+                        if full_df is not None and not getattr(full_df, "empty", True):
+                            rebuilt = _build_rolling_from_base(
+                                "SPY",
+                                full_df,
+                                max(0, int(target_len)),
+                                cache_manager=ctx.cache_manager,
+                            )
+                        if rebuilt is not None and not getattr(rebuilt, "empty", True):
+                            basic_data["SPY"] = rebuilt
+                            anchor_last = _extract_last_cache_date(rebuilt)
+                            if anchor_last is not None:
+                                trading_days_lag = _calculate_trading_days_lag(
+                                    pd.Timestamp(anchor_last), frozen_base
+                                )
+                                rebuild_success = True
+                            _log(
+                                "✅ SPY rolling 再構築完了 "
+                                f"(cache={pd.Timestamp(anchor_last).date() if anchor_last is not None else 'n/a'}, "
+                                f"営業日差: {trading_days_lag}日)"
+                            )
+                        else:
+                            _log("⚠️ SPY rolling 再構築に失敗（full データ未整備）")
+                    except Exception as rebuild_err:
+                        _log(f"⚠️ SPY rolling 再構築エラー: {rebuild_err}")
+
                     # Hard failure when SPY cache exceeds freshness threshold
-                    raise SystemExit(1)
+                    if trading_days_lag > calendar_tolerance:
+                        if getattr(ctx, "skip_external", False):
+                            _log(
+                                "⚠️ skip_external=1 のため SPY 鮮度超過を警告扱いで継続します。"
+                            )
+                        else:
+                            raise SystemExit(1)
+            try:
+                payload = {
+                    "spy_last_date": pd.Timestamp(anchor_last).date().isoformat()
+                    if anchor_last is not None
+                    else None,
+                    "spy_trading_days_lag": int(trading_days_lag),
+                    "spy_rebuild_attempted": bool(rebuild_attempted),
+                    "spy_rebuild_success": bool(rebuild_success),
+                }
+                if isinstance(ctx.freshness_summary, dict):
+                    ctx.freshness_summary.update(payload)
+                if isinstance(globals().get("_FRESHNESS_SUMMARY"), dict):
+                    globals()["_FRESHNESS_SUMMARY"].update(payload)
+            except Exception:
+                pass
     except Exception:
         pass
 
@@ -4525,6 +4863,8 @@ def compute_today_signals(  # noqa: C901  # type: ignore[reportGeneralTypeIssues
         s6_ret = 0
         s6_uptwo = 0
         s6_combo = 0
+        s6_ret_values: list[float] = []
+        s6_ret_top: list[tuple[float, str]] = []
         for _sym in system6_syms or []:
             _df = raw_data_system6.get(_sym)
             if _df is None or getattr(_df, "empty", True):
@@ -4540,6 +4880,14 @@ def compute_today_signals(  # noqa: C901  # type: ignore[reportGeneralTypeIssues
                 ret_pass = (not pd.isna(r6v)) and (r6v > 0.20)
             except Exception:
                 ret_pass = False
+                r6v = float("nan")
+            if not pd.isna(r6v):
+                try:
+                    r6f = float(r6v)
+                    s6_ret_values.append(r6f)
+                    s6_ret_top.append((r6f, str(_sym)))
+                except Exception:
+                    pass
             if ret_pass:
                 s6_ret += 1
             # UpTwoDays 判定（独立）
@@ -4560,6 +4908,28 @@ def compute_today_signals(  # noqa: C901  # type: ignore[reportGeneralTypeIssues
             + f"フィルタ通過={s6_filter}, return_6d>20%: {s6_ret}, "
             + f"UpTwoDays: {s6_uptwo}"
         )
+        if s6_setup == 0 and s6_ret_values:
+            try:
+                series = pd.Series(s6_ret_values)
+                max_v = float(series.max())
+                p95 = float(series.quantile(0.95))
+                p99 = float(series.quantile(0.99))
+                _log(
+                    "🧪 system6 return_6d stats (filter pass): "
+                    + f"max={max_v:.4f}, p95={p95:.4f}, p99={p99:.4f}"
+                )
+            except Exception:
+                pass
+            try:
+                s6_ret_top.sort(key=lambda kv: kv[0], reverse=True)
+                top_items = s6_ret_top[:3]
+                if top_items:
+                    top_line = ", ".join(
+                        f"{sym}:{val:.4f}" for val, sym in top_items
+                    )
+                    _log(f"🧪 system6 near-miss top: {top_line}")
+            except Exception:
+                pass
         try:
             _stage(
                 "system6",
@@ -4710,7 +5080,7 @@ def compute_today_signals(  # noqa: C901  # type: ignore[reportGeneralTypeIssues
     except Exception:
         pass
 
-    for system_name in system_names:
+    def _handle_system_start(system_name: str) -> None:
         _log(f"▶ {system_name} 開始")
 
         # システム開始をUIに通知
@@ -4725,6 +5095,52 @@ def compute_today_signals(  # noqa: C901  # type: ignore[reportGeneralTypeIssues
         except Exception:
             pass
 
+    def _handle_setup_skip(system_name: str) -> None:
+        _log(f"[{system_name}] ⏭️ setup_count=0 のため処理をスキップ")
+        per_system[system_name] = pd.DataFrame()
+        _log(f"[{system_name}] ❌ {system_name}: 0 件 🚫")
+        try:
+            _stage(system_name, 75, candidate_count=0)
+            _stage(system_name, 100, candidate_count=0, entry_count=0)
+        except Exception:
+            pass
+        _log(f"✅ {system_name} 完了: 0件")
+        try:
+            _log(f"⏱️ {system_name}: skipped (setup_count=0)")
+        except Exception:
+            pass
+        # Progress event を発火（UIの一貫性維持）
+        try:
+            emit_progress_event(
+                "system_complete",
+                {"system": system_name, "candidates": 0, "skipped": True},
+            )
+        except Exception:
+            pass
+        try:
+            emit_progress_event(
+                "system_timing",
+                {
+                    "system": system_name,
+                    "skipped": True,
+                    "total_sec": 0.0,
+                },
+            )
+        except Exception:
+            pass
+        try:
+            if per_system_progress and callable(per_system_progress):
+                per_system_progress(system_name, "done")
+        except Exception:
+            pass
+
+    def _run_single_system(system_name: str) -> _SystemRunResult:
+        candidate_kwargs: dict[str, Any] = {}
+        diag_payload: dict[str, Any] | None = None
+        df = pd.DataFrame()
+        # per-system 計測（ベンチマークが無効でも _PerfTimer による軽量ログは出す）
+        _sys_t_prepare = 0.0  # Phase5 は内部で prepare を行うため外側では実行しない
+        _sys_t_candidates = None
         try:
             if system_name == "system1":
                 raw_data = raw_data_system1
@@ -4745,49 +5161,27 @@ def compute_today_signals(  # noqa: C901  # type: ignore[reportGeneralTypeIssues
 
             strategy = strategies.get(system_name)
             if strategy is None:
-                _log(f"[{system_name}] ❌ strategy not found")
-                per_system[system_name] = pd.DataFrame()
-                continue
+                return _SystemRunResult(
+                    system_name,
+                    pd.DataFrame(),
+                    None,
+                    candidate_kwargs,
+                    _sys_t_prepare,
+                    _sys_t_candidates,
+                )
 
             # システム固有のロジック実行
             if system_name == "system4" and spy_df is None:
-                _log(
-                    f"[{system_name}] ⚠️ System4 は SPY 指標が必要ですが SPY データがありません。スキップします。"
+                return _SystemRunResult(
+                    system_name,
+                    pd.DataFrame(),
+                    None,
+                    candidate_kwargs,
+                    _sys_t_prepare,
+                    _sys_t_candidates,
                 )
-                per_system[system_name] = pd.DataFrame()
-                continue
-
-            # 早期終了: セットアップ候補が0件の場合、高コストな処理をスキップ
-            # (事前計算済みの _setup_counts を参照)
-            if _setup_counts.get(system_name, -1) == 0:
-                _log(f"[{system_name}] ⏭️ setup_count=0 のため処理をスキップ")
-                per_system[system_name] = pd.DataFrame()
-                _log(f"[{system_name}] ❌ {system_name}: 0 件 🚫")
-                try:
-                    _stage(system_name, 75, candidate_count=0)
-                    _stage(system_name, 100, candidate_count=0, entry_count=0)
-                except Exception:
-                    pass
-                _log(f"✅ {system_name} 完了: 0件")
-                # Progress event を発火（UIの一貫性維持）
-                try:
-                    emit_progress_event(
-                        "system_complete",
-                        {"system": system_name, "candidates": 0, "skipped": True},
-                    )
-                except Exception:
-                    pass
-                try:
-                    if per_system_progress and callable(per_system_progress):
-                        per_system_progress(system_name, "done")
-                except Exception:
-                    pass
-                continue
 
             _log(f"[{system_name}] 🔎 {system_name}: シグナル抽出を開始")
-            # per-system 計測（ベンチマークが無効でも _PerfTimer による軽量ログは出す）
-            _sys_t_prepare = 0.0  # Phase5 は内部で prepare を行うため外側では実行しない
-            _sys_t_candidates = None
             try:
                 import time as _t
 
@@ -4795,7 +5189,6 @@ def compute_today_signals(  # noqa: C901  # type: ignore[reportGeneralTypeIssues
             except Exception:
                 _sys_t0 = None
 
-            candidate_kwargs: dict[str, Any] = {}
             if system_name == "system4":
                 candidate_kwargs["market_df"] = spy_df
 
@@ -4889,7 +5282,7 @@ def compute_today_signals(  # noqa: C901  # type: ignore[reportGeneralTypeIssues
                         # 重複する詳細ログを抑制
                         log_callback=_quiet_log_for_phase5,
                         stage_progress=None,
-                        use_process_pool=False,  # Phase5 is already parallelized per-system
+                        use_process_pool=False,  # System-level parallelism is handled outside
                         max_workers=None,
                         lookback_days=None,
                     )
@@ -4897,7 +5290,7 @@ def compute_today_signals(  # noqa: C901  # type: ignore[reportGeneralTypeIssues
                     import traceback
 
                     _log(f"[{system_name}] ⚠️ get_today_signals failed: {sig_err}")
-                    _log(f"[{system_name}] Traceback:\n{traceback.format_exc()}")
+                    _log(f"[{system_name}] Traceback:\\n{traceback.format_exc()}")
                     df = pd.DataFrame()
 
             # per-system 計測まとめ（準備は内部で行われるため 0、候補抽出は get_today_signals 全体の時間）
@@ -4926,8 +5319,12 @@ def compute_today_signals(  # noqa: C901  # type: ignore[reportGeneralTypeIssues
                 pass
 
             # df is already a DataFrame with entry_price/stop_price from get_today_signals
-            if df is None or df.empty:
+            if df is None:
                 df = pd.DataFrame()
+            elif getattr(df, "empty", False):
+                # Preserve attrs on empty frames (entry_skip_counts etc.)
+                if not isinstance(df, pd.DataFrame):
+                    df = pd.DataFrame()
             else:
                 # デバッグ: get_today_signalsから返されたDataFrameの列を確認
                 if os.environ.get("ALLOCATION_DEBUG", "0") == "1":
@@ -4954,27 +5351,47 @@ def compute_today_signals(  # noqa: C901  # type: ignore[reportGeneralTypeIssues
                             f"[ALLOC_DEBUG] {system_name} attrs debug failed: {sys.exc_info()[0]}"
                         )
 
-            per_system[system_name] = df
             count = len(df) if not df.empty else 0
             if count > 0:
                 # 成功アイコン（従来は常に❌表示だった箇所を条件分岐）
                 _log(f"[{system_name}] ✅ {system_name}: {count} 件")
             else:
                 _log(f"[{system_name}] ❌ {system_name}: {count} 件 🚫")
+                try:
+                    _log_entry_skip_from_attrs(system_name, df)
+                except Exception:
+                    pass
+            try:
+                _emit_stop_floor_clamp_from_attrs(system_name, df)
+            except Exception:
+                pass
+
+            try:
+                raw_diag = getattr(strategy, "last_diagnostics", None)
+                if isinstance(raw_diag, dict):
+                    diag_payload = raw_diag
+            except Exception:
+                diag_payload = None
+            if diag_payload is None and df is not None:
+                try:
+                    attrs = getattr(df, "attrs", {})
+                    cand_diag = attrs.get("candidate_diagnostics")
+                    if isinstance(cand_diag, dict):
+                        diag_payload = cand_diag
+                except Exception:
+                    pass
 
             # UI 進捗: 候補抽出件数を 75% ステージとして通知（早期に TRDlist を可視化）
             # System3/System5 は diagnostics から setup_predicate_count を取得して STUpass に反映
             try:
                 setup_count = None
-                if system_name in ("system3", "system5"):
-                    diag_payload = getattr(strategy, "last_diagnostics", None)
-                    if isinstance(diag_payload, dict):
-                        setup_count = diag_payload.get("setup_predicate_count")
-                        if setup_count is not None:
-                            try:
-                                setup_count = int(setup_count)
-                            except Exception:
-                                setup_count = None
+                if system_name in ("system3", "system5") and diag_payload is not None:
+                    setup_count = diag_payload.get("setup_predicate_count")
+                    if setup_count is not None:
+                        try:
+                            setup_count = int(setup_count)
+                        except Exception:
+                            setup_count = None
                 _stage(
                     system_name, 75, candidate_count=int(count), setup_count=setup_count
                 )
@@ -4982,30 +5399,76 @@ def compute_today_signals(  # noqa: C901  # type: ignore[reportGeneralTypeIssues
                 pass
 
             try:
-                diag_payload = getattr(strategy, "last_diagnostics", None)
-                if isinstance(diag_payload, dict):
-                    ctx.system_diagnostics[system_name] = diag_payload
+                if diag_payload is not None:
                     _log_zero_candidate_diagnostics(system_name, count, diag_payload)
             except Exception:
                 pass
 
         except Exception as e:
             _log(f"[{system_name}] ⚠️ {system_name}: シグナル抽出に失敗しました: {e}")
-            per_system[system_name] = pd.DataFrame()
+            df = pd.DataFrame()
             _log(f"[{system_name}] ❌ {system_name}: 0 件 🚫")
 
-        _log(f"✅ {system_name} 完了: {len(per_system[system_name])}件")
+        return _SystemRunResult(
+            system_name,
+            df,
+            diag_payload if isinstance(diag_payload, dict) else None,
+            candidate_kwargs,
+            _sys_t_prepare,
+            _sys_t_candidates,
+        )
+
+    def _finalize_system_result(result: _SystemRunResult) -> None:
+        per_system[result.system_name] = result.df
+        if result.diagnostics is not None:
+            try:
+                ctx.system_diagnostics[result.system_name] = result.diagnostics
+            except Exception:
+                pass
+
+        _log(f"✅ {result.system_name} 完了: {len(result.df)}件")
+        # 詳細タイマー: get_today_signals 内部計測があれば活用
+        try:
+            timing = {}
+            try:
+                timing = dict(getattr(result.df, "attrs", {}).get("timing", {}))
+            except Exception:
+                timing = {}
+            total_sec = timing.get("total_sec")
+            if total_sec is None:
+                total_sec = result.sys_t_candidates
+            parts = []
+            if timing:
+                label_map = [
+                    ("slice_sec", "slice"),
+                    ("prepare_sec", "prepare"),
+                    ("candidates_sec", "candidates"),
+                    ("setup_sec", "setup"),
+                    ("select_sec", "select"),
+                    ("build_sec", "build"),
+                ]
+                for key, label in label_map:
+                    val = timing.get(key)
+                    if isinstance(val, (int, float)):
+                        parts.append(f"{label}={float(val):.2f}s")
+            if isinstance(total_sec, (int, float)):
+                msg = f"⏱️ {result.system_name}: total={float(total_sec):.2f}s"
+                if parts:
+                    msg += " (" + ", ".join(parts) + ")"
+                _log(msg)
+        except Exception:
+            pass
         # Progress: per-system complete
         try:
             snapshot: StageSnapshot | None
             try:
-                snapshot = GLOBAL_STAGE_METRICS.get_snapshot(system_name)
+                snapshot = GLOBAL_STAGE_METRICS.get_snapshot(result.system_name)
             except Exception:
                 snapshot = None
 
             event_data = {
-                "system": system_name,
-                "candidates": int(len(per_system.get(system_name, pd.DataFrame()))),
+                "system": result.system_name,
+                "candidates": int(len(per_system.get(result.system_name, pd.DataFrame()))),
             }
             event_data.update(_snapshot_to_progress_payload(snapshot))
             emit_progress_event(
@@ -5014,26 +5477,45 @@ def compute_today_signals(  # noqa: C901  # type: ignore[reportGeneralTypeIssues
             )
         except Exception:
             pass
+        # Progress: per-system timing
+        try:
+            timing_payload = {"system": result.system_name}
+            try:
+                timing_payload.update(
+                    dict(getattr(result.df, "attrs", {}).get("timing", {}))
+                )
+            except Exception:
+                pass
+            if timing_payload.get("total_sec") is None and result.sys_t_candidates:
+                timing_payload["total_sec"] = float(result.sys_t_candidates)
+            emit_progress_event("system_timing", timing_payload)
+        except Exception:
+            pass
 
         # ベンチマーク拡張: フェーズ4のシステム別明細を収集
         try:
             if _LIGHTWEIGHT_BENCHMARK and _LIGHTWEIGHT_BENCHMARK.enabled:
                 detail = {
-                    "system": system_name,
-                    "prepare_sec": round(float(_sys_t_prepare or 0.0), 6),
+                    "system": result.system_name,
+                    "prepare_sec": round(float(result.sys_t_prepare or 0.0), 6),
                     "generate_candidates_sec": round(
-                        float(_sys_t_candidates or 0.0), 6
+                        float(result.sys_t_candidates or 0.0), 6
                     ),
                     "total_sec": round(
-                        float(((_sys_t_prepare or 0.0) + (_sys_t_candidates or 0.0))),
+                        float(
+                            (result.sys_t_prepare or 0.0)
+                            + (result.sys_t_candidates or 0.0)
+                        ),
                         6,
                     ),
                     "candidates": (
-                        int(len(per_system.get(system_name, pd.DataFrame())))
-                        if isinstance(per_system.get(system_name), pd.DataFrame)
+                        int(len(per_system.get(result.system_name, pd.DataFrame())))
+                        if isinstance(per_system.get(result.system_name), pd.DataFrame)
                         else 0
                     ),
-                    "latest_only": bool(candidate_kwargs.get("latest_only", False)),
+                    "latest_only": bool(
+                        (result.candidate_kwargs or {}).get("latest_only", False)
+                    ),
                 }
                 _phase4_details.append(detail)
         except Exception:
@@ -5042,10 +5524,96 @@ def compute_today_signals(  # noqa: C901  # type: ignore[reportGeneralTypeIssues
         # システム完了をUIに通知
         try:
             if per_system_progress and callable(per_system_progress):
-                per_system_progress(system_name, "done")
+                per_system_progress(result.system_name, "done")
         except Exception:
             pass
 
+    def _resolve_system_parallel_workers(target: int) -> int:
+        if target <= 1:
+            return 1
+        try:
+            base = int(getattr(ctx.settings, "THREADS_DEFAULT", 0) or 0)
+        except Exception:
+            base = 0
+        if base <= 0:
+            base = os.cpu_count() or 4
+        base = max(1, int(base))
+        return max(1, min(int(target), base))
+
+    if parallel:
+        systems_to_run: list[str] = []
+        for system_name in system_names:
+            _handle_system_start(system_name)
+
+            strategy = strategies.get(system_name)
+            if strategy is None:
+                _log(f"[{system_name}] ❌ strategy not found")
+                per_system[system_name] = pd.DataFrame()
+                continue
+
+            # システム固有のロジック実行
+            if system_name == "system4" and spy_df is None:
+                _log(
+                    f"[{system_name}] ⚠️ System4 は SPY 指標が必要ですが SPY データがありません。スキップします。"
+                )
+                per_system[system_name] = pd.DataFrame()
+                continue
+
+            # 早期終了: セットアップ候補が0件の場合、高コストな処理をスキップ
+            if _setup_counts.get(system_name, -1) == 0:
+                _handle_setup_skip(system_name)
+                continue
+
+            systems_to_run.append(system_name)
+
+        if len(systems_to_run) > 1:
+            workers = _resolve_system_parallel_workers(len(systems_to_run))
+            _log(f"🧵 システム並列実行: workers={workers}")
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                futures = {
+                    executor.submit(_run_single_system, name): name
+                    for name in systems_to_run
+                }
+                for fut in as_completed(futures):
+                    name = futures[fut]
+                    try:
+                        result = fut.result()
+                    except Exception as e:
+                        _log(f"[{name}] ⚠️ {name}: シグナル抽出に失敗しました: {e}")
+                        _log(f"[{name}] ❌ {name}: 0 件 🚫")
+                        result = _SystemRunResult(
+                            name, pd.DataFrame(), None, {}, 0.0, None
+                        )
+                    _finalize_system_result(result)
+        else:
+            for name in systems_to_run:
+                result = _run_single_system(name)
+                _finalize_system_result(result)
+    else:
+        for system_name in system_names:
+            _handle_system_start(system_name)
+
+            strategy = strategies.get(system_name)
+            if strategy is None:
+                _log(f"[{system_name}] ❌ strategy not found")
+                per_system[system_name] = pd.DataFrame()
+                continue
+
+            # システム固有のロジック実行
+            if system_name == "system4" and spy_df is None:
+                _log(
+                    f"[{system_name}] ⚠️ System4 は SPY 指標が必要ですが SPY データがありません。スキップします。"
+                )
+                per_system[system_name] = pd.DataFrame()
+                continue
+
+            # 早期終了: セットアップ候補が0件の場合、高コストな処理をスキップ
+            if _setup_counts.get(system_name, -1) == 0:
+                _handle_setup_skip(system_name)
+                continue
+
+            result = _run_single_system(system_name)
+            _finalize_system_result(result)
     # 進捗通知
     if progress_callback:
         try:
@@ -5059,6 +5627,10 @@ def compute_today_signals(  # noqa: C901  # type: ignore[reportGeneralTypeIssues
         k: per_system.get(k, pd.DataFrame()) for k in order_1_7 if k in per_system
     }
     ctx.per_system_frames = dict(per_system)
+    try:
+        globals()["_LAST_PER_SYSTEM_FRAMES"] = dict(per_system)
+    except Exception:
+        pass
     # メトリクス概要計算
 
     # Phase 4測定終了
@@ -5343,8 +5915,164 @@ def compute_today_signals(  # noqa: C901  # type: ignore[reportGeneralTypeIssues
     except Exception:
         pass
 
+    # Phase5: Daily metrics CSV (per-system summary)
+    try:
+        _append_daily_metrics(
+            ctx,
+            per_system=per_system,
+            final_df=final_df,
+            allocation_summary=allocation_summary,
+        )
+    except Exception:
+        pass
+
     # 戻り値: final_df と AllocationSummary (呼び出し側で dict 化可能)
     return final_df, allocation_summary
+
+
+def _append_daily_metrics(
+    ctx: TodayRunContext,
+    *,
+    per_system: dict[str, pd.DataFrame],
+    final_df: pd.DataFrame,
+    allocation_summary: object,
+) -> None:
+    """Append per-system daily metrics to results_csv/daily_metrics.csv."""
+
+    try:
+        base_day = getattr(ctx, "signal_base_day", None) or getattr(ctx, "today", None)
+    except Exception:
+        base_day = None
+    if base_day is None:
+        return
+    try:
+        day_str = str(pd.Timestamp(base_day).date())
+    except Exception:
+        return
+
+    # Resolve results directory (test mode -> results_csv_test)
+    try:
+        if getattr(ctx, "test_mode", None):
+            results_dir = Path("results_csv_test")
+        else:
+            try:
+                results_dir = Path(ctx.settings.outputs.results_csv_dir)
+            except Exception:
+                results_dir = Path(getattr(ctx.settings, "RESULTS_DIR", "results_csv"))
+    except Exception:
+        results_dir = Path("results_csv")
+    try:
+        results_dir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+
+    # Build final counts (Entry)
+    final_counts: dict[str, int] = {}
+    try:
+        if hasattr(allocation_summary, "final_counts"):
+            raw = getattr(allocation_summary, "final_counts", {})
+            if isinstance(raw, dict):
+                final_counts = {str(k).strip().lower(): int(v) for k, v in raw.items()}
+    except Exception:
+        final_counts = {}
+    if not final_counts:
+        try:
+            if isinstance(final_df, pd.DataFrame) and not final_df.empty:
+                grp = (
+                    final_df["system"]
+                    .astype(str)
+                    .str.strip()
+                    .str.lower()
+                    .value_counts()
+                    .to_dict()
+                )
+                final_counts = {str(k): int(v) for k, v in grp.items()}
+        except Exception:
+            final_counts = {}
+
+    snapshots: dict[str, StageSnapshot] = {}
+    try:
+        snapshots = GLOBAL_STAGE_METRICS.all_snapshots()
+    except Exception:
+        snapshots = {}
+
+    rows: list[dict[str, object]] = []
+    for i in range(1, 8):
+        sys_name = f"system{i}"
+        snap = snapshots.get(sys_name)
+        pre = _safe_stage_int(getattr(snap, "filter_pass", None))
+        setup = _safe_stage_int(getattr(snap, "setup_pass", None))
+        cand = _safe_stage_int(getattr(snap, "candidate_count", None))
+        if cand == 0:
+            try:
+                df_sys = per_system.get(sys_name)
+                if df_sys is not None and not getattr(df_sys, "empty", True):
+                    cand = int(len(df_sys))
+            except Exception:
+                pass
+        entry = int(final_counts.get(sys_name, 0))
+        rows.append(
+            {
+                "date": day_str,
+                "system": sys_name,
+                "prefilter_pass": pre,
+                "setup_pass": setup,
+                "candidates": cand,
+                "entries": entry,
+            }
+        )
+
+    new_df = pd.DataFrame(rows)
+    out_path = results_dir / "daily_metrics.csv"
+    try:
+        existing = pd.read_csv(out_path)
+    except Exception:
+        existing = pd.DataFrame()
+
+    if not existing.empty:
+        try:
+            if "date" in existing.columns:
+                existing["date"] = pd.to_datetime(existing["date"], errors="coerce").dt.date
+                existing["date"] = existing["date"].astype(str)
+        except Exception:
+            pass
+        try:
+            if "system" in existing.columns:
+                mask = ~(
+                    (existing["date"] == day_str)
+                    & (existing["system"].astype(str).str.lower().isin([f"system{i}" for i in range(1, 8)]))
+                )
+                existing = existing.loc[mask]
+        except Exception:
+            pass
+
+    # Align columns (keep stable order, preserve any legacy columns)
+    preferred_cols = ["date", "system", "prefilter_pass", "setup_pass", "candidates", "entries"]
+    all_cols: list[str] = []
+    for col in preferred_cols:
+        if col not in all_cols:
+            all_cols.append(col)
+    for col in list(existing.columns):
+        if col not in all_cols:
+            all_cols.append(col)
+    for col in list(new_df.columns):
+        if col not in all_cols:
+            all_cols.append(col)
+
+    try:
+        combined = pd.concat([existing, new_df], ignore_index=True)
+    except Exception:
+        combined = new_df
+
+    try:
+        combined = combined.reindex(columns=all_cols)
+    except Exception:
+        pass
+
+    try:
+        combined.to_csv(out_path, index=False)
+    except Exception:
+        pass
 
 
 def _safe_stage_int(value: object | None) -> int:
@@ -6087,6 +6815,13 @@ def run_signal_pipeline(
         per_system_dict = (
             allocation_summary if isinstance(allocation_summary, dict) else {}
         )
+
+    # CLI経路で per_system が必要な場合は直近のフレームを参照
+    if not per_system_dict:
+        try:
+            per_system_dict = dict(globals().get("_LAST_PER_SYSTEM_FRAMES") or {})
+        except Exception:
+            per_system_dict = {}
 
     return final_df, per_system_dict
 

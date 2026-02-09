@@ -44,7 +44,11 @@ from common.system_candidates_utils import (
     prepare_ranking_input,
     set_diagnostics_after_ranking,
 )
-from common.system_common import check_precomputed_indicators, get_total_days
+from common.system_common import (
+    check_precomputed_indicators,
+    get_total_days,
+    slice_latest_rows,
+)
 from common.system_constants import SYSTEM3_REQUIRED_INDICATORS
 from common.system_setup_predicates import validate_predicate_equivalence
 from common.utils import get_cached_data
@@ -62,6 +66,19 @@ MIN_PRICE = 5.0  # Minimum closing price for filter
 MIN_DOLLAR_VOLUME_20 = 25_000_000  # Minimum 20-day dollar volume
 DEFAULT_ATR_RATIO_THRESHOLD = 0.05  # Default ATR ratio threshold (can be overridden)
 DROP_3D_THRESHOLD = 0.125  # 3-day drop threshold (12.5%)
+LATEST_ONLY_TAIL_ROWS = 5
+SYSTEM3_LATEST_ONLY_COLUMNS = (
+    "Open",
+    "High",
+    "Low",
+    "Close",
+    "Volume",
+    "atr10",
+    "dollarvolume20",
+    "atr_ratio",
+    "drop3d",
+    "sma150",
+)
 
 
 # ============================================================================
@@ -266,6 +283,7 @@ def prepare_data_vectorized_system3(
     Returns:
         Processed data dictionary
     """
+    latest_only = bool(kwargs.get("latest_only", False))
     # Fast path: reuse precomputed indicators
     if reuse_indicators and raw_data_dict:
         try:
@@ -278,7 +296,14 @@ def prepare_data_vectorized_system3(
                 # Apply System3-specific filters
                 prepared_dict = {}
                 for symbol, df in valid_data_dict.items():
-                    x = df.copy()
+                    if latest_only:
+                        x = slice_latest_rows(
+                            df,
+                            keep_columns=SYSTEM3_LATEST_ONLY_COLUMNS,
+                            tail_rows=LATEST_ONLY_TAIL_ROWS,
+                        )
+                    else:
+                        x = df.copy()
 
                     # Filter: Close>=5, DollarVolume20>25M,
                     # ATR_Ratio>=0.05 (test override allowed)
