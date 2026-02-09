@@ -1207,15 +1207,19 @@ def _send_exit_radar_notifications() -> None:
             f"{trailing_stop_price:.2f}" if trailing_stop_price is not None else "-"
         )
 
-        exit_price_text = "-"
+        trigger_parts: list[str] = []
+        if stop_price is not None:
+            op = ">=" if side == "short" else "<="
+            trigger_parts.append(f"stop{op}{stop_price:.2f}")
         if target_price is not None:
-            exit_price_text = f"target {target_price:.2f}"
-        elif trailing_stop_price is not None:
-            exit_price_text = f"trail {trailing_stop_price:.2f}"
-        elif stop_price is not None:
-            exit_price_text = f"stop {stop_price:.2f}"
-        elif exit_text and exit_text != "-":
-            exit_price_text = "close"
+            op = "<=" if side == "short" else ">="
+            trigger_parts.append(f"target{op}{target_price:.2f}")
+        if trailing_stop_price is not None:
+            op = ">=" if side == "short" else "<="
+            trigger_parts.append(f"trail{op}{trailing_stop_price:.2f}")
+        if exit_text and exit_text != "-":
+            trigger_parts.append(f"time {exit_text}")
+        exit_price_text = " / ".join(trigger_parts) if trigger_parts else "-"
 
         pnl_text = _format_unrealized(entry_price, current_price, qty, side)
         rows.append(
@@ -1238,12 +1242,39 @@ def _send_exit_radar_notifications() -> None:
 
     title = f"Exit Radar ・ {now_jst_str()}"
     summary = f"保有ポジション: {len(rows)}"
-    table = format_table(
-        rows,
-        headers=["Symbol", "Side", "Entry", "Stop", "Target", "Trail", "TimeExit", "ExitPx", "PnL"],
-        max_width=180,
-    )
-    message = summary + (f"\n{table}" if table else "")
+    format_mode = os.getenv("EXIT_RADAR_FORMAT", "compact").strip().lower()
+    if format_mode == "table":
+        table = format_table(
+            rows,
+            headers=[
+                "Symbol",
+                "Side",
+                "Entry",
+                "Stop",
+                "Target",
+                "Trail",
+                "TimeExit",
+                "Trigger",
+                "PnL",
+            ],
+            max_width=180,
+        )
+        message = summary + (f"\n{table}" if table else "")
+    else:
+        lines: list[str] = []
+        for row in rows:
+            symbol, side, entry, _stop, _target, _trail, _time_exit, trigger, pnl = row
+            side_label = "L" if side == "long" else ("S" if side == "short" else side)
+            base = f"{symbol} {side_label}"
+            if entry and entry != "-":
+                base = f"{base} entry {entry}"
+            if pnl and pnl != "-":
+                base = f"{base} pnl {pnl}"
+            lines.append(base)
+            trig = trigger if trigger and trigger != "-" else ""
+            if trig:
+                lines.append(f"  trigger {trig}")
+        message = summary + ("\n" + "\n".join(lines) if lines else "")
 
     if slack_ch:
         try:
