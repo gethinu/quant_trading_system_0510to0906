@@ -24,7 +24,6 @@ def _make_prepared(
 
 def test_system3_latest_only_parity_latest_day():
     dates = pd.date_range("2024-04-08", periods=4, freq="B")
-    latest = dates[-1]
     prepared = {
         # 最終日の drop3d: 0.50, 0.40, 0.30, 0.10 (<0.125 は除外)
         "AAA": _make_prepared("AAA", dates, [0.20, 0.25, 0.30, 0.50]),
@@ -38,19 +37,21 @@ def test_system3_latest_only_parity_latest_day():
         prepared, top_n=top_n, latest_only=True
     )
     assert fast_df is not None
+    assert fast_by_date
+    fast_latest_entry = max(fast_by_date.keys())
     full_by_date, full_df = generate_candidates_system3(
         prepared, top_n=top_n, latest_only=False
     )
-    assert full_df is not None and latest in full_by_date
+    assert full_df is not None and fast_latest_entry in full_by_date
 
-    fast_syms = list(fast_df[fast_df["date"] == latest]["symbol"])  # drop3d desc
-    full_syms = [r["symbol"] for r in full_by_date[latest]]
+    fast_syms = [r["symbol"] for r in fast_by_date[fast_latest_entry]]  # drop3d desc
+    full_syms = [r["symbol"] for r in full_by_date[fast_latest_entry]]
     expected = ["AAA", "BBB", "CCC"]  # 0.50 > 0.40 > 0.30
     assert fast_syms == expected
     assert full_syms == expected
 
-    fast_map = {r.symbol: r for r in fast_df.itertuples() if r.date == latest}
-    full_map = {r["symbol"]: r for r in full_by_date[latest]}
+    fast_map = {r["symbol"]: r for r in fast_by_date[fast_latest_entry]}
+    full_map = {r["symbol"]: r for r in full_by_date[fast_latest_entry]}
     for sym in expected:
-        assert float(fast_map[sym].drop3d) == float(full_map[sym]["drop3d"])
-        assert float(fast_map[sym].close) == float(full_map[sym]["close"])
+        assert float(fast_map[sym]["drop3d"]) == float(full_map[sym]["drop3d"])
+        assert float(fast_map[sym]["close"]) == float(full_map[sym]["close"])

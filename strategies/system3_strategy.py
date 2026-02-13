@@ -197,7 +197,17 @@ class System3Strategy(AlpacaOrderMixin, StrategyBase):
             return None
         prev_close = float(df.iloc[entry_idx - 1]["Close"])
         ratio = float(self.config.get("entry_price_ratio_vs_prev_close", 0.93))
-        entry_price = round(prev_close * ratio, 2)
+        limit_price = round(prev_close * ratio, 2)
+        # Limit-like entry: fill only if the entry day's Low reaches the limit.
+        try:
+            open_px = float(df.iloc[entry_idx]["Open"])
+            low_px = float(df.iloc[entry_idx]["Low"])
+        except Exception:
+            return None
+        if low_px > limit_price:
+            return None
+        # If open is more favorable than limit (gap down), assume fill at open.
+        entry_price = round(open_px if open_px <= limit_price else limit_price, 2)
         atr = None
         for col in ("atr10", "ATR10"):
             try:

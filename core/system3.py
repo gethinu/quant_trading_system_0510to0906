@@ -9,7 +9,7 @@
 #   - フロー: setup() → rank() → signals() の順序実行
 #
 # ロジック単位：
-#   setup()       → フィルター条件チェック（DollarVolume20>25M、atr_ratio>=0.05）
+#   setup()       → フィルター条件チェック（AvgVolume50>=1M、atr_ratio>=0.05）
 #   rank()        → drop3d の降順ランキング（下落度合い大きい順）
 #   signals()     → スコア付きシグナル抽出
 #
@@ -22,8 +22,8 @@
 """System3 core logic (Long mean-reversion).
 
 3-day drop mean-reversion strategy:
-- Indicators: atr10, dollarvolume20, atr_ratio, drop3d (precomputed only)
-- Setup conditions: Close>5, DollarVolume20>25M, atr_ratio>=0.05, drop3d>=0.125
+- Indicators: atr10, avgvolume50, atr_ratio, drop3d, sma150 (precomputed only)
+- Setup conditions: Close>=1, AvgVolume50>=1M, atr_ratio>=0.05, Close>SMA150, drop3d>=0.125
 - Candidate generation: drop3d descending ranking by date, extract top_n
 - Optimization: Removed all indicator calculations, using precomputed indicators only
 
@@ -62,8 +62,8 @@ except Exception:  # フォールバック
 # ============================================================================
 # System3 Strategy Constants
 # ============================================================================
-MIN_PRICE = 5.0  # Minimum closing price for filter
-MIN_DOLLAR_VOLUME_20 = 25_000_000  # Minimum 20-day dollar volume
+MIN_PRICE = 1.0  # Minimum closing price for filter
+MIN_AVG_VOLUME_50 = 1_000_000  # Minimum 50-day average volume
 DEFAULT_ATR_RATIO_THRESHOLD = 0.05  # Default ATR ratio threshold (can be overridden)
 DROP_3D_THRESHOLD = 0.125  # 3-day drop threshold (12.5%)
 LATEST_ONLY_TAIL_ROWS = 5
@@ -74,7 +74,7 @@ SYSTEM3_LATEST_ONLY_COLUMNS = (
     "Close",
     "Volume",
     "atr10",
-    "dollarvolume20",
+    "avgvolume50",
     "atr_ratio",
     "drop3d",
     "sma150",
@@ -87,12 +87,12 @@ SYSTEM3_LATEST_ONLY_COLUMNS = (
 def _apply_filter_conditions(
     df: pd.DataFrame, atr_threshold: float = DEFAULT_ATR_RATIO_THRESHOLD
 ) -> pd.DataFrame:
-    """Apply System3 filter: Close>=MIN_PRICE, DollarVolume20>MIN, ATR>=threshold.
+    """Apply System3 filter: Close>=MIN_PRICE, AvgVolume50>=MIN, ATR>=threshold.
 
     Preserves existing 'filter' column if present for test compatibility.
 
     Args:
-        df: DataFrame with required columns (Close, dollarvolume20, atr_ratio)
+        df: DataFrame with required columns (Close, avgvolume50, atr_ratio)
         atr_threshold: ATR ratio threshold (default: DEFAULT_ATR_RATIO_THRESHOLD)
 
     Returns:
@@ -111,13 +111,13 @@ def _apply_filter_conditions(
         _close = pd.Series(0.0, index=x.index)
 
     try:
-        _val_dvol = x.get("dollarvolume20")
-        if _val_dvol is None:
-            _dvol = pd.Series(0.0, index=x.index)
+        _val_avgvol = x.get("avgvolume50")
+        if _val_avgvol is None:
+            _avgvol = pd.Series(0.0, index=x.index)
         else:
-            _dvol = pd.to_numeric(_val_dvol, errors="coerce").fillna(0.0)
+            _avgvol = pd.to_numeric(_val_avgvol, errors="coerce").fillna(0.0)
     except Exception:
-        _dvol = pd.Series(0.0, index=x.index)
+        _avgvol = pd.Series(0.0, index=x.index)
 
     try:
         _val_atr = x.get("atr_ratio")
@@ -130,7 +130,7 @@ def _apply_filter_conditions(
 
     computed_filter = (
         (_close >= MIN_PRICE)
-        & (_dvol > MIN_DOLLAR_VOLUME_20)
+        & (_avgvol >= MIN_AVG_VOLUME_50)
         & (_atr_ratio >= atr_threshold)
     ).fillna(False)
 
@@ -143,12 +143,12 @@ def _apply_filter_conditions(
 
 
 def _apply_setup_conditions(df: pd.DataFrame) -> pd.DataFrame:
-    """Apply System3 setup conditions: filter & drop3d>=DROP_3D_THRESHOLD.
+    """Apply System3 setup conditions.
 
     Preserves existing 'setup' column if present for test compatibility.
 
     Args:
-        df: DataFrame with 'filter' and 'drop3d' columns
+        df: DataFrame with 'filter', 'Close', 'sma150', and 'drop3d' columns
 
     Returns:
         DataFrame with 'setup' boolean column added/updated
@@ -164,8 +164,29 @@ def _apply_setup_conditions(df: pd.DataFrame) -> pd.DataFrame:
     except Exception:
         _drop3d = pd.Series(dtype=float, index=x.index)
 
+    try:
+        _val_close = x.get("Close")
+        if _val_close is None:
+            _close = pd.Series(0.0, index=x.index)
+        else:
+            _close = pd.to_numeric(_val_close, errors="coerce")
+    except Exception:
+        _close = pd.Series(0.0, index=x.index)
+
+    try:
+        _val_sma150 = x.get("sma150")
+        if _val_sma150 is None:
+            _sma150 = pd.Series(0.0, index=x.index)
+        else:
+            _sma150 = pd.to_numeric(_val_sma150, errors="coerce")
+    except Exception:
+        _sma150 = pd.Series(0.0, index=x.index)
+
     computed_setup = (
-        x["filter"].astype(bool) & (~_drop3d.isna()) & (_drop3d >= DROP_3D_THRESHOLD)
+        x["filter"].astype(bool)
+        & (_close > _sma150)
+        & (~_drop3d.isna())
+        & (_drop3d >= DROP_3D_THRESHOLD)
     ).fillna(False)
 
     if "setup" in x.columns:
@@ -219,6 +240,24 @@ def _compute_indicators(symbol: str) -> tuple[str, pd.DataFrame | None]:
                     df = df.rename(columns=rename_map)
                 except Exception:
                     pass
+        except Exception:
+            pass
+
+        # Conservative fallbacks for missing precomputed columns.
+        try:
+            if "avgvolume50" not in df.columns and "Volume" in df.columns:
+                vol = pd.to_numeric(df["Volume"], errors="coerce")
+                df = df.copy()
+                df["avgvolume50"] = vol.rolling(50, min_periods=1).mean()
+            if (
+                "atr_ratio" not in df.columns
+                and "atr10" in df.columns
+                and "Close" in df.columns
+            ):
+                atr10 = pd.to_numeric(df["atr10"], errors="coerce")
+                close = pd.to_numeric(df["Close"], errors="coerce")
+                df = df.copy()
+                df["atr_ratio"] = atr10 / close
         except Exception:
             pass
 
@@ -305,7 +344,7 @@ def prepare_data_vectorized_system3(
                     else:
                         x = df.copy()
 
-                    # Filter: Close>=5, DollarVolume20>25M,
+                    # Filter: Close>=1, AvgVolume50>=1M,
                     # ATR_Ratio>=0.05 (test override allowed)
                     _atr_thr = 0.05
                     try:
@@ -315,14 +354,8 @@ def prepare_data_vectorized_system3(
                                 _atr_thr = float(_env.min_atr_ratio_for_test)
                     except Exception:
                         _atr_thr = 0.05
-                    # Build filter mask in steps to avoid too-long expressions
-                    close_ok = x["Close"] >= 5.0
-                    vol_ok = x["dollarvolume20"] > 25_000_000
-                    atr_ok = x["atr_ratio"] >= _atr_thr
-                    x["filter"] = close_ok & vol_ok & atr_ok
-
-                    # Setup: Filter + drop3d>=0.125 (12.5% 3-day drop)
-                    x["setup"] = x["filter"] & (x["drop3d"] >= 0.125)
+                    x = _apply_filter_conditions(x, atr_threshold=_atr_thr)
+                    x = _apply_setup_conditions(x)
 
                     prepared_dict[symbol] = x
 
@@ -873,8 +906,8 @@ def generate_candidates_system3(
             # Compute simple filter-level counts from the latest row per symbol
             try:
                 filter_counts: dict[str, int] = {
-                    "close_lt_5": 0,
-                    "dvol_le_25m": 0,
+                    "close_lt_1": 0,
+                    "avgvol50_lt_1m": 0,
                     "atr_ratio_lt_thr": 0,
                     "drop3d_nan": 0,
                 }
@@ -889,17 +922,17 @@ def generate_candidates_system3(
                         # Close
                         try:
                             c = float(s_last.get("Close", float("nan")))
-                            if c < 5.0:
-                                filter_counts["close_lt_5"] += 1
+                            if c < 1.0:
+                                filter_counts["close_lt_1"] += 1
                         except Exception:
-                            filter_counts["close_lt_5"] += 1
-                        # Dollar volume
+                            filter_counts["close_lt_1"] += 1
+                        # Average volume
                         try:
-                            dv = float(s_last.get("dollarvolume20", float("nan")))
-                            if dv <= 25_000_000:
-                                filter_counts["dvol_le_25m"] += 1
+                            av50 = float(s_last.get("avgvolume50", float("nan")))
+                            if av50 < 1_000_000:
+                                filter_counts["avgvol50_lt_1m"] += 1
                         except Exception:
-                            filter_counts["dvol_le_25m"] += 1
+                            filter_counts["avgvol50_lt_1m"] += 1
                         # ATR ratio
                         try:
                             av = float(s_last.get("atr_ratio", float("nan")))
@@ -1390,26 +1423,35 @@ def generate_candidates_system3(
                 msg = left + right
                 log_callback(msg)
 
-        # Build per-date list of candidate dicts (public API expectation)
+        # Build per-entry-date list of candidate dicts (public API expectation)
+        # - candidates_by_date keys represent "entry_date" (next NYSE trading day)
+        # - candidate["date"] keeps the original signal date for traceability
         by_date_list: dict[pd.Timestamp, list[dict[str, Any]]] = {}
         if not df_public.empty:
-            for dt_raw, sub in df_public.groupby("date"):
-                dt = pd.Timestamp(str(dt_raw))
+            group_col = "entry_date" if "entry_date" in df_public.columns else "date"
+            for key_raw, sub in df_public.groupby(group_col):
+                key_dt = pd.Timestamp(str(key_raw)).normalize()
+                if pd.isna(key_dt):
+                    continue
                 sub_sorted = sub.sort_values("drop3d", ascending=False, kind="stable")
-                by_date_list[dt] = []
+                by_date_list[key_dt] = []
                 for rec in sub_sorted.to_dict("records"):
+                    sig_dt_raw = rec.get("date")
+                    try:
+                        sig_dt = pd.Timestamp(str(sig_dt_raw)).normalize()
+                    except Exception:
+                        sig_dt = key_dt
                     item: dict[str, Any] = {
                         "symbol": rec.get("symbol"),
-                        "date": dt,
+                        "date": sig_dt,
+                        "entry_date": key_dt,
                         "drop3d": rec.get("drop3d"),
                         "atr_ratio": rec.get("atr_ratio"),
                         "close": rec.get("close"),
                     }
-                    if "entry_date" in rec:
-                        item["entry_date"] = rec.get("entry_date")
                     if "atr10" in rec:
                         item["atr10"] = rec.get("atr10")
-                    by_date_list[dt].append(item)
+                    by_date_list[key_dt].append(item)
 
         if log_callback:
             msg = (
@@ -1438,6 +1480,7 @@ def generate_candidates_system3(
     all_dates = sorted(all_dates_set)
 
     candidates_by_date: dict[pd.Timestamp, list[dict[str, Any]]] = {}
+    entry_date_cache: dict[pd.Timestamp, pd.Timestamp] = {}
     all_candidates: list[dict[str, Any]] = []
 
     if log_callback:
@@ -1445,6 +1488,18 @@ def generate_candidates_system3(
 
     # Execute drop3d ranking by date
     for i, date in enumerate(all_dates):
+        sig_dt = pd.Timestamp(date).normalize()
+        entry_dt = entry_date_cache.get(sig_dt)
+        if entry_dt is None:
+            try:
+                from common.utils_spy import resolve_signal_entry_date
+
+                entry_dt = resolve_signal_entry_date(sig_dt)
+            except Exception:
+                entry_dt = pd.NaT
+            entry_date_cache[sig_dt] = entry_dt
+        if entry_dt is None or pd.isna(entry_dt):
+            continue
         date_candidates: list[dict[str, Any]] = []
         for symbol, df in prepared_dict.items():
             try:
@@ -1474,7 +1529,8 @@ def generate_candidates_system3(
                 date_candidates.append(
                     {
                         "symbol": symbol,
-                        "date": date,
+                        "date": sig_dt,
+                        "entry_date": entry_dt,
                         "drop3d": drop3d_val,
                         "atr_ratio": row.get("atr_ratio", 0),
                         "close": row.get("Close", 0),
@@ -1489,7 +1545,7 @@ def generate_candidates_system3(
             date_candidates.sort(key=lambda x: x["drop3d"], reverse=True)
             top_candidates = date_candidates[:top_n]
 
-            candidates_by_date[date] = top_candidates
+            candidates_by_date.setdefault(entry_dt, []).extend(top_candidates)
             all_candidates.extend(top_candidates)
 
         # Progress reporting
@@ -1500,6 +1556,13 @@ def generate_candidates_system3(
     if all_candidates:
         candidates_df = pd.DataFrame(all_candidates)
         candidates_df["date"] = pd.to_datetime(candidates_df["date"])
+        try:
+            if "entry_date" in candidates_df.columns:
+                candidates_df["entry_date"] = pd.to_datetime(
+                    candidates_df["entry_date"]
+                )
+        except Exception:
+            pass
         candidates_df = candidates_df.sort_values(
             ["date", "drop3d"], ascending=[True, False]
         )

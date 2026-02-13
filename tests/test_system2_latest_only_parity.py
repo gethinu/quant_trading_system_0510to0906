@@ -22,7 +22,6 @@ def _make_prepared(
 
 def test_system2_latest_only_parity_latest_day():
     dates = pd.date_range("2024-02-05", periods=4, freq="B")
-    latest = dates[-1]
     prepared = {
         "AAA": _make_prepared("AAA", dates, [5, 10, 15, 40]),
         "BBB": _make_prepared("BBB", dates, [3, 8, 12, 30]),
@@ -37,22 +36,21 @@ def test_system2_latest_only_parity_latest_day():
         prepared, top_n=top_n, latest_only=True
     )
     assert fast_df is not None
+    assert fast_by_date
+    fast_latest_entry = max(fast_by_date.keys())
     full_by_date, full_df = generate_candidates_system2(
         prepared, top_n=top_n, latest_only=False
     )
-    assert full_df is not None and latest in full_by_date
+    assert full_df is not None and fast_latest_entry in full_by_date
 
-    fast_syms = list(
-        fast_df[fast_df["date"] == latest]["symbol"]
-    )  # ranking desc by adx7
-    # full_by_date は {date: {symbol: payload}} 正規化済み
-    full_syms = list(full_by_date[latest].keys())
+    fast_syms = list(fast_by_date[fast_latest_entry].keys())  # ranking desc by adx7
+    full_syms = list(full_by_date[fast_latest_entry].keys())
     expected = ["AAA", "BBB", "CCC"]  # 40 > 30 > 25
     assert fast_syms == expected
     assert full_syms == expected
 
-    fast_map = {r.symbol: r for r in fast_df.itertuples() if r.date == latest}
-    full_map = full_by_date[latest]
+    fast_map = fast_by_date[fast_latest_entry]
+    full_map = full_by_date[fast_latest_entry]
     for sym in expected:
-        assert float(fast_map[sym].adx7) == float(full_map[sym]["adx7"])  # type: ignore[index]
-        assert float(fast_map[sym].close) == float(full_map[sym]["close"])  # type: ignore[index]
+        assert float(fast_map[sym]["adx7"]) == float(full_map[sym]["adx7"])  # type: ignore[index]
+        assert float(fast_map[sym]["close"]) == float(full_map[sym]["close"])  # type: ignore[index]

@@ -491,6 +491,73 @@ class System7Strategy(AlpacaOrderMixin, StrategyBase):
             return None
         return entry_price, stop_price
 
+    def compute_exit(
+        self,
+        df: pd.DataFrame,
+        entry_idx: int,
+        _entry_price: float,
+        stop_price: float,
+    ) -> tuple[float, pd.Timestamp]:
+        """
+        System7 の出口ロジック（ショート）:
+        - 損切り: 当日 High >= stop_price で当日 stop 決済
+        - 利確: 当日 High >= max_70 で翌営業日 Open 決済
+        - フォールバック: 最終営業日 Close 決済
+        """
+        if df is None or df.empty:
+            raise ValueError("System7 compute_exit requires non-empty price data")
+
+        n = len(df)
+        if n <= 0:
+            raise ValueError("System7 compute_exit requires non-empty price data")
+
+        try:
+            idx0 = int(entry_idx)
+        except Exception:
+            idx0 = 0
+        idx0 = max(0, min(idx0, n - 1))
+
+        max70_col = "max_70" if "max_70" in df.columns else "Max_70"
+        has_max70 = max70_col in df.columns
+
+        for idx2 in range(idx0 + 1, n):
+            row = df.iloc[idx2]
+            try:
+                high_px = float(row["High"])
+            except Exception:
+                continue
+
+            # Stop has priority over profit exit.
+            if high_px >= float(stop_price):
+                return float(stop_price), pd.Timestamp(df.index[idx2])
+
+            max70_val = None
+            if has_max70:
+                try:
+                    max70_val = float(row[max70_col])
+                except Exception:
+                    max70_val = None
+
+            if max70_val is None or not math.isfinite(max70_val):
+                # Fallback if indicator column is missing/invalid on this row.
+                try:
+                    start = max(0, idx2 - 69)
+                    max70_val = float(pd.to_numeric(df["High"].iloc[start : idx2 + 1]).max())
+                except Exception:
+                    max70_val = None
+
+            if max70_val is not None and math.isfinite(max70_val):
+                if high_px >= max70_val:
+                    exit_idx = min(idx2 + 1, n - 1)
+                    try:
+                        exit_price = float(df.iloc[exit_idx]["Open"])
+                    except Exception:
+                        exit_price = float(df.iloc[exit_idx]["Close"])
+                    return exit_price, pd.Timestamp(df.index[exit_idx])
+
+        last_idx = n - 1
+        return float(df.iloc[last_idx]["Close"]), pd.Timestamp(df.index[last_idx])
+
     def prepare_minimal_for_test(self, raw_data_dict: dict) -> dict:
         out: dict = {}
         for sym, df in raw_data_dict.items():
@@ -508,5 +575,7 @@ class System7Strategy(AlpacaOrderMixin, StrategyBase):
             out[sym] = x
         return out
 
-    def get_total_days(self, data_dict: dict) -> int:
-        return int(get_total_days_system7(data_dict))
+    def get_total_days(self, data_dict: dict | None = None) -> int:
+        # Keep backward compatibility with older tests/callers that invoke
+        # get_total_days() without arguments.
+        return int(get_total_days_system7(data_dict or {}))

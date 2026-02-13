@@ -324,14 +324,15 @@ def test_entry_rule_limit_buy():
         {
             "Open": [100, 100],
             "High": [101, 101],
-            "Low": [99, 99],
+            # Limit buy at 0.97 * prev_close (=97.0) should fill only if Low touches it
+            "Low": [99, 97],
             "Close": [100, 100],
             "ATR10": [1, 1],
         },
         index=dates,
     )
     candidate = {"symbol": "DUMMY", "entry_date": dates[1]}
-    entry = strategy.compute_entry(df, candidate, current_capital=10_000)
+    entry = strategy.compute_entry(df, candidate, 10_000)
     assert entry == (97.0, pytest.approx(94.0))
 
 
@@ -342,7 +343,8 @@ def test_system5_profit_target_exits_next_open():
         {
             "Open": [100, 100, 110, 120, 120],
             "High": [100, 101, 100, 121, 121],
-            "Low": [99, 99, 95, 119, 119],
+            # Ensure entry-day Low touches the limit (97.0)
+            "Low": [99, 97, 95, 119, 119],
             "Close": [100, 100, 99, 120, 120],
             "ATR10": [1, 1, 1, 1, 1],
         },
@@ -367,7 +369,8 @@ def test_system5_stop_exit_uses_stop_price_same_day():
         {
             "Open": [100, 100, 100, 100],
             "High": [100, 101, 98, 100],
-            "Low": [99, 99, 90, 100],
+            # Ensure entry-day Low touches the limit (97.0)
+            "Low": [99, 97, 90, 100],
             "Close": [100, 100, 95, 100],
             "ATR10": [1, 1, 1, 1],
         },

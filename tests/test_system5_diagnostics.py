@@ -11,6 +11,29 @@ import pandas as pd
 from core.system5 import generate_candidates_system5
 
 
+def _make_system5_ready_df(
+    *,
+    dates: list[pd.Timestamp],
+    adx7_values: list[float],
+    setup: bool = True,
+) -> pd.DataFrame:
+    assert len(dates) == len(adx7_values)
+    return pd.DataFrame(
+        {
+            "Close": [120.0] * len(dates),
+            "adx7": adx7_values,
+            "atr_pct": [0.06] * len(dates),
+            "atr10": [2.0] * len(dates),
+            "sma100": [100.0] * len(dates),
+            "rsi3": [40.0] * len(dates),
+            "avgvolume50": [800_000.0] * len(dates),
+            "dollarvolume50": [15_000_000.0] * len(dates),
+            "setup": [setup] * len(dates),
+        },
+        index=dates,
+    )
+
+
 class TestSystem5DiagnosticsConsistency:
     """System5の診断整合性テスト群。"""
 
@@ -18,14 +41,9 @@ class TestSystem5DiagnosticsConsistency:
         """基本不変条件: STUpass >= TRDlist が常に成立。"""
         # Given: 10件のセットアップ通過データ
         prepared_dict = {
-            f"SYM{i:03d}": pd.DataFrame(
-                {
-                    "Close": [10.0],
-                    "adx7": [40.0 + i * 5],  # 40, 45, 50, ...
-                    "atr_pct": [0.03],
-                    "atr10": [0.5],
-                },
-                index=[pd.Timestamp("2025-01-01")],
+            f"SYM{i:03d}": _make_system5_ready_df(
+                dates=[pd.Timestamp("2025-01-01")],
+                adx7_values=[60.0 + i],  # 全件 ADX>55
             )
             for i in range(10)
         }
@@ -49,14 +67,9 @@ class TestSystem5DiagnosticsConsistency:
         """重複ランキングが発生しないこと - ユニーク銘柄の検証。"""
         # Given: 5件のユニーク銘柄
         prepared_dict = {
-            f"SYM{i:03d}": pd.DataFrame(
-                {
-                    "Close": [10.0],
-                    "adx7": [40.0 + i * 5],
-                    "atr_pct": [0.03],
-                    "atr10": [0.5],
-                },
-                index=[pd.Timestamp("2025-01-01")],
+            f"SYM{i:03d}": _make_system5_ready_df(
+                dates=[pd.Timestamp("2025-01-01")],
+                adx7_values=[60.0 + i],
             )
             for i in range(5)
         }
@@ -82,14 +95,9 @@ class TestSystem5DiagnosticsConsistency:
         """setup_unique_symbols が正しくトラッキングされること。"""
         # Given: 8件の銘柄
         prepared_dict = {
-            f"SYM{i:03d}": pd.DataFrame(
-                {
-                    "Close": [10.0],
-                    "adx7": [50.0],
-                    "atr_pct": [0.03],
-                    "atr10": [0.5],
-                },
-                index=[pd.Timestamp("2025-01-01")],
+            f"SYM{i:03d}": _make_system5_ready_df(
+                dates=[pd.Timestamp("2025-01-01")],
+                adx7_values=[60.0],
             )
             for i in range(8)
         }
@@ -113,14 +121,9 @@ class TestSystem5DiagnosticsConsistency:
         """top_n_requested が診断情報に記録されること。"""
         # Given: 5件の銘柄
         prepared_dict = {
-            f"SYM{i:03d}": pd.DataFrame(
-                {
-                    "Close": [10.0],
-                    "adx7": [45.0],
-                    "atr_pct": [0.03],
-                    "atr10": [0.5],
-                },
-                index=[pd.Timestamp("2025-01-01")],
+            f"SYM{i:03d}": _make_system5_ready_df(
+                dates=[pd.Timestamp("2025-01-01")],
+                adx7_values=[61.0],
             )
             for i in range(5)
         }
@@ -143,14 +146,9 @@ class TestSystem5DiagnosticsConsistency:
         """候補不足時の正しい処理。"""
         # Given: 3件の銘柄（top_n=10未満）
         prepared_dict = {
-            f"SYM{i:03d}": pd.DataFrame(
-                {
-                    "Close": [10.0],
-                    "adx7": [40.0 + i * 5],
-                    "atr_pct": [0.03],
-                    "atr10": [0.5],
-                },
-                index=[pd.Timestamp("2025-01-01")],
+            f"SYM{i:03d}": _make_system5_ready_df(
+                dates=[pd.Timestamp("2025-01-01")],
+                adx7_values=[62.0 + i],
             )
             for i in range(3)
         }
@@ -174,14 +172,10 @@ class TestSystem5DiagnosticsConsistency:
         """エッジケース: セットアップ通過候補がゼロ。"""
         # Given: セットアップ条件を満たさないデータ
         prepared_dict = {
-            f"SYM{i:03d}": pd.DataFrame(
-                {
-                    "Close": [3.0],  # < 5.0
-                    "adx7": [30.0],  # < 35.0
-                    "atr_pct": [0.01],  # < 0.025
-                    "atr10": [0.5],
-                },
-                index=[pd.Timestamp("2025-01-01")],
+            f"SYM{i:03d}": _make_system5_ready_df(
+                dates=[pd.Timestamp("2025-01-01")],
+                adx7_values=[30.0],
+                setup=False,
             )
             for i in range(5)
         }
@@ -206,14 +200,9 @@ class TestSystem5DiagnosticsConsistency:
         """境界ケース: 候補数がちょうど top_n と一致。"""
         # Given: 12件の銘柄
         prepared_dict = {
-            f"SYM{i:03d}": pd.DataFrame(
-                {
-                    "Close": [10.0],
-                    "adx7": [40.0 + i * 2],
-                    "atr_pct": [0.03],
-                    "atr10": [0.5],
-                },
-                index=[pd.Timestamp("2025-01-01")],
+            f"SYM{i:03d}": _make_system5_ready_df(
+                dates=[pd.Timestamp("2025-01-01")],
+                adx7_values=[60.0 + i],
             )
             for i in range(12)
         }
@@ -237,18 +226,13 @@ class TestSystem5DiagnosticsConsistency:
         """複数日付データでlatest_onlyが最終日のみを使うことを検証。"""
         # Given: 複数日付を持つ銘柄（latest_only=True なので最終日のみ）
         prepared_dict = {
-            f"SYM{i:03d}": pd.DataFrame(
-                {
-                    "Close": [10.0, 11.0, 12.0],
-                    "adx7": [40.0, 45.0, 50.0],
-                    "atr_pct": [0.03, 0.03, 0.03],
-                    "atr10": [0.5, 0.5, 0.5],
-                },
-                index=[
+            f"SYM{i:03d}": _make_system5_ready_df(
+                dates=[
                     pd.Timestamp("2025-01-01"),
                     pd.Timestamp("2025-01-02"),
                     pd.Timestamp("2025-01-03"),
                 ],
+                adx7_values=[58.0, 59.0, 60.0],
             )
             for i in range(5)
         }

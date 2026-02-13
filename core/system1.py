@@ -24,7 +24,7 @@
 
 ROC200-based momentum strategy:
 - Indicators: ROC200, SMA200, DollarVolume20 (precomputed only)
-- Setup conditions: Close>5, DollarVolume20>50M, Close>SMA200, ROC200>0
+- Setup conditions: Close>=5, DollarVolume20>50M, SMA25>SMA50
 - Candidate generation: ROC200 descending ranking by date, extract top_n
 - Optimization: Removed all indicator calculations, using precomputed indicators only
 """
@@ -52,7 +52,6 @@ from strategies.constants import STOP_ATR_MULTIPLE_SYSTEM1
 # ============================================================================
 MIN_PRICE = 5.0  # Minimum stock price for filter
 MIN_DOLLAR_VOLUME_20 = 50_000_000  # Minimum 20-day dollar volume
-MIN_ROC200 = 0.0  # Minimum ROC200 for momentum confirmation
 
 
 # ============================================================================
@@ -95,12 +94,12 @@ def _apply_filter_conditions(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _apply_setup_conditions(df: pd.DataFrame) -> pd.DataFrame:
-    """Apply System1 setup: filter & Close>SMA200 & ROC200>MIN_ROC200.
+    """Apply System1 setup: filter & SMA25>SMA50.
 
     Preserves existing 'setup' column if present for test compatibility.
 
     Args:
-        df: DataFrame with filter, Close, sma200, roc200 columns
+        df: DataFrame with filter, sma25, sma50 columns
 
     Returns:
         DataFrame with 'setup' boolean column added/updated
@@ -119,33 +118,24 @@ def _apply_setup_conditions(df: pd.DataFrame) -> pd.DataFrame:
 
     # Coerce numeric columns
     try:
-        _val_close = x.get("Close")
-        if _val_close is None:
-            _close = pd.Series(0.0, index=x.index)
+        _val_sma25 = x.get("sma25")
+        if _val_sma25 is None:
+            _sma25 = pd.Series(0.0, index=x.index)
         else:
-            _close = pd.to_numeric(_val_close, errors="coerce").fillna(0.0)
+            _sma25 = pd.to_numeric(_val_sma25, errors="coerce").fillna(0.0)
     except Exception:
-        _close = pd.Series(0.0, index=x.index)
+        _sma25 = pd.Series(0.0, index=x.index)
 
     try:
-        _val_sma = x.get("sma200")
-        if _val_sma is None:
-            _sma = pd.Series(0.0, index=x.index)
+        _val_sma50 = x.get("sma50")
+        if _val_sma50 is None:
+            _sma50 = pd.Series(0.0, index=x.index)
         else:
-            _sma = pd.to_numeric(_val_sma, errors="coerce").fillna(0.0)
+            _sma50 = pd.to_numeric(_val_sma50, errors="coerce").fillna(0.0)
     except Exception:
-        _sma = pd.Series(0.0, index=x.index)
+        _sma50 = pd.Series(0.0, index=x.index)
 
-    try:
-        _val_roc = x.get("roc200")
-        if _val_roc is None:
-            _roc = pd.Series(0.0, index=x.index)
-        else:
-            _roc = pd.to_numeric(_val_roc, errors="coerce").fillna(0.0)
-    except Exception:
-        _roc = pd.Series(0.0, index=x.index)
-
-    x["setup"] = _filter & (_close > _sma) & (_roc > MIN_ROC200)
+    x["setup"] = _filter & (_sma25 > _sma50)
     return x
 
 
@@ -302,11 +292,10 @@ def _to_float(value: Any) -> float:
 def system1_row_passes_setup(
     row: pd.Series, *, allow_fallback: bool = True
 ) -> tuple[bool, dict[str, bool], str | None]:
-    """System1 setup evaluation using SMA trend and ROC200.
+    """System1 setup evaluation using SMA trend.
 
     Conditions:
     - SMA trend: SMA25 > SMA50 (individual stock condition)
-    - ROC200 > 0 (momentum confirmation)
 
     Note: Market condition (SPY > SMA100) is checked at orchestrator level,
     not within this function. Phase 2 filter (Price>=5, DV20>=50M) is assumed
@@ -327,17 +316,15 @@ def system1_row_passes_setup(
     sma50 = _to_float(row.get("sma50"))
     sma_trend_ok = not math.isnan(sma25) and not math.isnan(sma50) and sma25 > sma50
 
-    # ROC200 momentum condition
+    # ROC200 is ranking metric (not setup condition)
     roc200_val = _to_float(row.get("roc200"))
     roc200_positive = not math.isnan(roc200_val) and roc200_val > 0
 
     # Combined evaluation
-    passes = sma_trend_ok and roc200_positive
+    passes = sma_trend_ok
     reason: str | None = None
     if not sma_trend_ok:
         reason = "sma_trend"
-    elif not roc200_positive:
-        reason = "roc200"
 
     flags = {
         "sma_trend_ok": sma_trend_ok,
@@ -1499,17 +1486,21 @@ def generate_candidates_system1(
             # Build by_date structure
             by_date: dict[pd.Timestamp, dict[str, dict]] = {}
             for _, row in df_all.iterrows():
-                dt = row.get("date")
-                if pd.isna(dt):
+                sig_dt_raw = row.get("date")
+                entry_dt_raw = row.get("entry_date")
+                if pd.isna(sig_dt_raw) or pd.isna(entry_dt_raw):
                     continue
-                dt_norm = pd.Timestamp(str(dt)).normalize()
-                if dt_norm not in by_date:
-                    by_date[dt_norm] = {}
+                sig_dt = pd.Timestamp(str(sig_dt_raw)).normalize()
+                entry_dt = pd.Timestamp(str(entry_dt_raw)).normalize()
+                if pd.isna(entry_dt):
+                    continue
+                if entry_dt not in by_date:
+                    by_date[entry_dt] = {}
                 sym = str(row.get("symbol", ""))
-                by_date[dt_norm][sym] = {
+                by_date[entry_dt][sym] = {
                     "symbol": sym,
-                    "date": dt_norm,
-                    "entry_date": row.get("entry_date"),
+                    "date": sig_dt,
+                    "entry_date": entry_dt,
                     "roc200": row.get("roc200", 0.0),
                     "close": row.get("close", 0.0),
                     "setup": bool(row.get("setup", False)),
@@ -1551,6 +1542,7 @@ def generate_candidates_system1(
 
     # mypy/py311 での var-annotated 誤検出を避けるため、明示型の空 dict を生成
     candidates_by_date: dict[pd.Timestamp, list[dict[str, object]]] = {}
+    entry_date_cache: dict[pd.Timestamp, pd.Timestamp] = {}
     all_candidates: list[dict] = []
 
     diag_target_date = all_dates[-1]
@@ -1558,6 +1550,18 @@ def generate_candidates_system1(
         log_callback(f"System1: Generating candidates for {len(all_dates)} dates")
 
     for i, date in enumerate(all_dates):
+        sig_dt = pd.Timestamp(date).normalize()
+        entry_dt = entry_date_cache.get(sig_dt)
+        if entry_dt is None:
+            try:
+                from common.utils_spy import resolve_signal_entry_date
+
+                entry_dt = resolve_signal_entry_date(sig_dt)
+            except Exception:
+                entry_dt = pd.NaT
+            entry_date_cache[sig_dt] = entry_dt
+        if entry_dt is None or pd.isna(entry_dt):
+            continue
         date_candidates: list[dict] = []
 
         for symbol, df in prepared_dict.items():
@@ -1639,7 +1643,7 @@ def generate_candidates_system1(
                 continue
 
             roc200_val = _to_float(row.get("roc200"))
-            if pd.isna(roc200_val) or roc200_val <= 0:
+            if pd.isna(roc200_val):
                 continue
 
             close_val = _to_float(row.get("Close", 0))
@@ -1648,12 +1652,8 @@ def generate_candidates_system1(
             date_candidates.append(
                 {
                     "symbol": symbol,
-                    "date": date,
-                    "entry_date": (
-                        __import__(
-                            "common.utils_spy", fromlist=["resolve_signal_entry_date"]
-                        ).resolve_signal_entry_date(date)
-                    ),
+                    "date": sig_dt,
+                    "entry_date": entry_dt,
                     "roc200": roc200_val,
                     "close": 0.0 if math.isnan(close_val) else close_val,
                     "sma200": 0.0 if math.isnan(sma200_val) else sma200_val,
@@ -1663,7 +1663,7 @@ def generate_candidates_system1(
         if date_candidates:
             date_candidates.sort(key=lambda x: x["roc200"], reverse=True)
             top_candidates = date_candidates[:resolved_top_n]
-            candidates_by_date[date] = top_candidates
+            candidates_by_date.setdefault(entry_dt, []).extend(top_candidates)
             all_candidates.extend(top_candidates)
 
         if progress_callback and (i + 1) % max(1, len(all_dates) // 10) == 0:
@@ -1761,7 +1761,7 @@ def generate_roc200_ranking_system1(
 
             # Get ROC200 value
             roc200_val = _to_float(row.get("roc200"))
-            if pd.isna(roc200_val) or roc200_val <= 0:
+            if pd.isna(roc200_val):
                 continue
 
             close_val = _to_float(row.get("Close", 0))

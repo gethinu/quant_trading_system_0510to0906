@@ -22,6 +22,8 @@
 # strategies/system4_strategy.py
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import pandas as pd
 
@@ -40,6 +42,128 @@ from core.system4 import (
 
 from .base_strategy import StrategyBase
 from .constants import STOP_ATR_MULTIPLE_SYSTEM4
+
+
+def _normalize_daily_index(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame()
+    x = df.copy()
+    if "Date" in x.columns:
+        idx = pd.to_datetime(x["Date"], errors="coerce").dt.normalize()
+    elif "date" in x.columns:
+        idx = pd.to_datetime(x["date"], errors="coerce").dt.normalize()
+    else:
+        idx = pd.to_datetime(x.index, errors="coerce").normalize()
+    x.index = pd.Index(idx, name="Date")
+    x = x[~x.index.isna()]
+    try:
+        x = x.sort_index()
+        if getattr(x.index, "has_duplicates", False):
+            x = x[~x.index.duplicated(keep="last")]
+    except Exception:
+        pass
+    return x
+
+
+def _find_col_ci(df: pd.DataFrame, expected: str) -> str | None:
+    target = str(expected).lower()
+    for col in df.columns:
+        if str(col).lower() == target:
+            return str(col)
+    return None
+
+
+def _build_spy_gate_map(spy_df: pd.DataFrame | None, *, sma_window: int) -> dict[pd.Timestamp, bool]:
+    if spy_df is None or spy_df.empty:
+        return {}
+    x = _normalize_daily_index(spy_df)
+    if x.empty:
+        return {}
+    close_col = _find_col_ci(x, "Close")
+    if close_col is None:
+        return {}
+    close = pd.to_numeric(x[close_col], errors="coerce")
+    sma_col = _find_col_ci(x, f"sma{sma_window}")
+    if sma_col is not None:
+        sma = pd.to_numeric(x[sma_col], errors="coerce")
+    else:
+        sma = close.rolling(sma_window, min_periods=sma_window).mean()
+    gate = (close > sma) & close.notna() & sma.notna()
+    return {pd.Timestamp(dt).normalize(): bool(val) for dt, val in gate.items()}
+
+
+def _extract_signal_date(candidate: dict[str, Any], entry_dt: pd.Timestamp) -> pd.Timestamp | None:
+    raw = candidate.get("date", candidate.get("Date", None))
+    if raw is None:
+        raw = entry_dt
+    ts = pd.to_datetime(raw, errors="coerce")
+    if pd.isna(ts):
+        return None
+    return pd.Timestamp(ts).normalize()
+
+
+def _apply_spy_gate_to_candidates(
+    candidates_by_date: dict,
+    merged_df: pd.DataFrame | None,
+    *,
+    spy_gate: dict[pd.Timestamp, bool],
+) -> tuple[dict, pd.DataFrame | None, int, int]:
+    if not spy_gate:
+        before = 0
+        for entries in candidates_by_date.values():
+            if isinstance(entries, dict):
+                before += len(entries)
+            elif isinstance(entries, list):
+                before += len(entries)
+        return candidates_by_date, merged_df, before, before
+
+    filtered_by_date: dict = {}
+    before_count = 0
+    after_count = 0
+
+    for key, entries in candidates_by_date.items():
+        entry_dt = pd.to_datetime(key, errors="coerce")
+        entry_dt = pd.Timestamp(entry_dt).normalize() if pd.notna(entry_dt) else pd.NaT
+
+        if isinstance(entries, dict):
+            before_count += len(entries)
+            kept: dict = {}
+            for sym, payload in entries.items():
+                payload_map = payload if isinstance(payload, dict) else {}
+                sig_dt = _extract_signal_date(payload_map, entry_dt)
+                if sig_dt is not None and spy_gate.get(sig_dt, False):
+                    kept[sym] = payload
+            if kept:
+                filtered_by_date[key] = kept
+                after_count += len(kept)
+        elif isinstance(entries, list):
+            before_count += len(entries)
+            kept_list: list = []
+            for item in entries:
+                if not isinstance(item, dict):
+                    continue
+                sig_dt = _extract_signal_date(item, entry_dt)
+                if sig_dt is not None and spy_gate.get(sig_dt, False):
+                    kept_list.append(item)
+            if kept_list:
+                filtered_by_date[key] = kept_list
+                after_count += len(kept_list)
+
+    filtered_df: pd.DataFrame | None = merged_df
+    if merged_df is not None and not merged_df.empty:
+        x = merged_df.copy()
+        if "date" in x.columns:
+            sig = pd.to_datetime(x["date"], errors="coerce").dt.normalize()
+        elif "Date" in x.columns:
+            sig = pd.to_datetime(x["Date"], errors="coerce").dt.normalize()
+        else:
+            sig = pd.to_datetime(x.index, errors="coerce").normalize()
+        mask = sig.map(lambda v: bool(spy_gate.get(pd.Timestamp(v), False)) if pd.notna(v) else False)
+        filtered_df = x[mask].copy()
+        if filtered_df.empty:
+            filtered_df = x.iloc[0:0].copy()
+
+    return filtered_by_date, filtered_df, before_count, after_count
 
 
 class System4Strategy(AlpacaOrderMixin, StrategyBase):
@@ -107,12 +231,35 @@ class System4Strategy(AlpacaOrderMixin, StrategyBase):
             include_diagnostics=True,
             **kwargs,
         )
+        spy_gate = _build_spy_gate_map(market_df, sma_window=200)
         if isinstance(result, tuple) and len(result) == 3:
             candidates_by_date, merged_df, diagnostics = result
+            (
+                candidates_by_date,
+                merged_df,
+                before_cnt,
+                after_cnt,
+            ) = _apply_spy_gate_to_candidates(candidates_by_date, merged_df, spy_gate=spy_gate)
+            diagnostics["spy_gate_condition"] = "SPY close > SMA200"
+            diagnostics["spy_gate_total_candidates_before"] = int(before_cnt)
+            diagnostics["spy_gate_total_candidates_after"] = int(after_cnt)
+            diagnostics["spy_gate_dropped"] = int(max(0, before_cnt - after_cnt))
+            diagnostics["ranked_top_n_count"] = int(after_cnt)
             self.last_diagnostics = diagnostics
             result = (candidates_by_date, merged_df)
+            if log_callback and before_cnt != after_cnt:
+                log_callback(
+                    f"System4: SPY gate filtered {before_cnt - after_cnt} candidates "
+                    f"(remaining={after_cnt})"
+                )
         elif isinstance(result, tuple) and len(result) == 2:
             candidates_by_date, merged_df = result
+            (
+                candidates_by_date,
+                merged_df,
+                before_cnt,
+                after_cnt,
+            ) = _apply_spy_gate_to_candidates(candidates_by_date, merged_df, spy_gate=spy_gate)
             self.last_diagnostics = build_system_diagnostics(
                 self.SYSTEM_NAME,
                 prepared_dict,
@@ -125,6 +272,11 @@ class System4Strategy(AlpacaOrderMixin, StrategyBase):
                 ),
             )
             result = (candidates_by_date, merged_df)
+            if log_callback and before_cnt != after_cnt:
+                log_callback(
+                    f"System4: SPY gate filtered {before_cnt - after_cnt} candidates "
+                    f"(remaining={after_cnt})"
+                )
         else:
             self.last_diagnostics = None
         try:  # noqa: SIM105
@@ -204,15 +356,36 @@ class System4Strategy(AlpacaOrderMixin, StrategyBase):
         stop_price: float,
     ):
         trail_pct = float(getattr(self, "config", {}).get("trailing_pct", 0.20))
-        highest = entry_price
-        for idx2 in range(entry_idx + 1, len(df)):
-            close = float(df.iloc[idx2]["Close"])
-            if close > highest:
-                highest = close
-            if close <= highest * (1 - trail_pct):
-                return close, df.index[idx2]
-            if close <= stop_price:
-                return close, df.index[idx2]
+        n = len(df)
+        if n == 0:
+            return float(stop_price), pd.Timestamp.utcnow().normalize()
+        if entry_idx < 0:
+            entry_idx = 0
+        if entry_idx >= n:
+            entry_idx = n - 1
+
+        highest = float(entry_price)
+        base_stop = float(stop_price)
+
+        for idx2 in range(entry_idx, n):
+            row = df.iloc[idx2]
+            try:
+                high = float(row["High"])
+                low = float(row["Low"])
+            except Exception:
+                continue
+
+            if high > highest:
+                highest = high
+
+            if trail_pct > 0:
+                trailing_stop = highest * (1.0 - trail_pct)
+                effective_stop = max(base_stop, trailing_stop)
+            else:
+                effective_stop = base_stop
+
+            if low <= effective_stop:
+                return float(effective_stop), df.index[idx2]
         last_close = float(df.iloc[-1]["Close"])
         return last_close, df.index[-1]
 

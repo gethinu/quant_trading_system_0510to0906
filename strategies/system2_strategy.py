@@ -40,7 +40,6 @@ from core.system2 import (
 from .base_strategy import StrategyBase
 from .constants import (
     ENTRY_MIN_GAP_PCT_DEFAULT,
-    MAX_HOLD_DAYS_DEFAULT,
     PROFIT_TAKE_PCT_DEFAULT_4,
     STOP_ATR_MULTIPLE_DEFAULT,
 )
@@ -152,7 +151,8 @@ class System2Strategy(AlpacaOrderMixin, StrategyBase):
     def compute_entry(self, df: pd.DataFrame, candidate: dict, _current_capital: float):
         """
         エントリー価格とストップを返す（ショート）。
-        - candidate["entry_date"] の行をもとに、ギャップ条件とATRベースのストップを計算。
+        - 前日終値の +4% 指値ショート（当日高値が指値に到達した場合のみ約定）
+        - 高寄りしていれば、より有利な寄付価格で約定
 
         Args:
             df: 価格データ
@@ -174,11 +174,21 @@ class System2Strategy(AlpacaOrderMixin, StrategyBase):
         if entry_idx <= 0 or entry_idx >= len(df):
             return None
         prior_close = float(df.iloc[entry_idx - 1]["Close"])
-        entry_price = float(df.iloc[entry_idx]["Open"])
         min_gap = float(self.config.get("entry_min_gap_pct", ENTRY_MIN_GAP_PCT_DEFAULT))
-        # 上窓（前日終値比+4%）未満なら見送り（ショート前提）
-        if entry_price < prior_close * (1 + min_gap):
+        limit_price = prior_close * (1 + min_gap)
+        try:
+            open_px = float(df.iloc[entry_idx]["Open"])
+            high_px = float(df.iloc[entry_idx]["High"])
+        except Exception:
             return None
+
+        # 指値未到達なら不成立
+        if high_px < limit_price:
+            return None
+
+        # ショート売り指値: 高寄りなら寄付で有利約定、そうでなければ指値約定
+        entry_price = open_px if open_px >= limit_price else limit_price
+
         atr = None
         for col in ("atr10", "ATR10"):
             try:
@@ -210,9 +220,11 @@ class System2Strategy(AlpacaOrderMixin, StrategyBase):
         profit_take_pct = float(
             self.config.get("profit_take_pct", PROFIT_TAKE_PCT_DEFAULT_4)
         )
-        max_hold_days = int(self.config.get("max_hold_days", MAX_HOLD_DAYS_DEFAULT))
+        # System2 spec: evaluate target up to "2 days after entry", otherwise exit
+        # at the following close.
+        max_hold_days = int(self.config.get("max_hold_days", 2))
 
-        for offset in range(max_hold_days):
+        for offset in range(max_hold_days + 1):
             idx = entry_idx + offset
             if idx >= len(df):
                 break
@@ -226,7 +238,7 @@ class System2Strategy(AlpacaOrderMixin, StrategyBase):
                 exit_idx = min(idx + 1, len(df) - 1)
                 return float(df.iloc[exit_idx]["Close"]), df.index[exit_idx]
 
-        exit_idx = min(entry_idx + max_hold_days, len(df) - 1)
+        exit_idx = min(entry_idx + max_hold_days + 1, len(df) - 1)
         return float(df.iloc[exit_idx]["Close"]), df.index[exit_idx]
 
     def compute_pnl(self, entry_price: float, exit_price: float, shares: int) -> float:

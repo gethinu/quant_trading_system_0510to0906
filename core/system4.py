@@ -56,7 +56,6 @@ from common.utils import get_cached_data
 MIN_DOLLAR_VOLUME = 100_000_000  # DollarVolume50 minimum threshold
 HV50_MIN = 10  # Historical Volatility 50-day minimum %
 HV50_MAX = 40  # Historical Volatility 50-day maximum %
-MAX_RSI4_THRESHOLD = 30.0  # RSI4 oversold threshold
 DEFAULT_TOP_N = 20  # Default number of top candidates
 LATEST_ONLY_TAIL_ROWS = 5
 SYSTEM4_LATEST_ONLY_COLUMNS = (
@@ -383,7 +382,7 @@ def generate_candidates_system4(
                 except Exception:
                     pass
 
-                dt = pd.Timestamp(str(df.index[-1]))
+                dt = pd.Timestamp(str(df.index[-1])).normalize()
                 date_counter[dt] = date_counter.get(dt, 0) + 1
                 rows.append(
                     {
@@ -455,6 +454,28 @@ def generate_candidates_system4(
             df_all = df_all.sort_values("rsi4", ascending=True, kind="stable").head(
                 top_n
             )
+            # Key candidates by entry_date (next NYSE trading day after signal date)
+            try:
+                sig_dt = (
+                    pd.Timestamp(mode_date).normalize()
+                    if mode_date is not None
+                    else pd.Timestamp(df_all["date"].iloc[0]).normalize()
+                )
+            except Exception:
+                sig_dt = None
+            try:
+                from common.utils_spy import resolve_signal_entry_date
+
+                entry_dt = resolve_signal_entry_date(sig_dt)
+            except Exception:
+                entry_dt = sig_dt
+            try:
+                if entry_dt is None or pd.isna(entry_dt):
+                    entry_dt = sig_dt
+                df_all = df_all.copy()
+                df_all.loc[:, "entry_date"] = pd.Timestamp(entry_dt).normalize()
+            except Exception:
+                pass
 
             # Recalculate diagnostics from metadata
             if "_setup_via" in df_all.columns:
@@ -486,7 +507,7 @@ def generate_candidates_system4(
             set_diagnostics_after_ranking(
                 diagnostics, final_df=df_public, ranking_source="latest_only"
             )
-            by_date = normalize_dataframe_to_by_date(df_public)
+            by_date = normalize_dataframe_to_by_date(df_public, date_col="entry_date")
             if log_callback:
                 log_callback(
                     f"System4: latest_only fast-path -> {len(df_public)} candidates "
@@ -515,6 +536,7 @@ def generate_candidates_system4(
     all_dates = sorted(all_dates_set)
 
     candidates_by_date: dict[pd.Timestamp, list[dict[str, Any]]] = {}
+    entry_date_cache: dict[pd.Timestamp, pd.Timestamp] = {}
     all_candidates: list[dict[str, Any]] = []
 
     if log_callback:
@@ -522,6 +544,18 @@ def generate_candidates_system4(
 
     # Execute RSI4 ranking by date (ascending - lowest RSI4 first for oversold)
     for i, date in enumerate(all_dates):
+        sig_dt = pd.Timestamp(date).normalize()
+        entry_dt = entry_date_cache.get(sig_dt)
+        if entry_dt is None:
+            try:
+                from common.utils_spy import resolve_signal_entry_date
+
+                entry_dt = resolve_signal_entry_date(sig_dt)
+            except Exception:
+                entry_dt = pd.NaT
+            entry_date_cache[sig_dt] = entry_dt
+        if entry_dt is None or pd.isna(entry_dt):
+            continue
         date_candidates = []
 
         for symbol, df in prepared_dict.items():
@@ -548,7 +582,7 @@ def generate_candidates_system4(
                     continue
                 rsi4_val = cast(Any, row.get("rsi4", 100))
                 try:
-                    if pd.isna(rsi4_val) or float(rsi4_val) >= MAX_RSI4_THRESHOLD:
+                    if pd.isna(rsi4_val):
                         continue
                 except Exception:
                     continue
@@ -556,7 +590,8 @@ def generate_candidates_system4(
                 date_candidates.append(
                     {
                         "symbol": symbol,
-                        "date": date,
+                        "date": sig_dt,
+                        "entry_date": entry_dt,
                         "rsi4": rsi4_val,
                         "atr_ratio": row.get("atr_ratio", 0),
                         "close": row.get("Close", 0),
@@ -572,7 +607,7 @@ def generate_candidates_system4(
             date_candidates.sort(key=lambda x: x["rsi4"])
             top_candidates = date_candidates[:top_n]
 
-            candidates_by_date[date] = top_candidates
+            candidates_by_date.setdefault(entry_dt, []).extend(top_candidates)
             all_candidates.extend(top_candidates)
 
         # Progress reporting
@@ -583,6 +618,13 @@ def generate_candidates_system4(
     if all_candidates:
         candidates_df = pd.DataFrame(all_candidates)
         candidates_df["date"] = pd.to_datetime(candidates_df["date"])
+        try:
+            if "entry_date" in candidates_df.columns:
+                candidates_df["entry_date"] = pd.to_datetime(
+                    candidates_df["entry_date"]
+                )
+        except Exception:
+            pass
         candidates_df = candidates_df.sort_values(
             ["date", "rsi4"], ascending=[True, True]
         )

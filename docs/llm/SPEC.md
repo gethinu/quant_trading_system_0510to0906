@@ -1,48 +1,285 @@
 # LLM Reference: Product Spec
 
-Purpose
-This document captures the stable product intent, scope, and invariants for the Quant Trading System. It is the first reference for changes and should be kept in sync with code.
+This file embeds the system-rule documents by direct copy from `docs/systems/*.txt`.
+Any change to rules must be edited in `docs/systems` first, then copied here verbatim.
+## Source: docs/systems/システム1.txt
 
-Scope
-- Educational and paper-trading oriented system for US equities.
-- Daily signal generation, backtests, and dashboards.
-- Seven systems: long systems 1,3,4,5 and short systems 2,6,7.
+システム１――ロング・トレンド・ハイ・モメンタム
 
-Core Workflows
-1. Build the symbol universe from settings and data files.
-2. Load cached market data via CacheManager.
-3. Ensure indicators exist (precomputed or cache-managed).
-4. For each system: filter, setup, rank, and generate candidates.
-5. Merge signals and allocate capital or slots via finalize_allocation.
-6. Persist outputs and diagnostics; send notifications when configured.
+トレード対象
+NYSE（ニューヨーク証券取引所）、ナスダック、アメリカン証券取引所に上場しているすべての銘柄。
 
-System Set
-- System1, System3, System4, System5: long systems.
-- System2, System6: short systems.
-- System7: SPY-only hedge, short side.
-- Allocation weights and system descriptions live in `docs/systems/INDEX.md` and `data/symbol_system_map.json`. Core logic in `core/systemX.py` is the source of truth.
+フィルター
+	•	過去20日の平均売買代金が5000万ドルを上回る。
+	•	最低株価が５ドル以上。
 
-Critical Invariants
-- System7 trades SPY only. Expanding symbols is forbidden.
-- All cache I/O must go through `common/cache_manager.py::CacheManager`.
-- Configuration access must go through `config/settings.py::get_settings()` and `config/environment.py::get_env_config()`.
-- Tests must not call external APIs. Use cached data or fixtures.
-- Diagnostics must include `ranking_source`, `setup_predicate_count`, and `ranked_top_n_count` for every system.
+セットアップ
+	•	SPYの終値が100日SMA（単純移動平均線）を上回る。
+	•	25日SMAの終値が50日SMAの終値を上回る。
 
-Out of Scope
-- Real-money performance guarantees.
-- Direct manipulation of files under `data_cache/` outside CacheManager.
-- Changing the allocation contract in `core/final_allocation.py`.
+ランキング
+ポジションサイジングが許容する以上のセットアップが発生したときは、銘柄を過去200日ROC（変化率）が高い順に選ぶ。つまり、過去200日の価格上昇率が高い順ということである。
 
-Update Triggers
-- Any change to system logic, candidate selection, or diagnostics schema.
-- New UI, API, or CLI entry point.
-- Changes to cache structure, output naming, or allocation contract.
+仕掛け
+翌日の寄り付きで成り行き注文で仕掛ける。
 
-References
-- `docs/README.md`
-- `docs/systems/INDEX.md`
-- `docs/TECHNICAL_SPECS.md`
-- `docs/technical/environment_variables.md`
-- `.github/copilot-instructions.md`
-- `.agent/workflows/project-reference.md`
+損切り注文
+トレードを仕掛けたら、買値の下に、過去20日の5ATRの位置に損切りを置く。
+
+再仕掛け
+損切りされても、すべての仕掛け条件が整えば、翌日に再び仕掛ける。
+
+利益の保護
+25%のトレーリングストップを使う。
+
+利食い
+利益目標は設定しない。
+
+ポジションサイジング
+リスクは資金全体の2%、サイズは最大で資
+金全体の10%、最大で10のポジション。
+
+---
+
+## Source: docs/systems/システム2.txt
+
+システム2ーショート RSIスラスト
+
+トレード対象
+NYSE、ナスダック、アメリカン証券取引所に上場しているすべての銘柄。
+
+フィルター
+	•	 最低株価は5ドル以上。
+	•	 過去 20日の平均売買代金が 2500万ドルを上回る。
+	•	過去10日のATR が終値の値の3%以上。
+
+セットアップ
+	•	 3日 RSI（相対力指数）が90を上回る。
+	•	 過去2日間とも終値が前日の終値を上回る。
+
+ランキング
+7日 ADX が高い順に銘柄を選ぶ。
+
+仕掛け
+翌日、前日の終値を4%以上上回る価格で売る。
+
+損切り注文
+発注したら、売値の上に、過去 10日の3ATR の位置に損切り注文を置く。
+
+再仕掛け
+損切り注文に引っかかっても、すべての仕掛け条件が手び整えば、翌日に再び仕掛ける。
+
+利益の保護
+使わない。
+
+利食い
+ 	•	大引けで4%以上の利益が出ているときは翌日の大引けで成り行きで手仕舞う。
+ 	•	2日後に利益目標に到達しないときは、翌日に大引け成り行き注文を入れる。
+
+ポジションサイジング
+リスクは資金全体の2%、サイズは最大で資
+金全体の10%、最大で10のポジション。
+
+---
+
+## Source: docs/systems/システム3.txt
+
+システム3ーロング・ミーン・リバージョン・セルオフ
+
+トレード対象
+NYSE、ナスダック、アメリカン証券取引所に上場しているすべての銘柄。
+
+フィルター
+	•	 最低株価は1ドル以上。
+	•	 過去 50日の平均出来高が100万株以上。
+	•	 過去 10日のATR が5%以上。
+
+セットアップ
+	•	 終値が150日 SMAを上回る。
+	•	 過去3日で 12.5%以上の下落。
+
+ランキング
+過去3日の下落幅が大きい順に銘柄を選ぶ。
+
+仕掛け
+前日の終値の7%下に指値注文を入れる。
+
+損切り注文
+買値の下に過去 10日の 2.5ATR の位置に損切り注文を置く。
+
+再仕掛け
+損切りに引っかかったら、再び仕掛ける。
+
+利益の保護
+使わない。
+
+利食い
+ 	•	終値ベースで4%以上の利益が出たら、翌日の大引けで成り行きで手仕舞う。
+ 	•	3日たっても利益目標に達することも、損切り注文に引っかかることもなければ、翌日の大引けで成り行き注文で手仕舞う。
+
+ポジションサイジング
+リスクは資金全体の2%、サイズは最大で資金全体の 10%。
+
+---
+
+## Source: docs/systems/システム4.txt
+
+システム4ーロング・トレンド・ロー・ボラティリティ
+
+トレード対象
+NYSE （ニューヨーク証券取引所）、ナスダック、アメリカン証券取引所に上場しているすべての銘柄。
+
+フィルター
+	•	 過去 50日の1日の平均売買代金が1億ドルを上回る。
+	•	 ヒストリカルボラティリティが 10〜40%の範囲内にある。
+
+セットアップ
+	•	S&P500の終値が 200日 SMA を上回っている。
+	•	その銘柄の終値が 200日 SMAを上回っている。
+
+ランキング
+4日RSIが小さい順に銘柄を選ぶ。
+
+仕掛け
+寄り付きで成り行きで仕掛ける。スリッページにかかわらず仕掛ける。
+
+損切り注文
+発注したら、買値の下に過去 40日の 1.5ATR の位置に損切り注文を置く。
+
+再仕掛け
+損切りに引っかかったら、手び仕掛ける。
+
+利益の保護
+20%のトレーリングストップも置く。
+
+利食い
+利食いはしない。
+
+ポジションサイジング
+リスクは資金全体の2%、サイズは最大で資
+金全体の 10%。
+
+---
+
+## Source: docs/systems/システム5.txt
+
+システム5ーロング・ミーン・リバージョン・ハイADX・リバーサル
+
+トレード対象
+NYSE、ナスダック、アメリカン証券取引所に上場しているすべての銘柄。
+
+フィルター
+	•	過去50日の平均出来高が50万株を上回る。
+	•	過去 50日の平均売買代金が 250万ドルを上回る。
+	•	ATRが4%を上回る。
+
+セットアップ
+	•	 終値が「100日 SMA +過去10日の ATRを上回る。
+	•	 7日 ADX が55を上回る。
+	•	 3日 RSIが50を下回る。
+
+ランキング
+7日 ADX が高い順に銘柄を選ぶ。
+
+仕掛け
+前日の終値の3%下に指値をして買う。
+
+損切り注文
+買値の下に、過去10日の 3ATR の位置に損切り注文を置く。
+
+再仕掛け
+損切りに引っかかったら再び仕掛ける。
+
+利益の保護
+使わない。
+
+利食い
+	•	 過去10日の1ATR に利益目標を置き、翌日の寄り付きで成り行きで手仕舞う。
+	•	 仕掛けてから6日後になっても損切りに引っかからず、利益目標にも達しないときは、翌日の寄り付きで成り行きで手仕舞う。
+
+ポジションサイジング
+リスクは資金全体の2%、サイズは最大で資金全体の 10%。
+
+---
+
+## Source: docs/systems/システム6.txt
+
+システム6ーショート・ミーン・リバージョン・ハイ・シックスデイサージ
+
+トレード対象
+NYSE、ナスダック、アメリカン証券取引所に上場しているすべての銘柄。
+
+フィルター
+	•	 最低株価が5ドル以上。
+	•	 過去 50 日の平均売買代金が 1000万ドルを上回る。
+
+セットアップ
+	•	 直近6日間で株価が20%以上上昇。
+	•	 直近2日は前日の終値を上回って引ける。
+
+【重要】閾値に関する注意事項:
+	•	 return_6d > 0.20 (6日間で20%上昇)は非常に厳しい条件です。
+	•	 通常の市場環境では、この条件を満たす銘柄は少数または0になることがあります。
+	•	 これは仕様通りの正常な動作であり、エラーではありません。
+	•	 候補数が0の場合でも、システムは正常に動作しています。
+	•	 強いモメンタムが発生している相場局面でのみ候補が出現します。
+
+実装詳細:
+	•	 コード上の条件: return_6d > 0.20 AND uptwodays == True
+	•	 predicate関数: common/system_setup_predicates.py::system6_setup_predicate()
+	•	 候補生成: core/system6.py::generate_candidates_system6()
+
+ランキング
+直近6日間の株価の上昇が大きい順に銘柄を選ぶ。
+
+仕掛け
+前日の終値を5%上回る位置に指値を置いて売る。
+
+損切り注文
+売値の上に、過去10日の 3ATR の位置に損切り注文を置く。
+
+再仕掛け
+損切りに引っかかったら再び仕掛ける。
+
+利益の保護
+使わない。
+
+利食い
+	•	 5%の利益が出たら、翌日の大引けで成り行きで手仕舞う。
+	•	 時間ベースの利食いを使い、仕掛けてから3日後には大引けで成り行きで手仕舞う。
+
+ポジションサイジング
+リスクは資金全体の2%、サイズは最大で資金全体の 10%。
+
+---
+
+## Source: docs/systems/システム7.txt
+
+システム7ーカタストロフィーヘッジ
+
+トレード対象
+SPY（S&P500のETF)
+
+フィルター
+使わない。
+
+セットアップ
+SPY が直近50日間の最安値を付ける。
+
+ランキング
+使わない。
+
+仕掛け
+翌日の寄り付きで成り行きで仕掛ける。
+
+損切り注文
+過去 50日間の 3ATR の位置に損切り注文を置く。
+
+利益の保護
+SPY が直近 70 日間の高値を付けるまで売りポジションを保有し、直近70日間の高値を付けたら、翌日の寄り付きで成り行きで手仕舞う。
+
+利食い
+使わない。
+
+ポジションサイジング
+この例では、これは唯一のシステムなので資金全体の 100%を使う（組み合わせシステムでは資金全体の100%は使わない）。

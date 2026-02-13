@@ -213,7 +213,18 @@ class System6Strategy(AlpacaOrderMixin, StrategyBase):
             return None
         prev_close = float(df.iloc[entry_idx - 1]["Close"])
         ratio = float(self.config.get("entry_price_ratio_vs_prev_close", 1.05))
-        entry_price = round(prev_close * ratio, 2)
+        limit_price = round(prev_close * ratio, 2)
+
+        # Short limit: fill only if the entry day's High touches the limit.
+        # If Open is already above/at the limit, assume a better fill at Open.
+        try:
+            o = float(df.iloc[entry_idx]["Open"])
+            high = float(df.iloc[entry_idx]["High"])
+        except Exception:
+            return None
+        if high < limit_price:
+            return None
+        entry_price = round(o if o >= limit_price else limit_price, 2)
         atr = None
         for col in ("atr10", "ATR10"):
             try:
@@ -228,7 +239,7 @@ class System6Strategy(AlpacaOrderMixin, StrategyBase):
         )
         stop_price = entry_price + stop_mult * atr
         # ショート戦略: ストップロスはエントリー価格より上に設定される
-        if stop_price <= entry_price:
+        if stop_price <= entry_price or entry_price <= 0:
             return None
         return entry_price, stop_price
 

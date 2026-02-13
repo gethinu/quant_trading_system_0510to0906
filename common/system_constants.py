@@ -25,7 +25,7 @@ MIN_ROWS_SYSTEM7 = 150  # SPY専用、基本指標
 SYSTEM1_ROC_PERIOD = 200
 SYSTEM1_SMA_PERIOD = 200
 SYSTEM1_MIN_PRICE = 5.0
-SYSTEM1_MIN_DOLLAR_VOLUME = 25_000_000  # 25M
+SYSTEM1_MIN_DOLLAR_VOLUME = 50_000_000  # 50M
 
 # === System2 (Short RSI spike) 定数 ===
 SYSTEM2_RSI_PERIOD = 3
@@ -36,28 +36,26 @@ SYSTEM2_MIN_DOLLAR_VOLUME = 25_000_000  # 25M
 SYSTEM2_ATR_RATIO_THRESHOLD = 0.03  # 3%
 
 # === System3 (Long mean-reversion) 定数 ===
-SYSTEM3_MIN_PRICE = 5.0
-SYSTEM3_MIN_DOLLAR_VOLUME = 25_000_000  # 25M
+SYSTEM3_MIN_PRICE = 1.0
+SYSTEM3_MIN_AVG_VOLUME_50 = 1_000_000  # 1M shares
 SYSTEM3_ATR_RATIO_THRESHOLD = 0.05  # 5%
 SYSTEM3_DROP_3D_THRESHOLD = 0.125  # 12.5% 3日下落
 
 # === System4 (Long trend low-vol pullback) 定数 ===
-SYSTEM4_MIN_PRICE = 5.0
-SYSTEM4_MIN_DOLLAR_VOLUME = 25_000_000  # 25M
-SYSTEM4_RSI_THRESHOLD = 50  # RSI4 < 50
+SYSTEM4_MIN_DOLLAR_VOLUME = 100_000_000  # 100M (DollarVolume50)
 SYSTEM4_HV_PERIOD = 50
 SYSTEM4_SMA_PERIOD = 200
 
 # === System5 (Long mean-reversion with high ADX) 定数 ===
-SYSTEM5_MIN_PRICE = 5.0
-SYSTEM5_MIN_DOLLAR_VOLUME = 25_000_000  # 25M
-SYSTEM5_ATR_PCT_THRESHOLD = 0.025  # 2.5%
+SYSTEM5_MIN_AVG_VOLUME_50 = 500_000  # 500k shares
+SYSTEM5_MIN_DOLLAR_VOLUME_50 = 2_500_000  # 2.5M
+SYSTEM5_ATR_PCT_THRESHOLD = 0.04  # 4.0%
 SYSTEM5_ADX_THRESHOLD = 55  # ADX7 > 55
 SYSTEM5_ADX_PERIOD = 7
 
 # === System6 (Short mean-reversion momentum burst) 定数 ===
 SYSTEM6_MIN_PRICE = 5.0
-SYSTEM6_MIN_DOLLAR_VOLUME = 25_000_000  # 25M
+SYSTEM6_MIN_DOLLAR_VOLUME = 10_000_000  # 10M
 SYSTEM6_RETURN_6D_THRESHOLD = 0.20  # 20% 6日リターン
 SYSTEM6_ATR_PERIOD = 10
 SYSTEM6_DOLLAR_VOLUME_PERIOD = 50
@@ -78,7 +76,13 @@ ADX_PERIOD_DEFAULT = 7
 DOLLAR_VOLUME_PERIOD_DEFAULT = 20
 
 # === システム別必須指標リスト ===
-SYSTEM1_REQUIRED_INDICATORS = ["roc200", "sma200", "dollarvolume20"]
+SYSTEM1_REQUIRED_INDICATORS = [
+    "roc200",
+    "sma25",
+    "sma50",
+    "atr20",
+    "dollarvolume20",
+]
 
 SYSTEM2_REQUIRED_INDICATORS = [
     "rsi3",
@@ -91,9 +95,10 @@ SYSTEM2_REQUIRED_INDICATORS = [
 
 SYSTEM3_REQUIRED_INDICATORS = [
     "atr10",
-    "dollarvolume20",
+    "avgvolume50",
     "atr_ratio",
     "drop3d",
+    "sma150",
 ]
 
 SYSTEM4_REQUIRED_INDICATORS = [
@@ -107,8 +112,11 @@ SYSTEM4_REQUIRED_INDICATORS = [
 SYSTEM5_REQUIRED_INDICATORS = [
     "adx7",
     "atr10",
-    "dollarvolume20",
+    "avgvolume50",
+    "dollarvolume50",
     "atr_pct",
+    "sma100",
+    "rsi3",
 ]
 
 SYSTEM6_REQUIRED_INDICATORS = [
@@ -144,22 +152,20 @@ SYSTEM_CONFIGS = {
         "min_rows": MIN_ROWS_SYSTEM3,
         "required_indicators": SYSTEM3_REQUIRED_INDICATORS,
         "min_price": SYSTEM3_MIN_PRICE,
-        "min_dollar_volume": SYSTEM3_MIN_DOLLAR_VOLUME,
+        "min_avg_volume_50": SYSTEM3_MIN_AVG_VOLUME_50,
         "atr_ratio_threshold": SYSTEM3_ATR_RATIO_THRESHOLD,
         "drop_3d_threshold": SYSTEM3_DROP_3D_THRESHOLD,
     },
     "system4": {
         "min_rows": MIN_ROWS_SYSTEM4,
         "required_indicators": SYSTEM4_REQUIRED_INDICATORS,
-        "min_price": SYSTEM4_MIN_PRICE,
         "min_dollar_volume": SYSTEM4_MIN_DOLLAR_VOLUME,
-        "rsi_threshold": SYSTEM4_RSI_THRESHOLD,
     },
     "system5": {
         "min_rows": MIN_ROWS_SYSTEM5,
         "required_indicators": SYSTEM5_REQUIRED_INDICATORS,
-        "min_price": SYSTEM5_MIN_PRICE,
-        "min_dollar_volume": SYSTEM5_MIN_DOLLAR_VOLUME,
+        "min_avg_volume_50": SYSTEM5_MIN_AVG_VOLUME_50,
+        "min_dollar_volume_50": SYSTEM5_MIN_DOLLAR_VOLUME_50,
         "atr_pct_threshold": SYSTEM5_ATR_PCT_THRESHOLD,
         "adx_threshold": SYSTEM5_ADX_THRESHOLD,
     },

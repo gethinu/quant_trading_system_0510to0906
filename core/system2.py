@@ -212,48 +212,133 @@ def prepare_data_vectorized_system2(
         Processed data dictionary
     """
     latest_only = bool(kwargs.get("latest_only", False))
-    # Fast path: reuse precomputed indicators
+    # Fast path: reuse precomputed indicators from in-memory raw_data_dict.
+    # This path is intentionally permissive: if some indicators are missing we
+    # still return a prepared frame with best-effort derived columns. Missing
+    # values will naturally fail the filter/setup gates.
     if reuse_indicators and raw_data_dict:
-        try:
-            # Early check - verify required indicators exist
-            valid_data_dict, error_symbols = check_precomputed_indicators(
-                raw_data_dict, SYSTEM2_REQUIRED_INDICATORS, "System2", skip_callback
-            )
+        prepared_dict: dict[str, pd.DataFrame] = {}
 
-            if valid_data_dict:
-                # Apply System2-specific filters
-                prepared_dict = {}
-                for symbol, df in valid_data_dict.items():
-                    if latest_only:
-                        x = slice_latest_rows(
-                            df,
-                            keep_columns=SYSTEM2_LATEST_ONLY_COLUMNS,
-                            tail_rows=LATEST_ONLY_TAIL_ROWS,
+        # Respect explicit symbol filtering when raw_data_dict is provided.
+        if symbols:
+            target_symbols = [s for s in symbols if s in raw_data_dict]
+        else:
+            target_symbols = list(raw_data_dict.keys())
+
+        # Canonical indicator columns used by System2 logic
+        canon_by_norm = {
+            "rsi3": "rsi3",
+            "adx7": "adx7",
+            "atr10": "atr10",
+            "dollarvolume20": "dollarvolume20",
+            "atrratio": "atr_ratio",
+            "twodayup": "twodayup",
+            "uptwodays": "uptwodays",
+        }
+
+        for symbol in target_symbols:
+            df = raw_data_dict.get(symbol)
+            if df is None or df.empty:
+                continue
+
+            if latest_only:
+                x = slice_latest_rows(
+                    df,
+                    keep_columns=SYSTEM2_LATEST_ONLY_COLUMNS,
+                    tail_rows=LATEST_ONLY_TAIL_ROWS,
+                )
+            else:
+                x = df.copy()
+
+            # Normalize index and OHLCV naming (best-effort)
+            try:
+                from common.system_common import _normalize_index, _rename_ohlcv
+
+                x = _rename_ohlcv(x)
+                x = _normalize_index(x)
+            except Exception:
+                try:
+                    x.index = pd.to_datetime(x.index, errors="coerce").normalize()
+                    x = x[~x.index.isna()]
+                    x = x.sort_index()
+                    if getattr(x.index, "has_duplicates", False):
+                        x = x[~x.index.duplicated(keep="last")]
+                except Exception:
+                    pass
+
+            # Rename common indicator variants to canonical names
+            try:
+                rename_map: dict[str, str] = {}
+                for col in list(x.columns):
+                    if not isinstance(col, str):
+                        continue
+                    norm = col.lower().replace("_", "").replace(" ", "")
+                    canonical = canon_by_norm.get(norm)
+                    if canonical and col != canonical:
+                        rename_map[col] = canonical
+                if rename_map:
+                    x = x.rename(columns=rename_map)
+            except Exception:
+                pass
+
+            # Derived columns (compute when possible; otherwise leave missing)
+            if "atr_ratio" not in x.columns:
+                try:
+                    if ("atr10" in x.columns) and ("Close" in x.columns):
+                        atr10 = pd.to_numeric(x["atr10"], errors="coerce")
+                        close = pd.to_numeric(x["Close"], errors="coerce")
+                        x["atr_ratio"] = atr10 / close
+                except Exception:
+                    pass
+            if "dollarvolume20" not in x.columns:
+                try:
+                    if ("Close" in x.columns) and ("Volume" in x.columns):
+                        close = pd.to_numeric(x["Close"], errors="coerce")
+                        vol = pd.to_numeric(x["Volume"], errors="coerce")
+                        dv = close * vol
+                        x["dollarvolume20"] = dv.rolling(20, min_periods=1).mean()
+                except Exception:
+                    pass
+            if "twodayup" not in x.columns:
+                try:
+                    if "Close" in x.columns:
+                        close = pd.to_numeric(x["Close"], errors="coerce")
+                        x["twodayup"] = (close > close.shift(1)) & (
+                            close.shift(1) > close.shift(2)
                         )
                     else:
-                        x = df.copy()
-                    filter_series = _apply_filter_conditions(x)
-                    x["filter"] = filter_series
-                    x["setup"] = _apply_setup_conditions(x, filter_series=filter_series)
-                    prepared_dict[symbol] = x
-
-                if log_callback:
-                    log_callback(
-                        f"System2: Fast-path processed {len(prepared_dict)} symbols"
+                        x["twodayup"] = False
+                except Exception:
+                    x["twodayup"] = False
+            if ("uptwodays" not in x.columns) and ("twodayup" in x.columns):
+                try:
+                    x["uptwodays"] = (
+                        pd.Series(x["twodayup"], index=x.index)
+                        .fillna(False)
+                        .astype(bool)
                     )
+                except Exception:
+                    pass
 
-                return prepared_dict
+            # Apply System2-specific filters/setup. These functions handle
+            # missing columns via NaN defaults.
+            try:
+                filter_series = _apply_filter_conditions(x)
+                x["filter"] = filter_series
+                x["setup"] = _apply_setup_conditions(x, filter_series=filter_series)
+            except Exception:
+                # If anything goes wrong, keep the frame but mark as not tradable
+                try:
+                    x["filter"] = False
+                    x["setup"] = False
+                except Exception:
+                    pass
 
-        except RuntimeError:
-            # Re-raise error immediately if required indicators are missing
-            raise
-        except Exception as e:
-            # Fall back to normal processing for other errors
-            logger.debug(f"System2: Fast-path failed: {e}")
-            if log_callback:
-                log_callback(
-                    "System2: Fast-path failed, falling back to normal processing"
-                )
+            prepared_dict[symbol] = x
+
+        if log_callback:
+            log_callback(f"System2: Fast-path processed {len(prepared_dict)} symbols")
+        return prepared_dict
 
     # Normal processing path: batch processing from symbol list
     if symbols:
@@ -341,6 +426,7 @@ def generate_candidates_system2(
         try:
             rows: list[dict] = []
             date_counter: dict[pd.Timestamp, int] = {}
+            entry_date_cache: dict[pd.Timestamp, pd.Timestamp] = {}
             setup_pass_count = 0  # カウンター追加
             for sym, df in prepared_dict.items():
                 if df is None or df.empty:
@@ -378,33 +464,73 @@ def generate_candidates_system2(
 
                 setup_pass_count += 1  # setup通過カウント
 
+                # tests/minimal fixtures may use ADX7 in TitleCase
                 adx7_val = last_row.get("adx7", None)
+                if adx7_val is None:
+                    try:
+                        adx7_val = last_row.get("ADX7", None)
+                    except Exception:
+                        adx7_val = None
                 try:
-                    if adx7_val is None or pd.isna(adx7_val):
+                    if (
+                        adx7_val is None
+                        or pd.isna(adx7_val)
+                        or float(adx7_val) <= 0
+                    ):
                         continue
                 except Exception as e:
                     logger.debug(f"System2: ADX7 check failed for {sym}: {e}")
                     continue
-                dt = pd.Timestamp(str(df.index[-1]))
+
+                dt = pd.Timestamp(str(df.index[-1])).normalize()
                 date_counter[dt] = date_counter.get(dt, 0) + 1
+                # Signal date -> next NYSE trading day entry
+                entry_dt = entry_date_cache.get(dt)
+                if entry_dt is None:
+                    try:
+                        from common.utils_spy import resolve_signal_entry_date
+
+                        entry_dt = resolve_signal_entry_date(dt)
+                    except Exception:
+                        entry_dt = pd.NaT
+                    entry_date_cache[dt] = entry_dt
+                if entry_dt is None or pd.isna(entry_dt):
+                    continue
 
                 # ATR10を配分計算用に保持
                 atr10_val = 0.0
                 try:
                     atr10_raw = last_row.get("atr10")
+                    if atr10_raw is None:
+                        atr10_raw = last_row.get("ATR10")
                     if atr10_raw is not None and not pd.isna(atr10_raw):
                         atr10_val = float(atr10_raw)
                 except Exception as e:
                     logger.debug(f"System2: ATR10 extraction failed for {sym}: {e}")
                     pass
 
+                rsi3_val = last_row.get("rsi3", 0)
+                if rsi3_val is None:
+                    try:
+                        rsi3_val = last_row.get("RSI3", 0)
+                    except Exception:
+                        rsi3_val = 0
+
+                close_val = last_row.get("Close", 0)
+                if close_val is None:
+                    try:
+                        close_val = last_row.get("close", 0)
+                    except Exception:
+                        close_val = 0
+
                 rows.append(
                     {
                         "symbol": sym,
                         "date": dt,
+                        "entry_date": entry_dt,
                         "adx7": adx7_val,
-                        "rsi3": last_row.get("rsi3", 0),
-                        "close": last_row.get("Close", 0),
+                        "rsi3": rsi3_val,
+                        "close": close_val,
                         "atr10": atr10_val,
                     }
                 )
@@ -414,14 +540,7 @@ def generate_candidates_system2(
             if not rows:
                 if log_callback:
                     log_callback("System2: latest_only fast-path produced 0 rows")
-                empty_df = pd.DataFrame(
-                    columns=["symbol", "date", "adx7", "rsi3", "close", "atr10"]
-                )
-                return (
-                    ({}, empty_df, diagnostics)
-                    if include_diagnostics
-                    else ({}, empty_df)
-                )
+                return ({}, None, diagnostics) if include_diagnostics else ({}, None)
             df_all = pd.DataFrame(rows)
             # 最頻日で揃える（欠落シンボル耐性）
             mode_date = choose_mode_date_for_latest_only(date_counter)
@@ -430,6 +549,15 @@ def generate_candidates_system2(
             df_all = df_all.sort_values("adx7", ascending=False, kind="stable").head(
                 top_n
             )
+            # Add ranks for deterministic ordering and normalization priority
+            try:
+                total_rank = int(len(df_all))
+                if total_rank > 0:
+                    df_all = df_all.copy()
+                    df_all.loc[:, "rank"] = list(range(1, total_rank + 1))
+                    df_all.loc[:, "rank_total"] = total_rank
+            except Exception:
+                pass
             set_diagnostics_after_ranking(
                 diagnostics, final_df=df_all, ranking_source="latest_only"
             )
@@ -466,8 +594,9 @@ def generate_candidates_system2(
                 except Exception as e:
                     logger.debug(f"System2: Debug log generation failed: {e}")
                     pass
-            # Orchestrator expects: {date: {symbol: {field: value}}}
-            by_date = normalize_dataframe_to_by_date(df_all)
+            # Orchestrator expects: {entry_date: {symbol: payload}}
+            # Keep signal date in payload as 'date'
+            by_date = normalize_dataframe_to_by_date(df_all, date_col="entry_date")
             if log_callback:
                 log_callback(
                     f"System2: latest_only fast-path -> {len(df_all)} candidates "
@@ -510,9 +639,9 @@ def generate_candidates_system2(
         return ({}, None, diagnostics) if include_diagnostics else ({}, None)
     all_signal_dates = sorted(all_dates_set)
 
-    # Build raw candidates keyed by signal date (entry == signal for System2 tests)
-
+    # Build raw candidates keyed by entry date (next NYSE trading day after signal)
     candidates_by_entry_date: dict[pd.Timestamp, list[dict[str, Any]]] = {}
+    entry_date_cache: dict[pd.Timestamp, pd.Timestamp] = {}
 
     if log_callback:
         log_callback(
@@ -523,6 +652,18 @@ def generate_candidates_system2(
         )
 
     for i, sig_date in enumerate(all_signal_dates):
+        sig_dt = pd.Timestamp(sig_date).normalize()
+        entry_dt = entry_date_cache.get(sig_dt)
+        if entry_dt is None:
+            try:
+                from common.utils_spy import resolve_signal_entry_date
+
+                entry_dt = resolve_signal_entry_date(sig_dt)
+            except Exception:
+                entry_dt = pd.NaT
+            entry_date_cache[sig_dt] = entry_dt
+        if entry_dt is None or pd.isna(entry_dt):
+            continue
         per_date_records: list[dict[str, Any]] = []
         for symbol, df in prepared_dict.items():
             try:
@@ -540,14 +681,13 @@ def generate_candidates_system2(
                     if adx_val is None or pd.isna(adx_val):
                         continue
                     adx_f = float(adx_val)
+                    if adx_f <= 0:
+                        continue
                 except Exception:
                     continue
 
                 close_val = _get_ci(row, ["Close", "close"], None)
                 entry_price = None if close_val is None else float(close_val)
-
-                # For parity tests, use signal date as entry date (same-day entry)
-                entry_date = pd.Timestamp(sig_date)
 
                 per_date_records.append(
                     {
@@ -556,7 +696,9 @@ def generate_candidates_system2(
                         "close": entry_price,
                         "adx7": adx_f,
                         # keep auxiliary fields if needed later
-                        "date": pd.Timestamp(sig_date),
+                        "date": sig_dt,
+                        "signal_date": sig_dt,
+                        "entry_date": entry_dt,
                     }
                 )
             except Exception as e:
@@ -576,9 +718,14 @@ def generate_candidates_system2(
             # by our mocked resolve). Grouping by the actual entry_date per
             # record is safer in case side-effects vary by symbol.
             for rec in ranked:
-                # Group by the signal date itself
-                entry_date = pd.Timestamp(rec["date"])  # same-day entry
-                candidates_by_entry_date.setdefault(entry_date, []).append(rec)
+                rec_entry = rec.get("entry_date")
+                try:
+                    rec_entry_ts = pd.Timestamp(rec_entry).normalize()
+                except Exception:
+                    rec_entry_ts = entry_dt
+                if pd.isna(rec_entry_ts):
+                    continue
+                candidates_by_entry_date.setdefault(rec_entry_ts, []).append(rec)
 
         if progress_callback and (i + 1) % max(1, len(all_signal_dates) // 10) == 0:
             progress_callback(f"Processed {i + 1}/{len(all_signal_dates)} signal dates")
@@ -598,13 +745,8 @@ def generate_candidates_system2(
             diagnostics, final_df=None, ranking_source="full_scan"
         )
 
-    # Build a DataFrame to return for parity with latest_only
-    if all_records:
-        df_full = pd.DataFrame(all_records)
-    else:
-        df_full = pd.DataFrame(
-            columns=["symbol", "date", "adx7", "close", "rank", "rank_total"]
-        )
+    # Build a DataFrame only when we actually have candidates (align with other systems)
+    df_full = pd.DataFrame(all_records) if all_records else None
 
     # Normalize to orchestrator-expected shape: {date: {symbol: payload}}
     from common.system_candidates_utils import normalize_candidates_by_date
@@ -625,10 +767,23 @@ def get_total_days_system2(data_dict: dict[str, pd.DataFrame]) -> int:
         data_dict: Data dictionary
 
     Returns:
-        Maximum day count
+        Unique day count across all symbols (Date/date column or index).
     """
-    total_days: int = get_total_days(data_dict)
-    return total_days
+    all_dates: set[pd.Timestamp] = set()
+    for df in (data_dict or {}).values():
+        if df is None or df.empty:
+            continue
+        try:
+            if "Date" in df.columns:
+                dates = pd.to_datetime(df["Date"]).dt.normalize()
+            elif "date" in df.columns:
+                dates = pd.to_datetime(df["date"]).dt.normalize()
+            else:
+                dates = pd.to_datetime(df.index).normalize()
+            all_dates.update(dates)
+        except Exception:
+            continue
+    return int(len(all_dates))
 
 
 __all__ = [

@@ -3,29 +3,29 @@
 # このファイルは System5（ロング ミーン・リバージョン 高 ADX）のロジック専門
 #
 # 前提条件：
-#   - 高 ADX 環境（ADX7 > 35）でのミーン・リバージョン狙い
-#   - ATR_Pct による変動性フィルター（> 2.5%）
+#   - 高 ADX 環境（ADX7 > 55）でのミーン・リバージョン狙い
+#   - ATR_Pct による変動性フィルター（> 4.0%）
 #   - RSI3 < 50 で過売り確認
 #   - 指標は precomputed のみ使用（ADX7 でランキング）
 #   - フロー: setup() → rank() → signals() の順序実行
 #
 # ロジック単位：
-#   setup()       → フィルター条件チェック（ADX7>55、ATR_Pct>2.5% など）
+#   setup()       → フィルター+セットアップ条件チェック（ADX7>55、ATR_Pct>4.0% など）
 #   rank()        → ADX7 の降順ランキング（強いトレンド環境優先）
 #   signals()     → スコア付きシグナル抽出
 #
 # Copilot へ：
-#   → ADX 閾値（35）の変更は慎重に。他システムとの競合検証必須
+#   → ADX 閾値（55）の変更は慎重に。他システムとの競合検証必須
 #   → RSI3 条件（< 50）の役割は「リバージョン環境確認」。ロジック変更禁止
-#   → ATR_Pct > 2.5% は変動性フィルター。下限変更は制御テストで確認
+#   → ATR_Pct > 4.0% は変動性フィルター。下限変更は制御テストで確認
 # ============================================================================
 
 """System5 core logic (Long mean-reversion with high ADX).
 
 High ADX mean-reversion strategy:
-- Indicators: adx7, atr10, dollarvolume20, atr_pct (precomputed only)
-- Setup conditions: Close>=5, AvgVol50>500k, DV50>2.5M, ATR_Pct>2.5%,
-    Close>SMA100+ATR10, ADX7>35, RSI3<50
+- Indicators: adx7, atr10, atr_pct, avgvolume50, dollarvolume50, sma100, rsi3
+- Setup conditions: AvgVol50>500k, DV50>2.5M, ATR_Pct>4.0%,
+    Close>SMA100+ATR10, ADX7>55, RSI3<50
 - Candidate generation: ADX7 descending ranking by date, extract top_n
 - Optimization: Removed all indicator calculations, using precomputed indicators only
 """
@@ -57,14 +57,15 @@ from common.utils import get_cached_data
 # System5 Strategy Constants
 # ============================================================================
 # Price & Volume filters
-MIN_PRICE = 5.0  # Minimum closing price for candidates
+MIN_AVG_VOLUME_50 = 500_000.0  # Minimum 50-day average volume (shares)
+MIN_DOLLAR_VOLUME_50 = 2_500_000.0  # Minimum 50-day average dollar volume (USD)
 
 # ADX-based filters
-MIN_ADX = 35.0  # Minimum ADX7 for high trend strength environment
-MIN_ADX_FULL_SCAN = 35.0  # ADX7 threshold for full-scan filtering
+MIN_ADX = 55.0  # Minimum ADX7 for high trend strength environment
+MIN_ADX_FULL_SCAN = 55.0  # ADX7 threshold for full-scan filtering
 
 # Volatility filters
-DEFAULT_ATR_PCT_THRESHOLD = 0.025  # 2.5% minimum ATR percentage
+DEFAULT_ATR_PCT_THRESHOLD = 0.04  # 4.0% minimum ATR percentage
 
 # Ranking parameters
 DEFAULT_TOP_N = 20  # Default number of top candidates to extract
@@ -78,7 +79,10 @@ SYSTEM5_LATEST_ONLY_COLUMNS = (
     "adx7",
     "atr10",
     "atr_pct",
-    "dollarvolume20",
+    "avgvolume50",
+    "dollarvolume50",
+    "sma100",
+    "rsi3",
 )
 
 
@@ -97,19 +101,21 @@ def _apply_filter_conditions(df: pd.DataFrame) -> pd.DataFrame:
     """Apply System5 filter conditions, preserving existing 'filter' column if present.
 
     Args:
-        df: DataFrame with required indicators (Close, adx7, atr_pct)
+        df: DataFrame with required indicators (avgvolume50, dollarvolume50, atr_pct)
 
     Returns:
         DataFrame with 'filter' column added/updated
     """
     result = df.copy()
 
-    close = pd.to_numeric(result["Close"], errors="coerce")
-    adx7 = pd.to_numeric(result["adx7"], errors="coerce")
+    avgvolume50 = pd.to_numeric(result["avgvolume50"], errors="coerce")
+    dollarvolume50 = pd.to_numeric(result["dollarvolume50"], errors="coerce")
     atr_pct = pd.to_numeric(result["atr_pct"], errors="coerce")
 
     computed_filter = (
-        (close >= MIN_PRICE) & (adx7 > MIN_ADX) & (atr_pct > DEFAULT_ATR_PCT_THRESHOLD)
+        (avgvolume50 > MIN_AVG_VOLUME_50)
+        & (dollarvolume50 > MIN_DOLLAR_VOLUME_50)
+        & (atr_pct > DEFAULT_ATR_PCT_THRESHOLD)
     ).fillna(False)
 
     if "filter" in result.columns:
@@ -126,19 +132,27 @@ def _apply_filter_conditions(df: pd.DataFrame) -> pd.DataFrame:
 def _apply_setup_conditions(df: pd.DataFrame) -> pd.DataFrame:
     """Apply System5 setup conditions, preserving existing 'setup' column if present.
 
-    For System5, setup conditions are identical to filter conditions.
-
     Args:
-        df: DataFrame with 'filter' column
+        df: DataFrame with filter/setup indicators
 
     Returns:
         DataFrame with 'setup' column added/updated
     """
     result = df.copy()
 
+    filter_col = pd.Series(result["filter"], index=result.index).fillna(False).astype(bool)
+    close = pd.to_numeric(result["Close"], errors="coerce")
+    sma100 = pd.to_numeric(result["sma100"], errors="coerce")
+    atr10 = pd.to_numeric(result["atr10"], errors="coerce")
+    adx7 = pd.to_numeric(result["adx7"], errors="coerce")
+    rsi3 = pd.to_numeric(result["rsi3"], errors="coerce")
+
     computed_setup = (
-        pd.Series(result["filter"], index=result.index).fillna(False).astype(bool)
-    )
+        filter_col
+        & (close > (sma100 + atr10))
+        & (adx7 > MIN_ADX)
+        & (rsi3 < 50.0)
+    ).fillna(False)
 
     if "setup" in result.columns:
         existing = (
@@ -165,15 +179,52 @@ def _compute_indicators(symbol: str) -> tuple[str, pd.DataFrame | None]:
         if df is None or df.empty:
             return symbol, None
 
-        # Check for required indicators
-        missing_indicators = [
-            col for col in SYSTEM5_REQUIRED_INDICATORS if col not in df.columns
-        ]
+        x = df.copy()
+
+        # Normalize common indicator aliases to canonical names.
+        alias_map = {
+            "ADX7": "adx7",
+            "ATR10": "atr10",
+            "ATR_Pct": "atr_pct",
+            "ATR_PCT": "atr_pct",
+            "ATR_Ratio": "atr_pct",
+            "AvgVolume50": "avgvolume50",
+            "DollarVolume50": "dollarvolume50",
+            "SMA100": "sma100",
+            "RSI3": "rsi3",
+        }
+        for src, dst in alias_map.items():
+            if src in x.columns and dst not in x.columns:
+                x[dst] = x[src]
+
+        # Conservative fallbacks for missing precomputed columns.
+        if "avgvolume50" not in x.columns and "Volume" in x.columns:
+            x["avgvolume50"] = pd.to_numeric(x["Volume"], errors="coerce").rolling(
+                50, min_periods=1
+            ).mean()
+        if (
+            "dollarvolume50" not in x.columns
+            and "Close" in x.columns
+            and "Volume" in x.columns
+        ):
+            close = pd.to_numeric(x["Close"], errors="coerce")
+            volume = pd.to_numeric(x["Volume"], errors="coerce")
+            x["dollarvolume50"] = (close * volume).rolling(50, min_periods=1).mean()
+        if (
+            "atr_pct" not in x.columns
+            and "atr10" in x.columns
+            and "Close" in x.columns
+        ):
+            atr10 = pd.to_numeric(x["atr10"], errors="coerce")
+            close = pd.to_numeric(x["Close"], errors="coerce")
+            x["atr_pct"] = atr10 / close
+
+        # Check for required indicators after normalization/fallback.
+        missing_indicators = [col for col in SYSTEM5_REQUIRED_INDICATORS if col not in x.columns]
         if missing_indicators:
             return symbol, None
 
         # Apply System5-specific filters and setup using helpers
-        x = df.copy()
         x = _apply_filter_conditions(x)
         x = _apply_setup_conditions(x)
 
@@ -401,17 +452,30 @@ def generate_candidates_system5(
                 ):
                     try:
                         close_val = last_row.get("Close", float("nan"))
+                        sma100_val = last_row.get("sma100", float("nan"))
+                        atr10_val = last_row.get("atr10", float("nan"))
                         adx_val = last_row.get("adx7", float("nan"))
+                        rsi3_val = last_row.get("rsi3", float("nan"))
                         atr_pct_val = last_row.get("atr_pct", float("nan"))
+                        avgvol50_val = last_row.get("avgvolume50", float("nan"))
+                        dvol50_val = last_row.get("dollarvolume50", float("nan"))
                         if (
                             pd.notna(close_val)
+                            and pd.notna(sma100_val)
+                            and pd.notna(atr10_val)
                             and pd.notna(adx_val)
+                            and pd.notna(rsi3_val)
                             and pd.notna(atr_pct_val)
+                            and pd.notna(avgvol50_val)
+                            and pd.notna(dvol50_val)
                         ):
                             manual_pass = bool(
-                                float(close_val) >= MIN_PRICE
-                                and float(adx_val) > MIN_ADX
+                                float(avgvol50_val) > MIN_AVG_VOLUME_50
+                                and float(dvol50_val) > MIN_DOLLAR_VOLUME_50
                                 and float(atr_pct_val) > DEFAULT_ATR_PCT_THRESHOLD
+                                and float(close_val) > (float(sma100_val) + float(atr10_val))
+                                and float(adx_val) > MIN_ADX
+                                and float(rsi3_val) < 50.0
                             )
                     except Exception:
                         manual_pass = False
@@ -441,7 +505,7 @@ def generate_candidates_system5(
                         continue
                 except Exception:
                     continue
-                dt = pd.Timestamp(str(df.index[-1]))
+                dt = pd.Timestamp(str(df.index[-1])).normalize()
                 date_counter[dt] = date_counter.get(dt, 0) + 1
 
                 # ATR10を配分計算用に保持
@@ -521,6 +585,28 @@ def generate_candidates_system5(
             df_all = df_all.sort_values("adx7", ascending=False, kind="stable").head(
                 top_n
             )
+            # Key candidates by entry_date (next NYSE trading day after signal date)
+            try:
+                sig_dt = (
+                    pd.Timestamp(mode_date).normalize()
+                    if mode_date is not None
+                    else pd.Timestamp(df_all["date"].iloc[0]).normalize()
+                )
+            except Exception:
+                sig_dt = None
+            try:
+                from common.utils_spy import resolve_signal_entry_date
+
+                entry_dt = resolve_signal_entry_date(sig_dt)
+            except Exception:
+                entry_dt = sig_dt
+            try:
+                if entry_dt is None or pd.isna(entry_dt):
+                    entry_dt = sig_dt
+                df_all = df_all.copy()
+                df_all.loc[:, "entry_date"] = pd.Timestamp(entry_dt).normalize()
+            except Exception:
+                pass
 
             if "_setup_via" in df_all.columns:
                 via_series = df_all["_setup_via"].fillna("").astype(str)
@@ -605,7 +691,7 @@ def generate_candidates_system5(
                         f"setup_predicate_count ({setup}). "
                         "Possible duplicate or logic error."
                     )
-            by_date = normalize_dataframe_to_by_date(df_public)
+            by_date = normalize_dataframe_to_by_date(df_public, date_col="entry_date")
             if log_callback:
                 msg = (
                     f"System5: latest_only fast-path -> {len(df_public)} "
@@ -635,6 +721,7 @@ def generate_candidates_system5(
     all_dates = sorted(all_dates_set)
 
     candidates_by_date: dict[pd.Timestamp, list[dict[str, Any]]] = {}
+    entry_date_cache: dict[pd.Timestamp, pd.Timestamp] = {}
     all_candidates: list[dict[str, Any]] = []
 
     if log_callback:
@@ -642,6 +729,18 @@ def generate_candidates_system5(
 
     # Execute ADX7 ranking by date (descending - highest ADX7 first)
     for i, date in enumerate(all_dates):
+        sig_dt = pd.Timestamp(date).normalize()
+        entry_dt = entry_date_cache.get(sig_dt)
+        if entry_dt is None:
+            try:
+                from common.utils_spy import resolve_signal_entry_date
+
+                entry_dt = resolve_signal_entry_date(sig_dt)
+            except Exception:
+                entry_dt = pd.NaT
+            entry_date_cache[sig_dt] = entry_dt
+        if entry_dt is None or pd.isna(entry_dt):
+            continue
         date_candidates = []
 
         for symbol, df in prepared_dict.items():
@@ -671,7 +770,8 @@ def generate_candidates_system5(
                 date_candidates.append(
                     {
                         "symbol": symbol,
-                        "date": date,
+                        "date": sig_dt,
+                        "entry_date": entry_dt,
                         "adx7": adx7_val,
                         "atr_pct": row.get("atr_pct", 0),
                         "close": row.get("Close", 0),
@@ -686,7 +786,7 @@ def generate_candidates_system5(
             date_candidates.sort(key=lambda x: x["adx7"], reverse=True)
             top_candidates = date_candidates[:top_n]
 
-            candidates_by_date[date] = top_candidates
+            candidates_by_date.setdefault(entry_dt, []).extend(top_candidates)
             all_candidates.extend(top_candidates)
 
         # Progress reporting
@@ -697,6 +797,13 @@ def generate_candidates_system5(
     if all_candidates:
         candidates_df = pd.DataFrame(all_candidates)
         candidates_df["date"] = pd.to_datetime(candidates_df["date"])
+        try:
+            if "entry_date" in candidates_df.columns:
+                candidates_df["entry_date"] = pd.to_datetime(
+                    candidates_df["entry_date"]
+                )
+        except Exception:
+            pass
         candidates_df = candidates_df.sort_values(
             ["date", "adx7"], ascending=[True, False]
         )

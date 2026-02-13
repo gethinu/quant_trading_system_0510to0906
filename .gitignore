@@ -116,6 +116,9 @@ dist/
 *.egg-info/
 pip-wheel-metadata/
 
+# Rust build artifacts
+rust/**/target/
+
 # Caches
 .cache/
 

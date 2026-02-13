@@ -8,6 +8,7 @@ from __future__ import annotations
 from unittest.mock import patch
 
 import pandas as pd
+import pytest
 
 from strategies.system2_strategy import System2Strategy
 
@@ -44,23 +45,16 @@ class TestSystem2Strategy:
             assert result is not None
 
     def test_prepare_data_with_exception_fallback(self):
-        """Test prepare_data fallback on exception"""
+        """System2 prepare_data does not have strategy-level fallback retry."""
         mock_raw_data = {"AAPL": pd.DataFrame({"Close": [100, 101]})}
 
         with patch(
             "strategies.system2_strategy.prepare_data_vectorized_system2"
         ) as mock_prepare:
-            # First call raises exception, second succeeds
-            mock_prepare.side_effect = [
-                Exception("Test error"),
-                {"AAPL": mock_raw_data["AAPL"]},
-            ]
-
-            result = self.strategy.prepare_data(mock_raw_data, use_process_pool=True)
-
-            # Should be called twice (initial + fallback)
-            assert mock_prepare.call_count == 2
-            assert result is not None
+            mock_prepare.side_effect = Exception("Test error")
+            with pytest.raises(Exception, match="Test error"):
+                self.strategy.prepare_data(mock_raw_data, use_process_pool=True)
+            assert mock_prepare.call_count == 1
 
     def test_generate_candidates(self):
         """Test generate_candidates method"""
@@ -94,9 +88,7 @@ class TestSystem2Strategy:
             }
         )
 
-        with patch(
-            "strategies.system2_strategy.simulate_trades_with_risk"
-        ) as mock_simulate:
+        with patch("common.backtest_utils.simulate_trades_with_risk") as mock_simulate:
             mock_simulate.return_value = (mock_trades_df, {})
 
             result = self.strategy.run_backtest(
@@ -113,25 +105,24 @@ class TestSystem2Strategy:
         dates = pd.date_range("2023-01-01", periods=5, freq="D")
         df = pd.DataFrame(
             {
-                "Open": [100.0, 101.0, 102.0, 103.0, 104.0],
-                "ATR20": [2.0, 2.1, 2.2, 2.3, 2.4],
-                "High": [101.0, 102.0, 103.0, 104.0, 105.0],
+                "Open": [100.0, 106.0, 102.0, 103.0, 104.0],
+                "High": [101.0, 108.0, 103.0, 104.0, 105.0],
+                "Close": [100.0, 105.0, 102.0, 103.0, 104.0],
+                "atr10": [2.0, 2.1, 2.2, 2.3, 2.4],
             },
             index=dates,
         )
 
-        candidate = {"entry_date": "2023-01-02", "entry_high": 102.0}
+        candidate = {"entry_date": "2023-01-02"}
 
         # Mock config to return default values
         self.strategy.config = {}
 
-        # Test implementation may vary based on actual system2 short logic
-        # This is a placeholder test structure
-        self.strategy.compute_entry(df, candidate, 10000.0)
-
-        # The actual test should validate short entry logic
-        # For now, just check that method exists
-        assert hasattr(self.strategy, "compute_entry")
+        result = self.strategy.compute_entry(df, candidate, 10000.0)
+        assert result is not None
+        entry_price, stop_price = result
+        assert entry_price >= 104.0  # prev close 100 の +4%以上で約定
+        assert stop_price > entry_price  # short stop
 
     def test_get_total_days(self):
         """Test get_total_days method"""

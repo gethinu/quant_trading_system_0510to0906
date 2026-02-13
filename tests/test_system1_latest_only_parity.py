@@ -46,8 +46,6 @@ def test_system1_latest_only_parity_latest_day():
     """
 
     dates = pd.date_range("2024-01-02", periods=3, freq="B")  # 例: 2024-01-02,03,04
-    latest_day = dates[-1]
-
     prepared = {
         # symbol: roc200 時系列 (最後の値でランキング)
         "AAA": _make_prepared("AAA", dates, [1.0, 2.0, 10.0]),
@@ -60,19 +58,27 @@ def test_system1_latest_only_parity_latest_day():
     top_n = 3
 
     # Fast path (latest_only)
-    _, fast_df, _ = generate_candidates_system1(prepared, top_n=top_n, latest_only=True)
+    fast_by_date, fast_df, _ = generate_candidates_system1(
+        prepared, top_n=top_n, latest_only=True
+    )
     assert fast_df is not None, "Fast path returned None unexpectedly"
+    assert fast_by_date, "Fast path returned empty candidates unexpectedly"
+
+    # Candidates are keyed by entry_date (next NYSE trading day after signal date)
+    fast_latest_entry = max(fast_by_date.keys())
 
     # Full path
     full_by_date, full_df, _ = generate_candidates_system1(
         prepared, top_n=top_n, latest_only=False
     )
     assert full_df is not None, "Full path returned None unexpectedly"
-    assert latest_day in full_by_date, "Full path missing latest day candidates"
+    assert (
+        fast_latest_entry in full_by_date
+    ), "Full path missing latest entry day candidates"
 
     # Extract symbol order
-    fast_symbols = list(fast_df[fast_df["date"] == latest_day]["symbol"])
-    full_symbols = [c["symbol"] for c in full_by_date[latest_day]]
+    fast_symbols = list(fast_by_date[fast_latest_entry].keys())
+    full_symbols = [c["symbol"] for c in full_by_date[fast_latest_entry]]
 
     # Expected ranking manually (descending roc200 positive values only)
     expected_rank = ["AAA", "BBB", "CCC"]  # 10 > 8 > 5
@@ -80,12 +86,10 @@ def test_system1_latest_only_parity_latest_day():
     assert full_symbols == expected_rank
 
     # Cross-validate metric equality for each symbol
-    fast_map = {
-        row.symbol: row for row in fast_df.itertuples() if row.date == latest_day
-    }
-    full_map = {c["symbol"]: c for c in full_by_date[latest_day]}
+    fast_map = fast_by_date[fast_latest_entry]
+    full_map = {c["symbol"]: c for c in full_by_date[fast_latest_entry]}
     for sym in expected_rank:
         assert sym in fast_map
         assert sym in full_map
-        assert float(fast_map[sym].roc200) == float(full_map[sym]["roc200"])  # type: ignore[index]
-        assert float(fast_map[sym].close) == float(full_map[sym]["close"])  # type: ignore[index]
+        assert float(fast_map[sym]["roc200"]) == float(full_map[sym]["roc200"])  # type: ignore[index]
+        assert float(fast_map[sym]["close"]) == float(full_map[sym]["close"])  # type: ignore[index]

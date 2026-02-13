@@ -4,7 +4,7 @@
 #
 # 前提条件：
 #   - 6 日上昇サージを検出して空売りシグナル生成
-#   - 高変動性環境で機能（HV 上昇確認）
+#   - 6日サージ後の反落を狙うショート戦略
 #   - 指標は precomputed のみ使用
 #   - フロー: setup() → rank() → signals() の順序実行
 #   - 候補数が 0 になることは正常（サージ条件が厳しい）
@@ -55,8 +55,6 @@ logger = logging.getLogger(__name__)
 # System6 configuration constants
 MIN_PRICE = 5.0  # 最低価格フィルター（ドル）
 MIN_DOLLAR_VOLUME_50 = 10_000_000  # 最低ドルボリューム50日平均（ドル）
-HV50_BOUNDS_PERCENT = (10.0, 40.0)
-HV50_BOUNDS_FRACTION = (0.10, 0.40)
 
 # Shared metrics collector to avoid file handle leaks
 _metrics = MetricsCollector()
@@ -69,10 +67,9 @@ SYSTEM6_FEATURE_COLUMNS = [
     "UpTwoDays",
     "filter",
     "setup",
-    "hv50",
 ]
 SYSTEM6_ALL_COLUMNS = SYSTEM6_BASE_COLUMNS + SYSTEM6_FEATURE_COLUMNS
-SYSTEM6_NUMERIC_COLUMNS = ["atr10", "dollarvolume50", "return_6d", "hv50"]
+SYSTEM6_NUMERIC_COLUMNS = ["atr10", "dollarvolume50", "return_6d"]
 LATEST_ONLY_TAIL_ROWS = 5
 SYSTEM6_LATEST_ONLY_COLUMNS = (
     "Open",
@@ -85,7 +82,6 @@ SYSTEM6_LATEST_ONLY_COLUMNS = (
     "return_6d",
     "uptwodays",
     "UpTwoDays",
-    "hv50",
 )
 
 # System6 Setup Constants
@@ -101,24 +97,19 @@ def _apply_filter_conditions(df: pd.DataFrame) -> pd.DataFrame:
     """Apply System6 filter conditions, preserving existing 'filter' column if present.
 
     Args:
-        df: DataFrame with required indicators (Low, dollarvolume50, hv50)
+        df: DataFrame with required indicators (Close, dollarvolume50)
 
     Returns:
         DataFrame with 'filter' column added/updated
     """
     result = df.copy()
 
-    low = pd.to_numeric(result["Low"], errors="coerce")
+    close = pd.to_numeric(result["Close"], errors="coerce")
     dvol50 = pd.to_numeric(result["dollarvolume50"], errors="coerce")
-    hv50 = pd.to_numeric(result["hv50"], errors="coerce")
 
-    hv50_percent = hv50.between(*HV50_BOUNDS_PERCENT)
-    hv50_fraction = hv50.between(*HV50_BOUNDS_FRACTION)
-    hv50_condition = (hv50_percent | hv50_fraction).fillna(False)
-
-    computed_filter = (
-        (low >= MIN_PRICE) & (dvol50 > MIN_DOLLAR_VOLUME_50) & hv50_condition
-    ).fillna(False)
+    computed_filter = ((close >= MIN_PRICE) & (dvol50 > MIN_DOLLAR_VOLUME_50)).fillna(
+        False
+    )
 
     if "filter" in result.columns:
         existing = (
@@ -347,7 +338,6 @@ def prepare_data_vectorized_system6(
                     "dollarvolume50",
                     "return_6d",
                     "atr10",
-                    "hv50",
                 )
                 if any(col not in x.columns for col in required_cols):
                     fallback_symbols.append(symbol)
@@ -525,6 +515,7 @@ def generate_candidates_system6(
         pass
 
     candidates_by_date: dict[pd.Timestamp, list] = {}
+    entry_date_cache: dict[pd.Timestamp, pd.Timestamp] = {}
 
     # === Fast Path: latest_only ===
     if latest_only:
@@ -669,11 +660,21 @@ def generate_candidates_system6(
                     continue
                 atr10 = last_row.get("atr10", None)
                 date_counter[dt] = date_counter.get(dt, 0) + 1
+                # Signal date -> next NYSE trading day entry
+                try:
+                    from common.utils_spy import resolve_signal_entry_date
+
+                    entry_dt = resolve_signal_entry_date(dt)
+                except Exception:
+                    entry_dt = dt
+                if entry_dt is None or pd.isna(entry_dt):
+                    entry_dt = dt
                 entry_price = last_row.get("Close") if "Close" in df else None
                 rows.append(
                     {
                         "symbol": sym,
                         "date": dt,
+                        "entry_date": pd.Timestamp(entry_dt).normalize(),
                         "return_6d": return_6d,
                         "atr10": atr10,
                         "entry_price": entry_price,
@@ -819,7 +820,7 @@ def generate_candidates_system6(
                 columns=[c for c in meta_cols if c in df_all.columns]
             )
 
-            normalized = normalize_dataframe_to_by_date(df_public)
+            normalized = normalize_dataframe_to_by_date(df_public, date_col="entry_date")
 
             if log_callback:
                 try:
@@ -997,9 +998,9 @@ def generate_candidates_system6(
                 skipped += 1
                 continue
             for date, row in setup_days.iterrows():
-                # 日付変換を簡略化（営業日補正なしで高速化）
+                # date はシグナル日（setup=True の日）。翌NYSE営業日にエントリーする。
                 if isinstance(date, pd.Timestamp):
-                    entry_date = date
+                    signal_dt = pd.Timestamp(date).normalize()
                 else:
                     # 安全な型のみ受け付ける（文字列 / 日付 / 数値インデックス想定）
                     if isinstance(date, (str, int, float)) or hasattr(date, "__str__"):
@@ -1007,15 +1008,29 @@ def generate_candidates_system6(
                             maybe_date = pd.to_datetime(str(date), errors="coerce")
                             if pd.isna(maybe_date):
                                 continue
-                            entry_date = pd.Timestamp(maybe_date).normalize()
+                            signal_dt = pd.Timestamp(maybe_date).normalize()
                         except Exception:
                             continue
                     else:
                         continue
 
+                entry_date = entry_date_cache.get(signal_dt)
+                if entry_date is None:
+                    try:
+                        from common.utils_spy import resolve_signal_entry_date
+
+                        entry_date = resolve_signal_entry_date(signal_dt)
+                    except Exception:
+                        entry_date = signal_dt
+                    entry_date_cache[signal_dt] = entry_date
+                if entry_date is None or pd.isna(entry_date):
+                    continue
+                entry_date = pd.Timestamp(entry_date).normalize()
+
                 rec = {
                     "symbol": sym,
                     "entry_date": entry_date,
+                    "signal_date": signal_dt,
                     "entry_price": last_price,
                     "return_6d": row["return_6d"],
                     "atr10": row["atr10"],

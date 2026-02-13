@@ -13,6 +13,8 @@ import pandas as pd
 from common.integrated_backtest import (
     DEFAULT_ALLOCATIONS,
     SystemState,
+    _build_rust_payload,
+    _canonicalize_rust_trades_for_python_parity,
     _compute_entry_exit,
     _get_side,
     _symbol_open_in_active,
@@ -230,3 +232,163 @@ class TestParameterValidation:
         # Should return a tuple with expected structure
         assert isinstance(result, tuple)
         assert len(result) == 2
+
+    def test_run_integrated_backtest_uses_rust_output_when_enabled(self):
+        """engine=rust かつ bridge が結果を返す場合はそれを採用する。"""
+        mock_strategy = _create_mock_strategy()
+        prepared_data = {"TEST": _create_sample_df(10)}
+        candidates = {
+            pd.Timestamp("2023-01-05"): [
+                {"entry_date": pd.Timestamp("2023-01-05"), "symbol": "TEST"}
+            ]
+        }
+        state = SystemState(
+            name="System1",
+            side="long",
+            strategy=mock_strategy,
+            prepared=prepared_data,
+            candidates_by_date=candidates,
+        )
+        expected_df = pd.DataFrame(
+            [
+                {
+                    "system": "System1",
+                    "side": "long",
+                    "symbol": "TEST",
+                    "entry_date": pd.Timestamp("2023-01-05"),
+                    "exit_date": pd.Timestamp("2023-01-06"),
+                    "entry_price": 100.0,
+                    "exit_price": 105.0,
+                    "shares": 1,
+                    "pnl": 5.0,
+                    "return_%": 0.05,
+                }
+            ]
+        )
+        with (
+            patch(
+                "common.integrated_backtest_rust_bridge.should_use_rust_engine",
+                return_value=True,
+            ),
+            patch(
+                "common.integrated_backtest_rust_bridge.run_rust_backtest_core",
+                return_value=expected_df,
+            ),
+        ):
+            trades_df, signal_counts = run_integrated_backtest(
+                [state], initial_capital=10000, engine="rust"
+            )
+
+        assert isinstance(trades_df, pd.DataFrame)
+        assert len(trades_df) == 1
+        assert signal_counts["System1"] == 1
+
+    def test_build_rust_payload_preserves_invalid_candidates_for_slot_semantics(self):
+        """無効候補も payload に残して slots 消費の挙動をPython側と一致させる。"""
+
+        class _SimpleStrategy:
+            def __init__(self):
+                self.config = {"max_positions": 5, "risk_pct": 0.02, "max_pct": 0.1}
+
+            def calculate_position_size(self, *_args, **_kwargs):
+                return 1
+
+            def compute_entry(self, _df, _candidate, _capital):
+                return (10.0, 9.0)
+
+            def compute_exit(self, df, entry_idx, _entry_price, _stop_price):
+                exit_idx = min(int(entry_idx) + 1, len(df) - 1)
+                return (11.0, df.index[exit_idx])
+
+        dt = pd.Timestamp("2023-01-05")
+        df = _create_sample_df(10)
+        strategy = _SimpleStrategy()
+        state = SystemState(
+            name="System1",
+            side="long",
+            strategy=strategy,
+            prepared={
+                "GOOD1": df,
+                "GOOD2": df,
+                # BAD は意図的に未投入（invalid placeholder 期待）
+            },
+            candidates_by_date={
+                dt: [
+                    {"entry_date": dt, "symbol": "GOOD1"},
+                    {"entry_date": dt, "symbol": "BAD"},
+                    {"entry_date": dt, "symbol": "GOOD2"},
+                ]
+            },
+        )
+
+        payload, _ = _build_rust_payload(
+            [state],
+            initial_capital=10000.0,
+            allocations={"System1": 1.0},
+            long_share=1.0,
+            short_share=0.0,
+            allow_gross_leverage=False,
+            min_hold_days=0,
+        )
+
+        opps = payload["opportunities"]
+        assert len(opps) == 3
+        assert [o["symbol"] for o in opps] == ["GOOD1", "BAD", "GOOD2"]
+        assert [bool(o["is_valid"]) for o in opps] == [True, False, True]
+
+    def test_canonicalize_rust_trades_uses_payload_prices_and_python_rounding(self):
+        """Rust出力の丸め差を payload 基準でPython側に正規化する。"""
+
+        class _SimpleStrategy:
+            def __init__(self):
+                self.config = {"max_positions": 5}
+
+            def compute_pnl(self, entry_price: float, exit_price: float, shares: int) -> float:
+                return (exit_price - entry_price) * shares
+
+        trades = pd.DataFrame(
+            [
+                {
+                    "system": "System1",
+                    "side": "long",
+                    "symbol": "TEST",
+                    "entry_date": pd.Timestamp("2023-01-05"),
+                    "exit_date": pd.Timestamp("2023-01-06"),
+                    "entry_price": 10.0,
+                    "exit_price": 10.07,
+                    "shares": 1,
+                    "pnl": 0.07,
+                    "return_%": 0.1,
+                }
+            ]
+        )
+        payload = {
+            "opportunities": [
+                {
+                    "system": "System1",
+                    "side": "long",
+                    "symbol": "TEST",
+                    "entry_date": "2023-01-05",
+                    "exit_date": "2023-01-06",
+                    "entry_price": 10.0,
+                    "exit_price": 10.065,  # Python round(..., 2) -> 10.06
+                    "is_valid": True,
+                }
+            ]
+        }
+        state = SystemState(
+            name="System1",
+            side="long",
+            strategy=_SimpleStrategy(),
+            prepared={},
+            candidates_by_date={},
+        )
+
+        normalized = _canonicalize_rust_trades_for_python_parity(
+            trades,
+            payload=payload,
+            name_to_state={"System1": state},
+        )
+
+        assert float(normalized.iloc[0]["exit_price"]) == 10.06
+        assert float(normalized.iloc[0]["pnl"]) == 0.06

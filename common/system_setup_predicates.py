@@ -41,7 +41,7 @@ from common.indicator_access import get_indicator
 from common.indicator_access import to_float as indicator_to_float
 
 # System5 の ATR% 閾値: core/system5.DEFAULT_ATR_PCT_THRESHOLD と揃える (循環依存回避のため再定義)
-DEFAULT_ATR_PCT_THRESHOLD: float = 0.025
+DEFAULT_ATR_PCT_THRESHOLD: float = 0.04
 
 
 # --- 汎用ユーティリティ ----------------------------------------------------
@@ -64,7 +64,7 @@ def _all_not_nan(values: list[float]) -> bool:
 
 # --- System1 -----------------------------------------------------------------
 # Phase 2 filter: Close>=5, dollarvolume20>=50M
-# Phase 6 setup: SMA25>SMA50, ROC200>0
+# Phase 6 setup: SMA25>SMA50
 # This predicate combines both for complete evaluation
 
 
@@ -75,7 +75,7 @@ def system1_setup_predicate(
 
     Conditions (Two-Phase safety included):
       - Phase 2 filter (safety): Close >= 5 and dollarvolume20 >= 50M
-      - Phase 6 setup: sma25 > sma50 and roc200 > 0
+      - Phase 6 setup: sma25 > sma50
 
     Returns:
       - When return_reason=False (default): bool
@@ -83,7 +83,7 @@ def system1_setup_predicate(
 
     Reason codes:
       - "missing_price_or_volume" | "filter_phase2"
-      - "missing_sma" | "missing_roc200" | "sma_trend" | "roc200"
+      - "missing_sma" | "sma_trend"
       - "exception" (unexpected error)
     """
     try:
@@ -101,25 +101,18 @@ def system1_setup_predicate(
             result = (False, "filter_phase2")
             return result if return_reason else result[0]
 
-        # Phase 6 setup (SMA trend + ROC200 momentum)
+        # Phase 6 setup (SMA trend)
         sma25_v: float = indicator_to_float(get_indicator(row_map, "sma25"))
         sma50_v: float = indicator_to_float(get_indicator(row_map, "sma50"))
-        roc200_v: float = indicator_to_float(get_indicator(row_map, "roc200"))
         if math.isnan(sma25_v) or math.isnan(sma50_v):
             result = (False, "missing_sma")
             return result if return_reason else result[0]
-        if math.isnan(roc200_v):
-            result = (False, "missing_roc200")
-            return result if return_reason else result[0]
 
-        ok: bool = (sma25_v > sma50_v) and (roc200_v > 0.0)
+        ok: bool = sma25_v > sma50_v
         if return_reason:
             if ok:
                 return True, None
-            # 詳細な失敗理由
-            if not (sma25_v > sma50_v):
-                return False, "sma_trend"
-            return False, "roc200"
+            return False, "sma_trend"
         return ok
     except Exception:
         return (False, "exception") if return_reason else False
@@ -138,7 +131,7 @@ def system1_setup_predicate_bool(row: pd.Series) -> bool:
 
 
 # --- System3 -----------------------------------------------------------------
-# Phase 2 filter: Low>=1, AvgVol50>=1M, atr_ratio>=0.05
+# Phase 2 filter: Close>=1, AvgVol50>=1M, atr_ratio>=0.05
 # Phase 6 setup: Close>SMA150, drop3d>=0.125
 # This predicate combines both for complete evaluation
 
@@ -149,7 +142,7 @@ def system3_setup_predicate(
     """System3 setup predicate with optional reason.
 
     Conditions (Two-Phase safety included):
-      - Phase 2 filter: low >= 1 and avgvolume50 >= 1M and atr_ratio >= threshold
+      - Phase 2 filter: close >= 1 and avgvolume50 >= 1M and atr_ratio >= 0.05
       - Phase 6 setup: close > sma150 and drop3d >= 0.125
 
     Reason codes:
@@ -163,28 +156,14 @@ def system3_setup_predicate(
 
         row_map: _Mapping[str, Any] = _cast(_Mapping[str, Any], row)
         # Phase 2 filter (safety check)
-        # NOTE: keep this logic consistent with core/system3.prepare_data_vectorized_system3
-        # which uses Close >= 5 and dollarvolume20 > 25_000_000 as the Phase2 filter.
         close_v: float = indicator_to_float(get_indicator(row_map, "Close"))
-        dv20_v: float = indicator_to_float(get_indicator(row_map, "dollarvolume20"))
+        avgvol50_v: float = indicator_to_float(get_indicator(row_map, "avgvolume50"))
         atr_ratio: float = indicator_to_float(get_indicator(row_map, "atr_ratio"))
 
-        # ATR 閾値（テスト時は環境変数による上書きを許可）
-        atr_thr = 0.05
-        try:
-            from config.environment import get_env_config as _get_env  # 遅延 import
-
-            _env = _get_env()
-            if _env.min_atr_ratio_for_test is not None:
-                atr_thr = float(_env.min_atr_ratio_for_test)
-        except Exception:
-            # 環境の取得に失敗しても既定値で継続
-            atr_thr = 0.05
-
-        if math.isnan(close_v) or math.isnan(dv20_v) or math.isnan(atr_ratio):
+        if math.isnan(close_v) or math.isnan(avgvol50_v) or math.isnan(atr_ratio):
             result = (False, "missing_filter_fields")
             return result if return_reason else result[0]
-        if not (close_v >= 5.0 and dv20_v > 25_000_000 and atr_ratio >= atr_thr):
+        if not (close_v >= 1.0 and avgvol50_v >= 1_000_000 and atr_ratio >= 0.05):
             result = (False, "filter_phase2")
             return result if return_reason else result[0]
 
@@ -262,7 +241,9 @@ def system4_setup_predicate(row: pd.Series) -> bool:
 
 
 # --- System5 -----------------------------------------------------------------
-# 条件 (filter == setup): Close>=5, adx7>35, atr_pct>DEFAULT_ATR_PCT_THRESHOLD
+# 条件:
+# - filter: avgvolume50>500k, dollarvolume50>2.5M, atr_pct>4%
+# - setup: filter + close>(sma100+atr10), adx7>55, rsi3<50
 
 
 def system5_setup_predicate(
@@ -270,16 +251,23 @@ def system5_setup_predicate(
 ) -> bool:
     try:
         close = _to_float(row.get("Close"))
+        sma100 = _to_float(row.get("sma100"))
+        atr10 = _to_float(row.get("atr10"))
         adx7 = _to_float(row.get("adx7"))
+        rsi3 = _to_float(row.get("rsi3"))
         atr_pct = _to_float(row.get("atr_pct"))
+        avgvol50 = _to_float(row.get("avgvolume50"))
+        dvol50 = _to_float(row.get("dollarvolume50"))
         threshold = (
             atr_pct_threshold
             if atr_pct_threshold is not None
             else DEFAULT_ATR_PCT_THRESHOLD
         )
-        if not _all_not_nan([close, adx7, atr_pct]):
+        if not _all_not_nan([close, sma100, atr10, adx7, rsi3, atr_pct, avgvol50, dvol50]):
             return False
-        return (close >= 5.0) and (adx7 > 35.0) and (atr_pct > threshold)
+        filter_ok = (avgvol50 > 500_000.0) and (dvol50 > 2_500_000.0) and (atr_pct > threshold)
+        setup_ok = (close > (sma100 + atr10)) and (adx7 > 55.0) and (rsi3 < 50.0)
+        return filter_ok and setup_ok
     except Exception:
         return False
 

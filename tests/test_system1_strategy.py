@@ -9,7 +9,6 @@ from __future__ import annotations
 from unittest.mock import Mock, patch
 
 import pandas as pd
-import pytest
 
 from strategies.system1_strategy import System1Strategy
 
@@ -83,10 +82,8 @@ class TestSystem1Strategy:
             "SPY": pd.DataFrame({"Close": [400, 401], "ROC200": [0.05, 0.06]}),
         }
 
-        with patch(
-            "strategies.system1_strategy.generate_roc200_ranking_system1"
-        ) as mock_generate:
-            mock_generate.return_value = {"2023-01-01": ["AAPL"]}
+        with patch("strategies.system1_strategy.generate_candidates_system1") as mock_generate:
+            mock_generate.return_value = ({}, pd.DataFrame())
 
             self.strategy.generate_candidates(mock_data_dict, top_n=5)
 
@@ -102,14 +99,13 @@ class TestSystem1Strategy:
             "SPY": pd.DataFrame({"Close": [400, 401]}),
         }
 
-        with patch(
-            "strategies.system1_strategy.generate_roc200_ranking_system1"
-        ) as mock_generate:
+        with patch("strategies.system1_strategy.generate_candidates_system1") as mock_generate:
             with patch("config.settings.get_settings") as mock_get_settings:
                 mock_settings = Mock()
                 mock_settings.backtest.top_n_rank = 15
+                mock_settings.strategies = {}
                 mock_get_settings.return_value = mock_settings
-                mock_generate.return_value = {"2023-01-01": ["AAPL"]}
+                mock_generate.return_value = ({}, pd.DataFrame())
 
                 self.strategy.generate_candidates(mock_data_dict)
 
@@ -118,11 +114,57 @@ class TestSystem1Strategy:
                 assert call_kwargs["top_n"] == 15
 
     def test_generate_candidates_missing_spy_data(self):
-        """Test generate_candidates raises error when SPY data missing"""
+        """System1 candidate generation no longer requires explicit SPY in data_dict."""
         mock_data_dict = {"AAPL": pd.DataFrame({"Close": [100, 101]})}
 
-        with pytest.raises(ValueError, match="SPY data not found"):
-            self.strategy.generate_candidates(mock_data_dict)
+        by_date, df = self.strategy.generate_candidates(mock_data_dict)
+        assert isinstance(by_date, dict)
+        assert df is not None
+        assert df.empty
+
+    def test_generate_candidates_applies_spy_sma100_gate(self):
+        """System1 strategy must enforce SPY > SMA100 gate on candidates."""
+        mock_data_dict = {
+            "AAPL": pd.DataFrame({"Close": [100, 101]}),
+        }
+        spy_df = pd.DataFrame(
+            {"Close": [90.0], "sma100": [100.0]},
+            index=pd.to_datetime(["2023-01-01"]),
+        )
+        core_candidates = {
+            "2023-01-02": {
+                "AAPL": {
+                    "symbol": "AAPL",
+                    "date": "2023-01-01",
+                    "entry_date": "2023-01-02",
+                }
+            }
+        }
+        core_merged = pd.DataFrame(
+            [{"symbol": "AAPL", "date": "2023-01-01", "entry_date": "2023-01-02"}]
+        )
+        core_diag = {
+            "ranking_source": "roc200",
+            "setup_predicate_count": 1,
+            "ranked_top_n_count": 1,
+        }
+
+        with patch("strategies.system1_strategy.generate_candidates_system1") as mock_generate:
+            mock_generate.return_value = (core_candidates, core_merged, core_diag)
+            by_date, merged_df = self.strategy.generate_candidates(
+                mock_data_dict,
+                market_df=spy_df,
+            )
+
+        assert by_date == {}
+        assert merged_df is not None
+        assert merged_df.empty
+        assert self.strategy.last_diagnostics is not None
+        assert self.strategy.last_diagnostics["spy_gate_condition"] == "SPY close > SMA100"
+        assert self.strategy.last_diagnostics["spy_gate_total_candidates_before"] == 1
+        assert self.strategy.last_diagnostics["spy_gate_total_candidates_after"] == 0
+        assert self.strategy.last_diagnostics["spy_gate_dropped"] == 1
+        assert self.strategy.last_diagnostics["ranked_top_n_count"] == 0
 
     def test_run_backtest(self):
         """Test run_backtest execution"""
@@ -139,9 +181,7 @@ class TestSystem1Strategy:
             }
         )
 
-        with patch(
-            "strategies.system1_strategy.simulate_trades_with_risk"
-        ) as mock_simulate:
+        with patch("common.backtest_utils.simulate_trades_with_risk") as mock_simulate:
             mock_simulate.return_value = (mock_trades_df, {})
 
             result = self.strategy.run_backtest(
@@ -217,8 +257,8 @@ class TestSystem1Strategy:
         assert exit_price == 90.0
         assert exit_date == dates[2]
 
-    def test_compute_exit_max_hold_days(self):
-        """Test compute_exit when max hold days reached"""
+    def test_compute_exit_holds_until_series_end_without_stop(self):
+        """System1 has no fixed max-hold; it exits at series end if stops never hit."""
         dates = pd.date_range("2023-01-01", periods=5, freq="D")
         df = pd.DataFrame(
             {
@@ -230,7 +270,7 @@ class TestSystem1Strategy:
             index=dates,
         )
 
-        self.strategy.config = {"max_hold_days": 2}
+        self.strategy.config = {"trailing_pct": 0.25}
         entry_idx = 1
         entry_price = 101.0
         stop_price = 90.0
@@ -239,9 +279,9 @@ class TestSystem1Strategy:
             df, entry_idx, entry_price, stop_price
         )
 
-        # Should exit at close price after max_hold_days (index 3)
-        assert exit_price == 103.5
-        assert exit_date == dates[3]
+        # No stop/trailing trigger -> exit on last available close
+        assert exit_price == 104.5
+        assert exit_date == dates[4]
 
     def test_get_total_days(self):
         """Test get_total_days method"""

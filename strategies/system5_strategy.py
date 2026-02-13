@@ -5,7 +5,7 @@
 # 前提条件：
 #   - ロジック本体は core/system5.py。このファイルは orchestration のみ
 #   - 高 ADX 環境（ADX7 > 55）でのミーン・リバージョン狙い
-#   - ATR_Pct による変動性フィルター（> 2.5%）
+#   - ATR_Pct による変動性フィルター（> 4.0%）
 #   - RSI3 < 50 で過売り確認
 #   - 最終配分は finalize_allocation() で一元化
 #
@@ -215,7 +215,18 @@ class System5Strategy(AlpacaOrderMixin, StrategyBase):
         ratio = float(
             getattr(self, "config", {}).get("entry_price_ratio_vs_prev_close", 0.97)
         )
-        entry_price = round(prev_close * ratio, 2)
+        limit_price = round(prev_close * ratio, 2)
+
+        # Buy limit: fill only if the entry day's Low touches the limit.
+        # If Open is already below/at the limit, assume a better fill at Open.
+        try:
+            o = float(df.iloc[entry_idx]["Open"])
+            low = float(df.iloc[entry_idx]["Low"])
+        except Exception:
+            return None
+        if low > limit_price:
+            return None
+        entry_price = round(o if o <= limit_price else limit_price, 2)
         atr = None
         for col in ("atr10", "ATR10"):
             try:
@@ -232,7 +243,7 @@ class System5Strategy(AlpacaOrderMixin, StrategyBase):
             )
         )
         stop_price = entry_price - stop_mult * atr
-        if entry_price - stop_price <= 0:
+        if entry_price - stop_price <= 0 or stop_price <= 0:
             return None
         self._last_entry_atr = atr
         return entry_price, stop_price

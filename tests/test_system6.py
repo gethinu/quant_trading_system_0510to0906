@@ -35,7 +35,8 @@ def test_placeholder_run(dummy_data):
     df = pd.DataFrame(
         {
             "Open": [100, 100, 100, 100],
-            "High": [100, 100, 100, 100],
+            # Short limit at 1.05 * prev_close (=105.0) should fill only if High touches it
+            "High": [100, 105, 100, 100],
             "Low": [100, 100, 100, 100],
             "Close": [100, 105, 90, 95],
             "Volume": [1_000_000] * 4,
@@ -57,7 +58,8 @@ def test_entry_rule_limit_short():
     df = pd.DataFrame(
         {
             "Open": [100, 100],
-            "High": [101, 101],
+            # Ensure entry-day High touches the limit (105.0)
+            "High": [101, 105],
             "Low": [99, 99],
             "Close": [100, 100],
             "ATR10": [1, 1],
@@ -76,7 +78,8 @@ def test_system6_profit_target_exits_next_close():
     df = pd.DataFrame(
         {
             "Open": [100] * 5,
-            "High": [100, 100, 107, 100, 100],
+            # Ensure entry-day High touches the limit (105.0)
+            "High": [100, 105, 107, 100, 100],
             "Low": [99, 99, 97, 95, 95],
             "Close": [100, 100, 99, 95, 95],
             "ATR10": [1] * 5,
@@ -103,7 +106,8 @@ def test_system6_stop_exit_same_day_at_stop_price():
     df = pd.DataFrame(
         {
             "Open": [100] * 4,
-            "High": [100, 100, 110, 100],
+            # Ensure entry-day High touches the limit (105.0)
+            "High": [100, 105, 110, 100],
             "Low": [99] * 4,
             "Close": [100, 100, 104, 100],
             "ATR10": [1] * 4,
@@ -132,7 +136,8 @@ def test_system6_time_exit_after_max_days_close():
     df = pd.DataFrame(
         {
             "Open": [100] * periods,
-            "High": [100, 100] + [107] * (periods - 2),
+            # Ensure entry-day High touches the limit (105.0)
+            "High": [100, 105] + [107] * (periods - 2),
             "Low": [99] * periods,
             "Close": [100, 100] + [103] * (periods - 2),
             "ATR10": [1] * periods,

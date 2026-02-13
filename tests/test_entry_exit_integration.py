@@ -109,7 +109,8 @@ class TestEntryExitIntegration:
                 "Open": [100, 102, 101, 99, 98, 97, 100, 103, 105, 107],
                 # profit target hit on the last bar
                 "High": [102, 104, 103, 101, 100, 99, 102, 105, 107, 115],
-                "Low": [99, 101, 100, 98, 97, 96, 99, 102, 104, 106],
+                # Entry day needs limit-touch for System3 (prev close * 0.93)
+                "Low": [99, 93, 100, 98, 97, 96, 99, 102, 104, 106],
                 "Close": [101, 103, 102, 100, 99, 98, 101, 104, 106, 108],
                 "ATR10": [1.5] * 10,
             },
@@ -167,7 +168,8 @@ class TestEntryExitIntegration:
             {
                 "Open": [100, 102, 101, 99, 98],
                 "High": [102, 104, 103, 101, 100],
-                "Low": [99, 101, 100, 98, 97],
+                # Entry day needs limit-touch for System3 (prev close * 0.93)
+                "Low": [99, 93, 100, 98, 97],
                 "Close": [101, 103, 102, 100, 99],
                 "ATR10": [1.5] * 5,
                 "ATR20": [2.0] * 5,
@@ -261,7 +263,8 @@ class TestEntryExitIntegration:
             {
                 "Open": [100, 100, 100, 100, 100, 100, 100, 100, 100, 100],
                 "High": [101, 103, 104, 104, 104, 104, 104, 104, 104, 104],
-                "Low": [99, 99, 99, 99, 99, 99, 99, 99, 99, 99],
+                # Limit buy at 0.97 * prev_close (=97.0) should fill only if Low touches it
+                "Low": [99, 97, 99, 99, 99, 99, 99, 99, 99, 99],
                 "Close": [100, 100, 102, 103, 103, 103, 103, 103, 103, 103],
                 "ATR10": [2.0] * 10,
             },
@@ -328,6 +331,61 @@ class TestEntryExitIntegration:
         assert r is not None
         entry_price, stop_price = r
         assert stop_price > entry_price  # ショートなので stop は上
+
+    def test_system7_exit_stop_same_day(self):
+        """System7: stop hit should exit same day at stop price"""
+        dates = pd.date_range("2025-01-01", periods=15, freq="D")
+        df = pd.DataFrame(
+            {
+                "Open": [100.0] * len(dates),
+                "High": [101.0] * len(dates),
+                "Low": [99.0] * len(dates),
+                "Close": [100.0] * len(dates),
+                "max_70": [130.0] * len(dates),
+            },
+            index=dates,
+        )
+        # entry_idx=3 の次日で stop 到達
+        df.iloc[4, df.columns.get_loc("High")] = 106.0
+
+        strategy = System7Strategy()
+        exit_price, exit_date = strategy.compute_exit(
+            df, entry_idx=3, _entry_price=100.0, stop_price=105.0
+        )
+        assert exit_date == dates[4]
+        assert exit_price == pytest.approx(105.0)
+
+    def test_system7_exit_profit_next_open_on_max70_break(self):
+        """System7: max_70 break should exit at next day's open"""
+        dates = pd.date_range("2025-01-01", periods=20, freq="D")
+        opens = [100.0] * len(dates)
+        highs = [101.0] * len(dates)
+        lows = [99.0] * len(dates)
+        closes = [100.0] * len(dates)
+        max70 = [130.0] * len(dates)
+
+        # idx=8 で max_70 条件を満たし、翌日寄りで決済
+        highs[8] = 121.0
+        max70[8] = 120.0
+        opens[9] = 97.5
+
+        df = pd.DataFrame(
+            {
+                "Open": opens,
+                "High": highs,
+                "Low": lows,
+                "Close": closes,
+                "max_70": max70,
+            },
+            index=dates,
+        )
+
+        strategy = System7Strategy()
+        exit_price, exit_date = strategy.compute_exit(
+            df, entry_idx=3, _entry_price=100.0, stop_price=140.0
+        )
+        assert exit_date == dates[9]
+        assert exit_price == pytest.approx(97.5)
 
 
 if __name__ == "__main__":

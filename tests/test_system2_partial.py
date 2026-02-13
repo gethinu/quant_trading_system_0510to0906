@@ -146,15 +146,15 @@ class TestGenerateCandidatesSystem2:
         assert pd.Timestamp("2023-01-03") in candidates_by_date
 
         candidates = candidates_by_date[pd.Timestamp("2023-01-03")]
-        assert len(candidates) == 1
+        assert len(candidates) == 1  # {symbol: payload}
 
-        candidate = candidates[0]
-        assert candidate["symbol"] == "AAPL"
-        assert candidate["entry_price"] == 105.0  # 直近終値
-        assert candidate["ADX7"] == 30.0
-        assert candidate["rank"] == 1
-        assert candidate["rank_total"] == 1
-        assert merged_df is None
+        assert "AAPL" in candidates
+        payload = candidates["AAPL"]
+        assert payload["close"] == 105.0  # 直近終値
+        assert payload["adx7"] == 30.0
+        assert payload["rank"] == 1
+        assert payload["rank_total"] == 1
+        assert merged_df is not None
 
     @patch("common.utils_spy.resolve_signal_entry_date")
     def test_multiple_symbols_ranking(self, mock_resolve):
@@ -187,16 +187,17 @@ class TestGenerateCandidatesSystem2:
         assert len(candidates) == 3
 
         # ADX7 降順で並んでいることを確認
-        assert candidates[0]["symbol"] == "TSLA"  # ADX7=35
-        assert candidates[0]["rank"] == 1
-        assert candidates[1]["symbol"] == "AAPL"  # ADX7=25
-        assert candidates[1]["rank"] == 2
-        assert candidates[2]["symbol"] == "MSFT"  # ADX7=20
-        assert candidates[2]["rank"] == 3
+        ordered = list(candidates.keys())
+        assert ordered[0] == "TSLA"  # ADX7=35
+        assert candidates["TSLA"]["rank"] == 1
+        assert ordered[1] == "AAPL"  # ADX7=25
+        assert candidates["AAPL"]["rank"] == 2
+        assert ordered[2] == "MSFT"  # ADX7=20
+        assert candidates["MSFT"]["rank"] == 3
 
         # 全候補のrank_totalが3
-        for candidate in candidates:
-            assert candidate["rank_total"] == 3
+        for payload in candidates.values():
+            assert payload["rank_total"] == 3
 
     @patch("common.utils_spy.resolve_signal_entry_date")
     def test_top_n_limiting(self, mock_resolve):
@@ -226,7 +227,7 @@ class TestGenerateCandidatesSystem2:
 
         # 上位3つのみが含まれている（ADX7が高い順）
         expected_symbols = ["SYM1", "SYM2", "SYM3"]
-        actual_symbols = [c["symbol"] for c in candidates]
+        actual_symbols = list(candidates.keys())
         assert actual_symbols == expected_symbols
 
     @patch("common.utils_spy.resolve_signal_entry_date")
@@ -333,9 +334,8 @@ class TestGenerateCandidatesSystem2:
         prepared_dict = {"AAPL": df}
 
         candidates_by_date, _ = generate_candidates_system2(prepared_dict)
-
-        candidate = candidates_by_date[pd.Timestamp("2023-01-03")][0]
-        assert candidate["entry_price"] is None
+        payload = candidates_by_date[pd.Timestamp("2023-01-03")]["AAPL"]
+        assert payload["close"] is None
 
     @patch("common.utils_spy.resolve_signal_entry_date")
     def test_empty_close_column_handling(self, mock_resolve):
@@ -354,9 +354,8 @@ class TestGenerateCandidatesSystem2:
         prepared_dict = {"AAPL": df}
 
         candidates_by_date, _ = generate_candidates_system2(prepared_dict)
-
-        candidate = candidates_by_date[pd.Timestamp("2023-01-03")][0]
-        assert candidate["entry_price"] is None
+        payload = candidates_by_date[pd.Timestamp("2023-01-03")]["AAPL"]
+        assert payload["close"] is None
 
 
 class TestIntegrationScenarios:
@@ -411,9 +410,8 @@ class TestIntegrationScenarios:
 
         # 両方の候補が含まれる
         assert len(candidates) == 2
-        symbols = [c["symbol"] for c in candidates]
-        assert "AAPL" in symbols
-        assert "TSLA" in symbols
+        assert "AAPL" in candidates
+        assert "TSLA" in candidates
 
 
 class TestPrepareDataVectorizedSystem2:
@@ -453,7 +451,7 @@ class TestPrepareDataVectorizedSystem2:
         result_df = result["AAPL"]
 
         # 必要な列が追加されている
-        expected_columns = ["ATR_Ratio", "TwoDayUp", "setup"]
+        expected_columns = ["atr_ratio", "twodayup", "setup"]
         for col in expected_columns:
             assert col in result_df.columns
 
