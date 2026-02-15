@@ -8,6 +8,7 @@ State Locations
 | `docs/llm/ARCHITECTURE.md` | LLM Reference | Runtime layer and ownership map | Versioned |
 | `docs/llm/INTERFACES.md` | LLM Reference | CLI/API/function/output contracts | Versioned |
 | `docs/llm/STATE.md` | LLM Reference | Persistent/ephemeral state inventory | Versioned |
+| `docs/llm/HANDOFF_POLYMARKET_CLOB_MM.md` | LLM Reference | Pointer + handoff for external Polymarket CLOB MM project | Versioned |
 | `rust/integrated_backtest_core/` | Rust Core | Integrated backtest allocation engine source | Versioned |
 | `data/symbol_system_map.json` | Allocation | Symbol-to-system mapping and integration constraints | Versioned |
 | `data_cache/full_backup/` | CacheManager | Raw long-term market data | Persistent source of truth |
