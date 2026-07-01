@@ -227,25 +227,34 @@ pip install -r requirements.txt
 
 ## データソース (Data source)
 
-日次 OHLCV は **Alpaca 無料 tier に切替済** です（旧 EODHD 有料 $20/月 → $0）。
+日次 OHLCV を **無料データソースに移行**し EODHD 有料 $20/月 → $0 化を進めています。
+プロバイダは同一スキーマ（columns / index / dtypes）の drop-in replacement として実装され、
+旧 `get_eodhd_data(symbol)` と透過的に差し替え可能です。
 
-- **API キー取得先**: <https://app.alpaca.markets/>
-- **feed**: 既定は **IEX**（無料）。SIP は有料（$99/月）のため使用しません。
+### 推奨: Polygon.io 無料 tier（本命・full-market volume）
+
+- **取得関数**: `common/polygon_data.py`
+  - `get_polygon_data(symbol)` — 単一銘柄の日次 OHLCV（EODHD 同一スキーマ）
+  - `get_polygon_grouped_daily(date)` — **1 call で全 US 銘柄の日足**（dv20/dv50 pre-compute 用）
+- **volume**: SIP 連結（全取引所 + FINRA/OTC/ATS）の **full-market**。min-ADV / 流動性フィルタが正常動作。
+- **料金**: **$0**。レート制限 5 req/min（Grouped Daily は 1 call/日で全銘柄のため実質非制約）。
+- **API キー取得先（無料）**: <https://polygon.io/dashboard/signup>
+- **環境変数**: `POLYGON_API_KEY`（未設定なら `ValueError` で fail-fast）。
+- **AdjClose**: `adjusted=true`（split/dividend 調整済）。Close は `adjusted=false`（raw）。
+
+### 補助: Alpaca IEX feed（発注連携用途／非推奨・株データ本番不可）
+
 - **取得関数**: `common/alpaca_data.py` の `get_alpaca_data(symbol)`。
-  旧 `get_eodhd_data(symbol)` と同一スキーマ（columns / index / dtypes）の
-  drop-in replacement です。
-- **環境変数**: `ALPACA_API_KEY`, `ALPACA_SECRET_KEY`（未設定なら `ValueError` で fail-fast）。
+- **環境変数**: `ALPACA_API_KEY`, `ALPACA_SECRET_KEY`。
 
-> ⚠️ **既知の制限（IEX feed の出来高過小）**
-> IEX feed の出来高は NASDAQ/NYSE 全体の **2〜3% しか反映されません**。
-> このため Volume は過小評価され、`min ADV`（最低平均出来高）系の
-> **流動性フィルタが全銘柄を棄却するリスク**があります。
-> 桁数が想定より小さい場合の選択肢:
-> 1. **SIP feed に切替**（`ALPACA_FEED=sip`、有料 $99/月）
-> 2. **Stooq フォールバック**（`common/stooq_data.py`、無料・日足のみ・出来高は取引所全体ベース。現状 stub 未実装）
+> ⚠️ **既知の制限（IEX feed の出来高過小・実証済）**
+> IEX feed の出来高は全市場の **約 2〜4% しか反映されません**（実測: 真値の約 1/26）。
+> 確定候補 27 銘柄で min-ADV / 生株数フィルタ生存率が **12〜25%** まで低下することを実証済。
+> このため **株の日次データ本番運用には非推奨**。full-market volume が要る用途では
+> **Polygon.io（上記・無料）** を使用してください。SIP 切替（`ALPACA_FEED=sip`）は
+> 有料 $99/月で EODHD より高コストになるため退行です。
 >
-> どちらを採るかは smoke test（`tests/test_alpaca_data_smoke.py`）の
-> 直近 Volume 桁数を確認して判断してください。
+> `common/stooq_data.py`（stub）は API 無し・daily hits quota・ティッカーマッピング困難のため却下。
 
 ### Bulk API 品質設定（2025-10-12 改善）
 
