@@ -29,11 +29,16 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
+
+# スクリプトを直接 (python scripts/daily_polygon_monitor.py / .ps1 経由) 実行しても
+# リポジトリ直下の `common` パッケージを解決できるようにする。
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +65,8 @@ class SystemSurvival:
     ratio: float = 0.0
     warn_threshold: float = 0.0
     status: str = "pending"  # ok | warn | fail | pending
+    survived_tickers: list[str] = field(default_factory=list)
+    rejected_tickers: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -113,39 +120,288 @@ def fetch_grouped_daily(target_date: str) -> Any:
     return get_polygon_grouped_daily(target_date)
 
 
-def load_dv_cache(target_date: str) -> Any:
-    """既存 data_cache/*.feather から前日の DollarVolume20/50 を lookup。
+def _load_dv_from_base_cache(cache_dir: Path) -> dict[str, dict[str, float]]:
+    """``data_cache/base/*.feather`` から各銘柄の最新 DollarVolume20/50 を読む。"""
+    out: dict[str, dict[str, float]] = {}
+    base_dir = cache_dir / "base"
+    if not base_dir.exists():
+        return out
+    import pandas as pd  # 遅延 import
 
-    TODO(polygon-key-added-iter): cache_manager 経由で symbol -> {DV20, DV50, Close, Low}
-    の dict を返す実装を追加。cache miss は Grouped Daily 過去 60 日を fetch で on-the-fly 補完。
+    for fp in base_dir.glob("*.feather"):
+        try:
+            df = pd.read_feather(fp)
+        except Exception:  # pragma: no cover - 壊れた feather はスキップ
+            continue
+        if df is None or df.empty:
+            continue
+        cols = {c.lower(): c for c in df.columns}
+        dv20c, dv50c = cols.get("dollarvolume20"), cols.get("dollarvolume50")
+        if not dv20c and not dv50c:
+            continue
+        last = df.iloc[-1]
+        sym = fp.stem.upper()
+        rec: dict[str, float] = {}
+        if dv20c is not None:
+            rec["DollarVolume20"] = float(last.get(dv20c, float("nan")))
+        if dv50c is not None:
+            rec["DollarVolume50"] = float(last.get(dv50c, float("nan")))
+        out[sym] = rec
+    return out
+
+
+def _compute_dv_from_grouped(
+    target_date: str, lookback_days: int, sleep_seconds: float
+) -> dict[str, dict[str, float]]:
+    """Grouped Daily を過去 ``lookback_days`` 営業日分 fetch し DV20/50 を on-the-fly 計算。
+
+    cache miss (base feather 未整備) 時のフォールバック。Close×Volume の
+    直近 20/50 営業日平均を全銘柄まとめてベクトル計算する。
     """
-    logger.info("[skeleton] load_dv_cache: target_date=%s (implementation deferred)", target_date)
-    return {}
+    import time
+
+    import pandas as pd
+
+    from common.polygon_data import get_polygon_grouped_daily
+
+    end = datetime.strptime(target_date, "%Y-%m-%d").date()
+    days: list[date] = []
+    d = end
+    guard = 0
+    while len(days) < lookback_days and guard < lookback_days * 3 + 10:
+        if d.weekday() < 5:
+            days.append(d)
+        d -= timedelta(days=1)
+        guard += 1
+    days = sorted(days)
+
+    dv_cols: list[Any] = []
+    fetched = 0
+    for i, dd in enumerate(days):
+        g = get_polygon_grouped_daily(dd.isoformat())
+        if g is not None and not g.empty:
+            dv = g["Close"].astype("float64") * g["Volume"].astype("float64")
+            dv.name = dd.isoformat()
+            dv_cols.append(dv)
+            fetched += 1
+        if sleep_seconds > 0 and i < len(days) - 1:
+            time.sleep(sleep_seconds)
+    logger.info("on-the-fly DV: %d/%d 営業日を取得", fetched, len(days))
+    if not dv_cols:
+        return {}
+
+    mat = pd.concat(dv_cols, axis=1)
+    mat = mat.reindex(sorted(mat.columns), axis=1)  # 日付昇順
+    dv20 = mat.iloc[:, -20:].mean(axis=1)
+    dv50 = mat.iloc[:, -50:].mean(axis=1)
+    out: dict[str, dict[str, float]] = {}
+    for sym in mat.index:
+        out[str(sym).upper()] = {
+            "DollarVolume20": float(dv20.loc[sym]),
+            "DollarVolume50": float(dv50.loc[sym]),
+        }
+    return out
 
 
-def evaluate_survival(grouped_df: Any, dv_cache: dict[str, Any]) -> dict[str, SystemSurvival]:
-    """sys1-7 それぞれの gate 生存率を計算する。
+def load_dv_cache(
+    target_date: str,
+    *,
+    lookback_days: int = 0,
+    sleep_seconds: float = 13.0,
+    cache_dir: Path | None = None,
+) -> dict[str, dict[str, float]]:
+    """symbol -> {"DollarVolume20", "DollarVolume50"} の dict を返す。
 
-    TODO(polygon-key-added-iter): grouped_df / dv_cache を join し、SYSTEM_GATES の閾値を
-    適用して n_pass / ratio / status を埋める。現状は空の SystemSurvival を返すだけ。
+    優先順位:
+        1. ``data_cache/base/*.feather`` の最新 DollarVolume20/50 (cache_daily_polygon
+           / cache_daily_data で整備済のもの)。
+        2. cache coverage が薄い場合、``lookback_days`` > 0 なら Grouped Daily を
+           その日数だけ fetch して Close×Volume の 20/50 日平均を on-the-fly 計算し
+           cache を補完する (base 値を優先し、欠けている銘柄のみ埋める)。
+
+    Parameters
+    ----------
+    target_date : str
+        対象取引日 (YYYY-MM-DD)。on-the-fly 計算の終端。
+    lookback_days : int
+        on-the-fly 補完で fetch する営業日数 (0 = base cache のみ)。DV50 には 50 以上推奨。
     """
+    if cache_dir is None:
+        try:
+            from config.settings import get_settings
+
+            cache_dir = Path(get_settings(create_dirs=False).DATA_CACHE_DIR)
+        except Exception:
+            cache_dir = Path("data_cache")
+
+    base = _load_dv_from_base_cache(cache_dir)
+    logger.info("load_dv_cache: base cache から %d 銘柄", len(base))
+
+    if lookback_days and lookback_days > 0:
+        otf = _compute_dv_from_grouped(target_date, lookback_days, sleep_seconds)
+        # base を優先し、base に無い銘柄のみ on-the-fly で補完
+        for sym, rec in otf.items():
+            base.setdefault(sym, rec)
+        logger.info("load_dv_cache: on-the-fly 補完後 合計 %d 銘柄", len(base))
+
+    if not base:
+        logger.warning("load_dv_cache: DV データ 0 件 (base cache 未整備 & lookback=0)。"
+                       "cache_daily_polygon.py で backfill するか --dv-lookback を指定してください。")
+    return base
+
+
+def evaluate_survival(
+    grouped_df: Any, dv_cache: dict[str, dict[str, float]]
+) -> dict[str, SystemSurvival]:
+    """sys1-7 それぞれの gate 生存率を全 US 銘柄ユニバースで計算する。
+
+    grouped_df (当日 Grouped Daily / index=symbol) に dv_cache (前日 DV20/50) を
+    join し、SYSTEM_GATES の閾値を適用。ratio = n_pass / n_total (n_total = 当日
+    価格のある全銘柄) で production coverage metric を算出する。
+    """
+    import math
+
     results: dict[str, SystemSurvival] = {}
+    if grouped_df is None or getattr(grouped_df, "empty", True):
+        for sysname, cfg in SYSTEM_GATES.items():
+            results[sysname] = SystemSurvival(
+                system=sysname, warn_threshold=cfg.get("warn_ratio", 0.0), status="fail"
+            )
+        return results
+
+    close = grouped_df["Close"].astype("float64")
+    low = grouped_df["Low"].astype("float64") if "Low" in grouped_df.columns else close
+    symbols = [str(s).upper() for s in grouped_df.index]
+
+    def _dv(sym: str, col: str) -> float:
+        rec = dv_cache.get(sym)
+        if not rec:
+            return float("nan")
+        return float(rec.get(col, float("nan")))
+
     for sysname, cfg in SYSTEM_GATES.items():
         s = SystemSurvival(system=sysname, warn_threshold=cfg.get("warn_ratio", 0.0))
+
+        if cfg.get("spy_only"):
+            has_spy = "SPY" in symbols
+            s.n_total = 1
+            s.n_pass = 1 if has_spy else 0
+            s.ratio = 1.0 if has_spy else 0.0
+            s.status = "ok" if has_spy else "fail"
+            s.survived_tickers = ["SPY"] if has_spy else []
+            results[sysname] = s
+            continue
+
+        min_price = cfg.get("min_price")
+        min_col = cfg.get("min_col", "Close")
+        price_series = low if min_col == "Low" else close
+        dv_col = cfg.get("dv_col")
+        dv_min = cfg.get("dv_min")
+
+        n_total = 0
+        survived: list[str] = []
+        for i, sym in enumerate(symbols):
+            px = float(price_series.iloc[i])
+            if math.isnan(px):
+                continue
+            n_total += 1  # 当日価格のある全銘柄が母数
+            if min_price is not None and px < min_price:
+                continue
+            if dv_col is not None:
+                dv = _dv(sym, dv_col)
+                if math.isnan(dv) or dv <= float(dv_min):
+                    continue
+            survived.append(sym)
+
+        s.n_total = n_total
+        s.n_pass = len(survived)
+        s.ratio = (s.n_pass / s.n_total) if s.n_total else 0.0
+        s.status = "warn" if s.ratio < s.warn_threshold else "ok"
+        s.survived_tickers = survived
         results[sysname] = s
+
     return results
 
 
 def compute_delta(current: CoverageReport, previous_path: Path | None) -> None:
     """前日 JSON との diff を current.delta_vs_previous / consecutive_drops に埋める。
 
-    TODO(polygon-key-added-iter): previous_path が存在すれば JSON 読み込み、各 system で
-    ratio 差分を計算。連続下落は過去 3 日分の履歴を walk して count。
+    - delta_vs_previous[sys] = 当日 ratio - 前日 ratio (小数 4 桁)。
+    - consecutive_drops[sys] = ratio が前日より下落していれば前日 count + 1、
+      非下落なら 0 にリセット。3 以上で「連続 3 日下落」フラグ相当。
+    - 前日 JSON が無ければ全 delta=0 / first_run=true フラグを notes に付与。
     """
+    # まず全 system を 0 初期化 (前日欠損時のデフォルト)
+    for sysname in current.survival_by_system:
+        current.delta_vs_previous.setdefault(sysname, 0.0)
+        current.consecutive_drops.setdefault(sysname, 0)
+
     if previous_path is None or not previous_path.exists():
-        current.notes.append("no_previous_report (delta unavailable)")
+        current.notes.append("first_run=true (no_previous_report; delta=0)")
         return
-    logger.info("[skeleton] compute_delta: previous=%s (implementation deferred)", previous_path)
+
+    try:
+        prev = json.loads(previous_path.read_text(encoding="utf-8"))
+    except Exception as exc:  # pragma: no cover - 壊れた JSON は first_run 扱い
+        logger.warning("前日 JSON の読み込みに失敗 (%s): %s", previous_path, exc)
+        current.notes.append("first_run=true (previous_report_unreadable; delta=0)")
+        return
+
+    prev_survival: dict[str, Any] = prev.get("survival_by_system", {}) or {}
+    prev_drops: dict[str, Any] = prev.get("consecutive_drops", {}) or {}
+
+    for sysname, cur in current.survival_by_system.items():
+        cur_ratio = float(cur.get("ratio", 0.0))
+        prev_entry = prev_survival.get(sysname) or {}
+        prev_ratio = float(prev_entry.get("ratio", cur_ratio))
+        delta = round(cur_ratio - prev_ratio, 4)
+        current.delta_vs_previous[sysname] = delta
+        if delta < 0:
+            current.consecutive_drops[sysname] = int(prev_drops.get(sysname, 0) or 0) + 1
+        else:
+            current.consecutive_drops[sysname] = 0
+
+    dropping = {k: v for k, v in current.consecutive_drops.items() if v >= 3}
+    if dropping:
+        current.notes.append(f"consecutive_declines_3d: {dropping}")
+    logger.info("compute_delta: vs %s 完了 (delta=%s)",
+                previous_path.name, current.delta_vs_previous)
+
+
+def _build_rejected_top10(
+    grouped_df: Any,
+    dv_cache: dict[str, dict[str, float]],
+    survivals: dict[str, SystemSurvival],
+) -> list[dict[str, str]]:
+    """当日出来高上位で sys1 (最も厳しい共通 gate) を通らない銘柄 top10 を理由付きで返す。"""
+    if grouped_df is None or getattr(grouped_df, "empty", True):
+        return []
+    import math
+
+    sys1_survived = set(survivals.get("sys1", SystemSurvival(system="sys1")).survived_tickers)
+    close = grouped_df["Close"].astype("float64")
+    vol = grouped_df["Volume"].astype("float64")
+    dollar_vol = (close * vol)
+    order = dollar_vol.sort_values(ascending=False)
+
+    rejected: list[dict[str, str]] = []
+    for sym_raw in order.index:
+        sym = str(sym_raw).upper()
+        if sym in sys1_survived:
+            continue
+        px = float(close.loc[sym_raw])
+        rec = dv_cache.get(sym) or {}
+        dv20 = rec.get("DollarVolume20", float("nan"))
+        if not rec or (isinstance(dv20, float) and math.isnan(dv20)):
+            reason = "no_dv20_cache"
+        elif px < 5.0:
+            reason = "price_below_5"
+        else:
+            reason = "dv20_below_50m"
+        rejected.append({"symbol": sym, "reason": reason})
+        if len(rejected) >= 10:
+            break
+    return rejected
 
 
 def notify_warnings(report: CoverageReport) -> int:
@@ -184,6 +440,19 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Polygon fetch をスキップし、骨格 / 出力 path のみ確認する。",
     )
+    p.add_argument(
+        "--dv-lookback",
+        type=int,
+        default=0,
+        help="base cache が薄い場合に Grouped Daily を過去 N 営業日 fetch して "
+        "DV20/50 を on-the-fly 計算する (0=cache のみ, DV50 には 50 以上推奨)。",
+    )
+    p.add_argument(
+        "--dv-sleep",
+        type=float,
+        default=13.0,
+        help="on-the-fly DV 計算時の Grouped Daily call 間 sleep 秒 (既定 13s)。",
+    )
     p.add_argument("--log-level", default="INFO", help="ログレベル (default: INFO)。")
     return p
 
@@ -221,9 +490,14 @@ def main(argv: list[str] | None = None) -> int:
     try:
         grouped = fetch_grouped_daily(target_date)
         report.n_candidates_total = int(getattr(grouped, "shape", [0])[0])
-        dv_cache = load_dv_cache(target_date)
+        dv_cache = load_dv_cache(
+            target_date,
+            lookback_days=args.dv_lookback,
+            sleep_seconds=args.dv_sleep,
+        )
         survivals = evaluate_survival(grouped, dv_cache)
         report.survival_by_system = {k: v.as_dict() for k, v in survivals.items()}
+        report.rejected_top10 = _build_rejected_top10(grouped, dv_cache, survivals)
         compute_delta(report, previous_path)
     except ValueError as exc:
         # POLYGON_API_KEY / MASSIVE_API_KEY 未設定 (共に common.polygon_data で判定)
