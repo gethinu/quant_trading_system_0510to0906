@@ -57,8 +57,9 @@ import pandas as pd
 import streamlit as st
 from streamlit.runtime.scriptrunner import get_script_run_ctx
 
-# ページ設定を最初に実行
-st.set_page_config(page_title="本日のシグナル", layout="wide")
+# ページ設定を最初に実行 (headless mode では Streamlit UI を触らない)
+if "--headless" not in sys.argv:
+    st.set_page_config(page_title="本日のシグナル", layout="wide")
 
 # sys.pathを正しく設定してからimport
 try:
@@ -73,6 +74,17 @@ try:
         sys.path.insert(0, str(scripts_dir))
 except Exception:
     pass
+
+# ---------------------------------------------------------------------------
+# Headless mode: Streamlit UI を起動せず、当日シグナル生成 core logic だけ実行し
+# standardize JSON を出力する (Phase 1 事業化: Task Scheduler / 配信の入口)。
+# UI 側 (下部の st.* 呼び出し) を実行する前に dispatch し sys.exit する。
+# 既存 Streamlit UI は --headless なしの起動で従来どおり動作する (untouched)。
+# ---------------------------------------------------------------------------
+if __name__ == "__main__" and "--headless" in sys.argv:
+    from common.signal_export import run_headless as _run_headless
+
+    sys.exit(_run_headless(sys.argv[1:]))
 
 from apps.progress_components import (  # noqa: E402
     ProgressUI,
