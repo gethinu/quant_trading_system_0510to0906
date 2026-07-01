@@ -187,12 +187,67 @@ Register-ScheduledTask -TaskName "AlpacaPaperSubmit" -Action $action -Trigger $t
 
 ---
 
+## Section 7 — account_equity scale 運用 ($1k / $10k / $100k)
+
+signals JSON (`results_csv/today_signals_YYYYMMDD.json`, Phase 1 pack) から
+**資本額に応じて** orders を生成する新経路 (`signals_json_to_orders`)。
+`$1k でも $100k でも` 同じ signals で動く。
+
+追加/拡張ファイル:
+
+| 目的 | ファイル |
+|------|----------|
+| JSON→orders + tier sizing | `common/alpaca_trading.py` (`signals_json_to_orders`, `OrderPlan`, `resolve_tier`) |
+| notional (fractional) 発注 | `common/broker_alpaca.py` (`submit_order` に `notional` param 追加) |
+| scale 別 dry-run preview | `scripts/paper_trading_dryrun.py --account-equity` |
+| scale 別 実発注 + 突合 | `scripts/paper_trading_submit.py --account-equity` |
+| pipeline preview step | `scripts/daily_pipeline.ps1 -AccountEquity` |
+| dashboard | `apps/dashboards/alpaca-next` (Today's Orders Preview) |
+| tests | `tests/test_signals_json_to_orders.py`, `tests/test_paper_trading_submit_mock.py` |
+
+### tier 決定マトリクス
+
+| equity | tier | signals | sizing | hedge | fractional |
+|--------|------|---------|--------|-------|------------|
+| < $10k | small | 各 sys の rank==1 のみ | `weight×equity`、$5未満 skip | 標準 | 必須 (notional) |
+| $10k–100k | medium | 全 signals | `weight×equity` | 標準 | 推奨 |
+| >= $100k | large | 全 signals | `weight×equity` | SPY(sys7) weight ×1.5 | whole share 可 |
+
+### 各 scale の dry-run preview (実発注なし)
+
+```powershell
+python scripts/paper_trading_dryrun.py --date 2026-07-01 --account-equity 1000
+python scripts/paper_trading_dryrun.py --date 2026-07-01 --account-equity 10000
+python scripts/paper_trading_dryrun.py --date 2026-07-01 --account-equity 100000
+# -> results_csv/orders_preview_YYYYMMDD_${equity}.json
+```
+
+### 実発注 (★ user 手動、Paper のみ、preview 突合あり)
+
+```powershell
+# 事前に同じ --account-equity で preview を生成しておく (突合基準)
+python scripts/paper_trading_submit.py --date 2026-07-01 --account-equity 10000 --confirm --yes
+```
+
+### rollback (全 open orders cancel)
+
+```powershell
+python -c "from alpaca.trading.client import TradingClient; TradingClient(paper=True).cancel_orders()"
+```
+
+### Live 移行 追加確認 (`ALPACA_PAPER=false`)
+
+Section 6 に加え: 1 発注あたりの上限 notional / 1 日発注上限の設定、
+live 用 monitoring (ntfy/email) の分離、法務 (助言・運用業登録要否)・税務・リスク説明の文書化。
+
+---
+
 ## まとめ — user が最初に叩く 2 コマンド
 
-```bash
-# ① dry-run で確認 (実発注なし)
-python scripts/paper_trading_dryrun.py --date 2026-06-30
+```powershell
+# ① dry-run で確認 (実発注なし、preview JSON 生成)
+python scripts/paper_trading_dryrun.py --date 2026-07-01 --account-equity 10000
 
-# ② 確認できたら Paper へ実発注 (これだけが実発注)
-python scripts/paper_trading_submit.py --date 2026-06-30 --confirm --yes
+# ② 確認できたら Paper へ実発注 (これだけが実発注、Paper のみ)
+python scripts/paper_trading_submit.py --date 2026-07-01 --account-equity 10000 --confirm --yes
 ```
