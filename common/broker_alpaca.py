@@ -108,6 +108,7 @@ def submit_order(
     trail_percent: float | None = None,
     time_in_force: str = "GTC",
     client_order_id: str | None = None,
+    notional: float | None = None,
     log_callback=None,
 ):
     """注文を送信する共通関数。
@@ -116,6 +117,9 @@ def submit_order(
 
     client_order_id: 指定すると Alpaca 側の冪等キーとして送信される。
         同一 client_order_id の再送は 422 (duplicate) となり、重複発注を防げる。
+
+    notional: 指定すると dollar 建て (fractional 対応銘柄) の market 発注になる。
+        qty とは排他 (notional 指定時は qty を送らない)。market 以外では非対応。
     """
     _require_sdk()
 
@@ -136,11 +140,15 @@ def submit_order(
     )
 
     if order_type == "market":
+        # notional (dollar 建て / fractional) 発注は qty と排他。
+        _sizing: dict[str, Any] = (
+            {"notional": float(notional)} if notional is not None else {"qty": qty}
+        )
         req = MarketOrderRequest(  # type: ignore[call-arg]
             symbol=symbol,
-            qty=qty,
             side=side_enum,
             time_in_force=tif,
+            **_sizing,
             **_coid,
         )
     elif order_type == "limit":
@@ -208,6 +216,7 @@ def submit_order_with_retry(
     trail_percent: float | None = None,
     time_in_force: str = "GTC",
     client_order_id: str | None = None,
+    notional: float | None = None,
     retries: int = 2,
     backoff_seconds: float = 1.0,
     rate_limit_seconds: float = 0.0,
@@ -234,6 +243,7 @@ def submit_order_with_retry(
                 trail_percent=trail_percent,
                 time_in_force=time_in_force,
                 client_order_id=client_order_id,
+                notional=notional,
                 log_callback=log_callback,
             )
             if rate_limit_seconds > 0:

@@ -73,7 +73,7 @@ class PreparedOrder:
     """
 
     symbol: str
-    qty: int
+    qty: float  # 整数株なら int 相当、fractional なら小数 (参考値)
     side: str  # "buy" | "sell"
     order_type: str = "market"  # "market" | "limit"
     limit_price: float | None = None
@@ -81,6 +81,14 @@ class PreparedOrder:
     client_order_id: str | None = None
     system: str | None = None
     entry_date: str | None = None
+    # account_equity scale sizing (signals_json_to_orders) で埋まる項目
+    notional: float | None = None  # dollar 建て発注額 (fractional 発注時に使用)
+    fractional: bool = False  # 分数株 (notional) 発注か否か
+    price: float | None = None  # 参照価格 (entry_price)
+    weight: float | None = None  # 元シグナルの weight
+    rank: int | None = None  # 元シグナルの rank
+    reason: str | None = None  # 元シグナルの reason
+    tier: str | None = None  # small | medium | large
     # 実発注後に埋まる
     order_id: str | None = None
     status: str | None = None
@@ -92,6 +100,45 @@ class PreparedOrder:
         d = asdict(self)
         d.pop("extra", None)
         return d
+
+
+@dataclass(slots=True)
+class SkippedSignal:
+    """sizing/フィルタで発注対象外になったシグナルとその理由。"""
+
+    symbol: str
+    reason: str
+    system: str | None = None
+    weight: float | None = None
+
+    def to_row(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+# tier 境界 (account_equity, USD)。resolve_tier / signals_json_to_orders で共有。
+TIER_SMALL_MAX = 10_000.0
+TIER_MEDIUM_MAX = 100_000.0
+# large tier で SPY hedge (system7) の weight に掛ける係数 (hedge 強化)。
+_LARGE_HEDGE_BOOST = 1.5
+_HEDGE_SYSTEM = "system7"
+
+
+def resolve_tier(account_equity: float, tier: str = "auto") -> str:
+    """account_equity から運用 tier を決定する。
+
+    - small  (< $10k):   top pick 集中、fractional 必須
+    - medium ($10k–100k): 標準 weight、全 sys の signals
+    - large  (>= $100k):  分散、hedge 強化 (SPY weight up)
+    明示指定 (small|medium|large) はそのまま採用する。
+    """
+    t = (tier or "auto").strip().lower()
+    if t in ("small", "medium", "large"):
+        return t
+    if account_equity < TIER_SMALL_MAX:
+        return "small"
+    if account_equity < TIER_MEDIUM_MAX:
+        return "medium"
+    return "large"
 
 
 # ---------------------------------------------------------------------------
@@ -173,6 +220,7 @@ def submit_paper_order(
     time_in_force: str = "day",
     client_order_id: str | None = None,
     *,
+    notional: float | None = None,
     dry_run: bool = True,
     client: Any | None = None,
     retries: int = 2,
@@ -213,18 +261,30 @@ def submit_paper_order(
     order_type = order_type.lower().strip()
     if order_type == "limit" and limit_price is None:
         raise ValueError("limit 注文には limit_price が必要です。")
-    qty = int(qty)
-    if qty <= 0:
-        raise ValueError(f"qty は正の整数: {qty}")
+
+    # notional (dollar 建て / fractional) 発注は market のみ、qty は無視される。
+    use_notional = notional is not None
+    if use_notional:
+        if order_type != "market":
+            raise ValueError("notional (fractional) 発注は market のみ対応です。")
+        if float(notional) <= 0:
+            raise ValueError(f"notional は正の値: {notional}")
+        qty_val: float = float(qty or 0)
+    else:
+        qty_val = int(qty)
+        if qty_val <= 0:
+            raise ValueError(f"qty は正の整数: {qty}")
 
     prepared = PreparedOrder(
         symbol=symbol.upper(),
-        qty=qty,
+        qty=qty_val,
         side=side,
         order_type=order_type,
         limit_price=limit_price,
         time_in_force=time_in_force,
         client_order_id=client_order_id,
+        notional=float(notional) if use_notional else None,
+        fractional=use_notional,
     )
 
     if dry_run:
@@ -247,6 +307,7 @@ def submit_paper_order(
             limit_price=prepared.limit_price,
             time_in_force=prepared.time_in_force,
             client_order_id=prepared.client_order_id,
+            notional=prepared.notional,
             retries=retries,
             backoff_seconds=backoff_seconds,
             rate_limit_seconds=rate_limit_seconds,
@@ -435,6 +496,289 @@ def signals_to_orders(
     return submitted
 
 
+# ---------------------------------------------------------------------------
+# 公開 API 3: signals JSON (Phase 1 pack) → account_equity scale sizing
+# ---------------------------------------------------------------------------
+def _norm_system(sys_key: str) -> str:
+    """"sys1" / "system1" を "system1" に正規化する。"""
+    k = str(sys_key).strip().lower()
+    if k.startswith("system"):
+        return k
+    if k.startswith("sys"):
+        return "system" + k[3:]
+    return k
+
+
+def _side_from_json(raw: str) -> str:
+    """signals JSON の "BUY"/"SELL" を Alpaca の "buy"/"sell" に変換。"""
+    s = str(raw).strip().lower()
+    return "buy" if s in ("buy", "long") else "sell"
+
+
+def _json_client_order_id(system: str, symbol: str, date: str) -> str:
+    """signals JSON 用の決定論的な冪等キー ``sysN_SYMBOL_YYYYMMDD``。"""
+    compact = str(date).replace("-", "").replace(" ", "")[:8]
+    short = system.replace("system", "sys")
+    return f"{short}_{symbol.upper()}_{compact}" if compact else f"{short}_{symbol.upper()}"
+
+
+def _fractionable(
+    symbol: str,
+    *,
+    client: Any | None,
+    cache: dict[str, bool],
+    fractionable_map: dict[str, bool] | None,
+    default: bool,
+) -> bool:
+    """銘柄が分数株 (fractional) 対応かを判定する。
+
+    優先順: 明示 ``fractionable_map`` → キャッシュ → Alpaca ``get_asset`` → ``default``。
+    API 呼び出し結果はキャッシュして重複コールを避ける。offline/dry-run で
+    client が無い場合は ``default`` (通常 ``prefer_fractional``) を返す。
+    """
+    sym = symbol.upper()
+    if fractionable_map is not None and sym in fractionable_map:
+        return bool(fractionable_map[sym])
+    if sym in cache:
+        return cache[sym]
+    if client is None:
+        return default
+    try:
+        asset = client.get_asset(sym)
+        val = bool(getattr(asset, "fractionable", default))
+    except Exception as exc:  # pragma: no cover - ネットワーク例外
+        logger.warning("%s: get_asset 失敗、fractionable=%s と仮定: %s", sym, default, exc)
+        val = default
+    cache[sym] = val
+    return val
+
+
+@dataclass(slots=True)
+class OrderPlan:
+    """signals_json_to_orders の結果コンテナ (発注対象 + skip + 集計)。"""
+
+    date: str
+    account_equity: float
+    tier: str
+    orders: list[PreparedOrder] = field(default_factory=list)
+    skipped: list[SkippedSignal] = field(default_factory=list)
+
+    def _order_notional(self, po: PreparedOrder) -> float:
+        if po.notional is not None:
+            return float(po.notional)
+        if po.price is not None:
+            return float(po.qty) * float(po.price)
+        return 0.0
+
+    def summary(self) -> dict[str, Any]:
+        total = sum(self._order_notional(o) for o in self.orders)
+        hedge = sum(
+            self._order_notional(o)
+            for o in self.orders
+            if _norm_system(o.system or "") == _HEDGE_SYSTEM
+        )
+        return {
+            "total_notional": round(total, 2),
+            "n_orders": len(self.orders),
+            "n_skipped": len(self.skipped),
+            "hedge_notional": round(hedge, 2),
+        }
+
+    def to_preview_dict(self) -> dict[str, Any]:
+        """Vercel dashboard / 突合用の preview JSON schema。"""
+        return {
+            "date": self.date,
+            "account_equity": self.account_equity,
+            "tier": self.tier,
+            "orders": [
+                {
+                    "symbol": o.symbol,
+                    "side": o.side,
+                    "notional_usd": round(self._order_notional(o), 2),
+                    "qty": round(float(o.qty), 6),
+                    "fractional": o.fractional,
+                    "order_type": o.order_type,
+                    "system": o.system,
+                    "weight": o.weight,
+                    "rank": o.rank,
+                    "client_order_id": o.client_order_id,
+                }
+                for o in self.orders
+            ],
+            "skipped": [s.to_row() for s in self.skipped],
+            "summary": self.summary(),
+        }
+
+
+def signals_json_to_orders(
+    signals_json: dict[str, Any],
+    account_equity: float,
+    tier: str = "auto",
+    min_notional_usd: float = 5.0,
+    prefer_fractional: bool = True,
+    dry_run: bool = True,
+    *,
+    fractionable_map: dict[str, bool] | None = None,
+    client: Any | None = None,
+    time_in_force: str = "day",
+) -> OrderPlan:
+    """当日 signals JSON (Phase 1 pack) を account_equity scale で発注へ変換する。
+
+    schema: ``{version, date, systems: {sysN: {signals: [...]}}, portfolio, ...}``
+
+    tier logic (``auto`` 時、:func:`resolve_tier` で判定):
+        - small  (< $10k):   各 sys の rank==1 のみ (top pick 集中)、fractional 必須
+        - medium ($10k–100k): 標準 weight、全 signals
+        - large  (>= $100k):  全 signals、SPY hedge (system7) weight を強化
+
+    position sizing::
+
+        target_notional = weight * account_equity
+        (large tier の hedge は weight ×1.5)
+        target_notional < min_notional_usd            -> skip
+        fractional 対応 & prefer_fractional            -> notional 発注 (market)
+        非対応 or prefer_fractional=False              -> whole share (round)、0株なら skip
+
+    ``dry_run`` はここでは常に発注しない (変換のみ)。実発注は
+    :func:`submit_paper_order` / ``paper_trading_submit.py`` 側で行う。
+
+    Returns
+    -------
+    OrderPlan
+        ``orders`` (PreparedOrder) + ``skipped`` (SkippedSignal) + ``summary``。
+    """
+    resolved_tier = resolve_tier(account_equity, tier)
+    date = str(signals_json.get("date", ""))
+    systems = signals_json.get("systems", {}) or {}
+
+    plan = OrderPlan(date=date, account_equity=float(account_equity), tier=resolved_tier)
+    frac_cache: dict[str, bool] = {}
+    seen: set[str] = set()
+
+    for sys_key, sysdata in systems.items():
+        system = _norm_system(sys_key)
+        raw_signals = (sysdata or {}).get("signals", []) or []
+
+        # small tier: 各 sys の top pick (rank==1) のみに集約
+        if resolved_tier == "small":
+            ranked = [s for s in raw_signals if (s.get("rank") or 99) <= 1]
+            signals = ranked or (raw_signals[:1] if raw_signals else [])
+        else:
+            signals = raw_signals
+
+        for sig in signals:
+            sym = str(sig.get("symbol", "")).upper()
+            if not sym:
+                continue
+            weight = sig.get("weight")
+            price = sig.get("entry_price")
+            side = _side_from_json(sig.get("side", ""))
+            rank = sig.get("rank")
+            reason = sig.get("reason")
+
+            coid = _json_client_order_id(system, sym, date)
+            if coid in seen:
+                continue
+            seen.add(coid)
+
+            if weight in (None, "") or float(weight) <= 0:
+                plan.skipped.append(SkippedSignal(sym, "weight 未設定/0", system, weight))
+                continue
+
+            eff_weight = float(weight)
+            # large tier: SPY hedge (system7) を強化
+            if resolved_tier == "large" and system == _HEDGE_SYSTEM:
+                eff_weight *= _LARGE_HEDGE_BOOST
+
+            target_notional = eff_weight * float(account_equity)
+            if target_notional < min_notional_usd:
+                plan.skipped.append(
+                    SkippedSignal(
+                        sym,
+                        f"target_notional ${target_notional:.2f} < min ${min_notional_usd:.0f} ({resolved_tier})",
+                        system,
+                        weight,
+                    )
+                )
+                continue
+
+            if price in (None, "") or float(price) <= 0:
+                plan.skipped.append(SkippedSignal(sym, "entry_price 未設定/0", system, weight))
+                continue
+            price_f = float(price)
+
+            fractionable = _fractionable(
+                sym,
+                client=client,
+                cache=frac_cache,
+                fractionable_map=fractionable_map,
+                default=prefer_fractional,
+            )
+
+            if prefer_fractional and fractionable:
+                # dollar 建て (fractional) 発注: Alpaca fractional は market のみ
+                po = PreparedOrder(
+                    symbol=sym,
+                    qty=round(target_notional / price_f, 6),
+                    side=side,
+                    order_type="market",
+                    time_in_force=time_in_force,
+                    client_order_id=coid,
+                    system=system,
+                    entry_date=date or None,
+                    notional=round(target_notional, 2),
+                    fractional=True,
+                    price=price_f,
+                    weight=float(weight),
+                    rank=int(rank) if rank is not None else None,
+                    reason=reason,
+                    tier=resolved_tier,
+                )
+            else:
+                whole = int(round(target_notional / price_f))
+                if whole <= 0:
+                    plan.skipped.append(
+                        SkippedSignal(
+                            sym,
+                            f"whole-share 0 (notional ${target_notional:.2f} < 1株 ${price_f:.2f})",
+                            system,
+                            weight,
+                        )
+                    )
+                    continue
+                ot = _DEFAULT_SYSTEM_ORDER_TYPE.get(system, "market")
+                po = PreparedOrder(
+                    symbol=sym,
+                    qty=whole,
+                    side=side,
+                    order_type=ot,
+                    limit_price=price_f if ot == "limit" else None,
+                    time_in_force=time_in_force,
+                    client_order_id=coid,
+                    system=system,
+                    entry_date=date or None,
+                    notional=None,
+                    fractional=False,
+                    price=price_f,
+                    weight=float(weight),
+                    rank=int(rank) if rank is not None else None,
+                    reason=reason,
+                    tier=resolved_tier,
+                )
+            plan.orders.append(po)
+
+    logger.info(
+        "signals_json_to_orders: tier=%s equity=$%.0f -> %d 注文 / %d skip",
+        resolved_tier,
+        account_equity,
+        len(plan.orders),
+        len(plan.skipped),
+    )
+    for po in plan.orders:
+        _audit_log({"event": "dry_run_json", **po.to_row()})
+    return plan
+
+
 def _fetch_open_positions(client: Any) -> dict[str, float]:
     """Alpaca から ``{symbol: signed_qty}`` を取得する (ロング+/ショート-)。"""
     out: dict[str, float] = {}
@@ -456,9 +800,13 @@ def _fetch_open_positions(client: Any) -> dict[str, float]:
 
 __all__ = [
     "PreparedOrder",
+    "SkippedSignal",
+    "OrderPlan",
     "LiveAccountGuardError",
     "OrderSubmitError",
     "assert_paper_env",
+    "resolve_tier",
     "submit_paper_order",
     "signals_to_orders",
+    "signals_json_to_orders",
 ]
