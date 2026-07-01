@@ -1,0 +1,128 @@
+<!--
+  Dashboard card skeleton: Polygon Daily Coverage
+  ------------------------------------------------
+  Parent runbook: docs/HUMAN_TASK_polygon_daily_monitor_20260701.md §4
+  Embed target:   bundle-of-edges 側 mt5-dashboard (https://gethinu.github.io/mt5-dashboard/)
+  Data source:    results_csv/polygon_daily_coverage_YYYYMMDD.json (直近 7 日を集約)
+
+  Status: skeleton HTML + JSON schema 定義のみ。
+  実際の埋め込み / データ sync は別 iteration。
+
+  JSON schema (期待入力):
+    {
+      "history": [
+        {
+          "date": "2026-06-30",
+          "n_candidates_total": 11234,
+          "survival_by_system": {
+            "sys1": {"ratio": 0.079, "status": "ok"}, ...
+          }
+        },
+        ...  // 直近 7 日、日付昇順
+      ]
+    }
+-->
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8" />
+    <title>Quant Trading — Polygon Coverage</title>
+    <style>
+        :root {
+            --card-bg: #1e2130;
+            --card-fg: #e6e9f0;
+            --ok: #4ade80;
+            --warn: #facc15;
+            --fail: #f87171;
+            --muted: #94a3b8;
+        }
+        .qt-card {
+            background: var(--card-bg);
+            color: var(--card-fg);
+            border-radius: 12px;
+            padding: 16px 20px;
+            font-family: -apple-system, "Segoe UI", sans-serif;
+            width: 360px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+        }
+        .qt-card h3 { margin: 0 0 8px; font-size: 14px; letter-spacing: 0.03em; }
+        .qt-card .qt-latest { font-size: 22px; font-weight: 600; }
+        .qt-card .qt-date { color: var(--muted); font-size: 11px; }
+        .qt-card table { width: 100%; margin-top: 12px; font-size: 12px; border-collapse: collapse; }
+        .qt-card td { padding: 3px 0; }
+        .qt-card td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+        .qt-card .status-ok { color: var(--ok); }
+        .qt-card .status-warn { color: var(--warn); }
+        .qt-card .status-fail { color: var(--fail); }
+        .qt-card .qt-spark { margin-top: 10px; height: 32px; }
+        .qt-card .qt-note { color: var(--muted); font-size: 10px; margin-top: 8px; }
+    </style>
+</head>
+<body>
+    <div class="qt-card" id="qt-coverage-card">
+        <h3>QUANT_TRADING · POLYGON COVERAGE</h3>
+        <div class="qt-latest" id="qt-headline">—</div>
+        <div class="qt-date" id="qt-date">no data</div>
+
+        <table id="qt-systems">
+            <tbody>
+                <!-- populated by init() -->
+            </tbody>
+        </table>
+
+        <svg class="qt-spark" viewBox="0 0 340 32" preserveAspectRatio="none" id="qt-spark">
+            <polyline fill="none" stroke="#60a5fa" stroke-width="1.5" points="" />
+        </svg>
+
+        <div class="qt-note" id="qt-note">skeleton view — data wire-up pending</div>
+    </div>
+
+    <script>
+        /**
+         * Render the coverage card from a JSON payload matching the schema above.
+         * TODO(next-iter): fetch history from results_csv or GitHub Pages mirror,
+         * hook into bundle-of-edges dashboard grid.
+         */
+        function renderCoverage(payload) {
+            if (!payload || !payload.history || !payload.history.length) return;
+            const latest = payload.history[payload.history.length - 1];
+            document.getElementById('qt-headline').textContent =
+                (latest.n_candidates_total || 0).toLocaleString() + ' tickers';
+            document.getElementById('qt-date').textContent = latest.date;
+
+            const tbody = document.querySelector('#qt-systems tbody');
+            tbody.innerHTML = '';
+            for (const [sys, val] of Object.entries(latest.survival_by_system || {})) {
+                const tr = document.createElement('tr');
+                tr.innerHTML =
+                    '<td>' + sys + '</td>' +
+                    '<td class="status-' + (val.status || 'ok') + '">' +
+                    (val.ratio * 100).toFixed(1) + '%</td>';
+                tbody.appendChild(tr);
+            }
+
+            // sparkline: 直近 7 日の sys1 ratio
+            const spark = payload.history
+                .map((d, i) => {
+                    const r = (d.survival_by_system?.sys1?.ratio ?? 0);
+                    const x = (i / (payload.history.length - 1 || 1)) * 340;
+                    const y = 32 - r * 32;  // ratio [0..1] → 0..32px
+                    return x.toFixed(1) + ',' + y.toFixed(1);
+                })
+                .join(' ');
+            document.querySelector('#qt-spark polyline').setAttribute('points', spark);
+        }
+
+        // demo payload (skeleton)
+        renderCoverage({
+            history: [
+                { date: '2026-06-24', n_candidates_total: 11100, survival_by_system: { sys1: { ratio: 0.081, status: 'ok' }, sys4: { ratio: 0.042, status: 'ok' } } },
+                { date: '2026-06-25', n_candidates_total: 11150, survival_by_system: { sys1: { ratio: 0.079, status: 'ok' }, sys4: { ratio: 0.041, status: 'ok' } } },
+                { date: '2026-06-26', n_candidates_total: 11200, survival_by_system: { sys1: { ratio: 0.075, status: 'ok' }, sys4: { ratio: 0.038, status: 'warn' } } },
+                { date: '2026-06-29', n_candidates_total: 11220, survival_by_system: { sys1: { ratio: 0.073, status: 'ok' }, sys4: { ratio: 0.036, status: 'warn' } } },
+                { date: '2026-06-30', n_candidates_total: 11234, survival_by_system: { sys1: { ratio: 0.079, status: 'ok' }, sys4: { ratio: 0.041, status: 'ok' } } },
+            ],
+        });
+    </script>
+</body>
+</html>
