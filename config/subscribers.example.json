@@ -1,0 +1,25 @@
+{
+  "_comment": "Phase 2 配信の下地。config/subscribers.json にコピーして使う。secret は env 変数名で参照し、生値は置かない。Phase 1 では tier / systems フィルタは未使用 (全 system を全 subscriber へ)。",
+  "version": "1.0",
+  "subscribers": [
+    {
+      "id": "owner",
+      "name": "self (Phase 1)",
+      "tier": "internal",
+      "systems": ["*"],
+      "channels": [
+        { "type": "discord", "webhook_env": "DISCORD_WEBHOOK_URL" }
+      ]
+    },
+    {
+      "id": "beta_user_001",
+      "name": "beta subscriber example (Phase 2)",
+      "tier": "basic",
+      "systems": ["sys1", "sys4", "sys7"],
+      "channels": [
+        { "type": "discord", "webhook_env": "BETA001_DISCORD_WEBHOOK_URL" },
+        { "type": "line", "to": "Uxxxxxxxxxxxxxxxx" }
+      ]
+    }
+  ]
+}
