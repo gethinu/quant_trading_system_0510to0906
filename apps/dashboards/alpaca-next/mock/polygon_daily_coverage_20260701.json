@@ -1,0 +1,48 @@
+{
+  "date": "2026-07-01",
+  "n_candidates_total": 11220,
+  "survival_by_system": {
+    "sys1": {
+      "ratio": 0.0883,
+      "status": "ok",
+      "count": 990,
+      "threshold": 0.03
+    },
+    "sys2": {
+      "ratio": 0.0676,
+      "status": "ok",
+      "count": 758,
+      "threshold": 0.03
+    },
+    "sys3": {
+      "ratio": 0.0599,
+      "status": "ok",
+      "count": 672,
+      "threshold": 0.03
+    },
+    "sys4": {
+      "ratio": 0.0458,
+      "status": "ok",
+      "count": 513,
+      "threshold": 0.03
+    },
+    "sys5": {
+      "ratio": 0.0414,
+      "status": "ok",
+      "count": 464,
+      "threshold": 0.03
+    },
+    "sys6": {
+      "ratio": 0.0272,
+      "status": "ok",
+      "count": 305,
+      "threshold": 0.03
+    },
+    "sys7": {
+      "ratio": 0.011,
+      "status": "warn",
+      "count": 123,
+      "threshold": 0.03
+    }
+  }
+}
