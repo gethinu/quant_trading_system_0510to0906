@@ -22,6 +22,14 @@ import pytest
 
 from common.alpaca_data import get_alpaca_data
 
+# .env を best-effort で読み込み、live smoke の認証情報検出を可能にする
+try:  # pragma: no cover - dotenv 不在時は環境変数のみ
+    from dotenv import load_dotenv
+
+    load_dotenv(override=False)
+except Exception:
+    pass
+
 # 旧 get_eodhd_data と一致すべき出力スキーマ
 EXPECTED_COLUMNS = ["Open", "High", "Low", "Close", "AdjClose", "Volume"]
 
@@ -128,6 +136,10 @@ def test_get_alpaca_data_schema_offline(monkeypatch):
 
 def test_get_alpaca_data_missing_creds_raises(monkeypatch):
     """認証情報が無ければ ValueError で fail-fast すること。"""
+    # .env の再読込を無効化し、環境変数が真に空の状態を再現する
+    import common.alpaca_data as ad
+
+    monkeypatch.setattr(ad, "_load_env", lambda: None)
     for key in [
         "ALPACA_API_KEY",
         "ALPACA_SECRET_KEY",

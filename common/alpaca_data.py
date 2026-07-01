@@ -49,8 +49,24 @@ _last_request_ts = 0.0
 _DEFAULT_HISTORY_START = os.getenv("ALPACA_HISTORY_START", "2000-01-01")
 
 
+def _load_env() -> None:
+    """`.env` を best-effort で読み込む (既存 env は上書きしない)。
+
+    本番の呼び出し経路 (scripts/cache_daily_data.py) は config.settings 経由で
+    既に load_dotenv 済だが、本モジュール単体利用/テスト時にも動くよう保険を掛ける。
+    common/broker_alpaca.py・common/notifier.py と同じパターン。
+    """
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv(override=False)
+    except Exception:  # pragma: no cover - dotenv 不在時は環境変数のみで動作
+        pass
+
+
 def _get_credentials() -> tuple[str, str]:
     """API キーを環境変数から読み込む。無ければ ValueError で fail-fast。"""
+    _load_env()
     api_key = os.getenv("ALPACA_API_KEY") or os.getenv("APCA_API_KEY_ID")
     secret_key = os.getenv("ALPACA_SECRET_KEY") or os.getenv("APCA_API_SECRET_KEY")
     if not api_key or not secret_key:
