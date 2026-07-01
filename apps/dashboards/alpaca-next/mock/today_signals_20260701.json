@@ -155,6 +155,23 @@
     "cli_version": "0.1.0",
     "run_id": "20260701_061523_a1b2c3",
     "elapsed_seconds": 47.3,
-    "publish_status": "ok"
+    "publish_status": "ok",
+    "narrative": {
+      "headline": "メガテック集中買い、SPY でカタストロフィ・ヘッジ",
+      "summary": "本日は sys1 (トレンドフォロー) が AAPL・MSFT・NVDA のメガテック 3 銘柄を SMA200 ブレイクアウトで選好し、sys4 も GOOGL・META をトレンド継続で拾いました。ロング側はテクノロジー・セクターに集中しています。\n一方 sys2/sys6 は TSLA・COIN・XOM をショートで逆張り、sys7 は SPY ショートで市場全体のカタストロフィ・ヘッジを掛けています。gate 生存率は多くの system で 10-16% と低めで、選別が厳しい地合いです。",
+      "per_symbol_reasons": {
+        "AAPL": "SMA200 上抜けブレイクアウト + 3 日連続で出来高拡大",
+        "MSFT": "ROC200 モメンタムが上位、押し目からの再加速",
+        "NVDA": "SMA200 ブレイクアウト、半導体主導の資金流入",
+        "TSLA": "RSI3 が過熱圏、短期の逆張りフェード",
+        "SPY": "市場全体のテールリスクに対するカタストロフィ・ヘッジ (ショート)"
+      },
+      "model": "claude-haiku-4-5-20251001",
+      "cost_usd": 0.0061,
+      "elapsed_seconds": 3.9,
+      "warnings": [],
+      "configured": true,
+      "fallback": false
+    }
   }
 }

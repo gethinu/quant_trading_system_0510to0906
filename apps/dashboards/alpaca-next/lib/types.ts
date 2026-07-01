@@ -49,11 +49,25 @@ export interface SignalsPortfolio {
   hedge: Hedge | null;
 }
 
+// AI narrator 出力 (common/narrator.py -> meta.narrative へ merge)
+export interface Narrative {
+  headline: string;
+  summary: string;
+  per_symbol_reasons: Record<string, string>;
+  model?: string;
+  cost_usd?: number;
+  elapsed_seconds?: number;
+  warnings?: string[];
+  configured?: boolean;
+  fallback?: boolean;
+}
+
 export interface SignalsMeta {
   cli_version: string;
   run_id: string;
   elapsed_seconds: number | null;
   publish_status?: 'ok' | 'partial' | 'failed';
+  narrative?: Narrative;
 }
 
 export interface SignalsPayload {
@@ -64,4 +78,44 @@ export interface SignalsPayload {
   systems: Record<string, SystemSignals>;
   portfolio: SignalsPortfolio;
   meta: SignalsMeta;
+}
+
+// --- Today's Orders Preview (orders_preview_YYYYMMDD_${equity}.json) --------
+
+export type OrderTier = 'small' | 'medium' | 'large';
+
+export interface PreviewOrder {
+  symbol: string;
+  side: string; // 'buy' | 'sell'
+  notional_usd: number;
+  qty: number;
+  fractional: boolean;
+  order_type: string;
+  system: string | null;
+  weight: number | null;
+  rank: number | null;
+  client_order_id: string;
+}
+
+export interface PreviewSkipped {
+  symbol: string;
+  reason: string;
+  system?: string | null;
+  weight?: number | null;
+}
+
+export interface OrdersPreviewSummary {
+  total_notional: number;
+  n_orders: number;
+  n_skipped: number;
+  hedge_notional: number;
+}
+
+export interface OrdersPreview {
+  date: string;
+  account_equity: number;
+  tier: OrderTier | string;
+  orders: PreviewOrder[];
+  skipped: PreviewSkipped[];
+  summary: OrdersPreviewSummary;
 }
