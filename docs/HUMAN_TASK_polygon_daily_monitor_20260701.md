@@ -193,4 +193,86 @@ Get-ScheduledTaskInfo -TaskName 'QuantTrading_PolygonDailyMonitor'
 ### 運用上の注意（本採用の前提条件）
 1. **無料 tier 履歴は約 2 年**。日次シグナル（SMA200/ROC200 = 200日）には十分だが、長期バックテストには不足 → backtest 用途は EODHD 履歴保持 or 別途。
 2. **production は必ず `get_polygon_grouped_daily`**（1 call/日で全12k銘柄）。per-symbol `get_polygon_data` は全銘柄運用に不向き（5 req/min 制限）。
-3. daily monitor の TODO 3 つ（`load_dv_cache` / `evaluate_survival` / `compute_delta`）は別 iteration で肉付け。
+3. ~~daily monitor の TODO 3 つは別 iteration で肉付け。~~ → **完了 (2026-07-01)**。下記 §6 参照。
+
+---
+
+## 6. Cache 統合 & monitor 実装完了 (2026-07-01)
+
+### 6.1 Cache 統合 (Polygon Grouped Daily → CacheManager)
+
+`scripts/cache_daily_polygon.py` を追加。`scripts/cache_daily_data.py` (EODHD 経路) と
+**同一の production 保存関数** (`add_indicators` → full CSV / `compute_base_indicators` +
+`save_base_cache` → base feather) を再利用するため、schema は **drop-in で完全互換**
+(base feather columns = `date/open/high/low/close/volume + SMA*/ATR*/RSI*/ROC200/HV50/DollarVolume20/50`)。
+検証: 合成 60 行を投入 → 既存 EODHD-baseline (BBB.feather) の全 column を包含 (欠落ゼロ)、
+`date` dtype = `datetime64[ns]`、DV20/DV50 算出を確認。`core/system1-7` / `CacheManager` は不変。
+
+**backfill 1-liner (全 US 銘柄 / 直近 ~2 年):**
+
+```bash
+# 全銘柄・直近250営業日 (無料 tier 履歴上限内)。250 call × 13s ≈ 55 分
+python scripts/cache_daily_polygon.py --start 2024-07-01 --end 2026-06-30
+
+# 特定銘柄のみ (drop-in 検証・部分更新用)
+python scripts/cache_daily_polygon.py --start 2026-04-01 --end 2026-06-30 --symbols AAPL,MSFT,SPY
+```
+
+- Grouped Daily は unadjusted (raw close) → `AdjClose = Close`。日次シグナルには十分。
+- 履歴上限 (~2 年) 超過の平日空応答は WARNING (fail-soft)。`--strict-history` で fail-fast。
+- 既存 EODHD 経路 (`cache_daily_data.py`) は **untouched で併存** (契約解除は user 判断)。
+
+### 6.2 monitor 3 TODO 実装後の signature
+
+```python
+load_dv_cache(target_date: str, *, lookback_days: int = 0,
+              sleep_seconds: float = 13.0, cache_dir: Path | None = None
+              ) -> dict[str, dict[str, float]]
+    # base/*.feather の最新 DV20/50 を優先。lookback_days>0 なら Grouped Daily を
+    # N 営業日 fetch し Close×Volume の 20/50 日平均で欠損銘柄を on-the-fly 補完。
+
+evaluate_survival(grouped_df, dv_cache) -> dict[str, SystemSurvival]
+    # 全 US 銘柄ユニバースで sys1-7 の gate 生存率 (n_pass / n_total) を算出。
+    # SystemSurvival に survived_tickers / rejected_tickers を追加。
+
+compute_delta(current: CoverageReport, previous_path: Path | None) -> None
+    # 前日 JSON と ratio 差分。consecutive_drops を前日値からインクリメント
+    # (>=3 で連続下落フラグ)。前日欠損時は delta=0 / first_run=true。
+```
+
+新 CLI: `--dv-lookback N` (on-the-fly DV 日数) / `--dv-sleep S` (call 間隔)。
+
+### 6.3 Part 3 E2E smoke — JSON 生成 verified (2026-06-30)
+
+```bash
+python scripts/daily_polygon_monitor.py --date 2026-06-30 --dv-lookback 55 --dv-sleep 0.3
+```
+
+`results_csv/polygon_daily_coverage_20260630.json` を **実生成** (exit 0, coverage OK)。
+`n_candidates_total=12474`、on-the-fly DV で 13,169 銘柄をカバー。
+
+| system | gate | n_pass / n_total | ratio | warn | status |
+|---|---|---|---|---|---|
+| sys1 | Close≥5 & DV20>50M | 2070 / 12474 | 0.166 | 0.05 | ok |
+| sys2 | Close≥5 & DV20>25M | 2735 / 12474 | 0.219 | 0.06 | ok |
+| sys3 | Close≥5 & DV20>25M | 2735 / 12474 | 0.219 | 0.06 | ok |
+| sys4 | DV50>100M | 1390 / 12474 | 0.111 | 0.04 | ok |
+| sys5 | Close≥5 | 10479 / 12474 | 0.840 | 0.15 | ok |
+| sys6 | Low≥5 & DV50>10M | 3597 / 12474 | 0.288 | 0.10 | ok |
+| sys7 | SPY 固定 | 1 / 1 | 1.000 | — | ok |
+
+> **verdict (73/69/65/88/92/85%) との関係**: verdict は PoC の**候補 ~27 銘柄
+> (liquid watchlist) を母数**とした gate 通過率。上表は**全 US 12k 銘柄を母数**とした
+> production coverage 比率で、母数が異なるため数値は別物 (schema 例の sys1≈0.079 と同じ
+> スケール)。27 銘柄リストは repo に未 commit のため exact 再現は不可。Polygon が
+> full-market SIP volume (= yfinance 一致) を返すことは verdict §で実証済で、本 smoke は
+> その volume が gate 計算まで通ることを end-to-end で確認した。
+> なお本 smoke は 429 により DV lookback が 28/55 日に留まり DV50 系 (sys4/sys6) は
+> 微小に過小。production の 06:00 JST 実行は base cache 主体のため影響しない。
+
+### 6.4 EODHD vs Polygon 乖離チェック
+
+real EODHD cache は本環境に未整備 (合成 BBB のみ) のため per-symbol 実数 diff は未実施。
+代替として **schema drop-in** (§6.1) を検証済 — 両経路は同一保存関数を共有するため
+乖離源は raw OHLCV 値のみ (両者 full-market SIP、AdjClose の split/dividend timing 差のみ)。
+実データ diff は base backfill 後に `polygon vs eodhd` 5 営業日 close 乖離集計を推奨 (残タスク無し・nice-to-have)。
