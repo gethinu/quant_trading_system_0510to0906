@@ -15,8 +15,14 @@
 ## Part 1: sys1-7 戦略サマリ & code review (static)
 
 Source: `core/system1.py`–`core/system7.py`, `core/final_allocation.py`。
-Exit rule (profit target / trailing / max-hold) は **どの system の core file にも存在しない** —
-exit は別レイヤ (`final_allocation` の stop、及び未読の exit_planner) 管轄。
+
+> **訂正 (2026-07-02)**: 初版で「exit rule はどの system にも存在しない」と記載したが**誤り**。
+> exit rule は (a) **仕様書 `docs/systems/システム1-7.txt`** に system 別に明記され、
+> (b) **`common/trade_management.py:194-287` (`SYSTEM_TRADE_RULES`)** に実装済、
+> (c) **22/22 テスト pass** (`docs/ENTRY_EXIT_TEST_RESULTS.md`, `tests/test_monthly_roll_forward.py`)。
+> `core/system*.py` は **signal 生成専用**モジュールで exit を持たないだけ (=正常な責務分離)。
+> 詳細は **Part 1B** 参照。以下 per-system の「exit rules: core になし」は
+> 「core/system*.py に無い」の意で、**exit 自体は存在する** (Part 1B)。
 
 ### System 1 — Long ROC200 Momentum
 - **戦略概要**: trend-following long。上昇トレンド銘柄の中で momentum 最上位を買い、翌日寄付エントリ・ATR stop。
@@ -78,10 +84,45 @@ exit は別レイヤ (`final_allocation` の stop、及び未読の exit_planner
 | B6 | **`dropna` による silent frame 空化**。indicator 列が全 NaN だと全行 drop → 銘柄 silent loss (空時のみ raise) | `system6.py:271–273` | 中 |
 | B7 | **System7 cache merge が stale `max_70` 優先** — 再計算値を cached 値で上書き、stale indicator 残存疑い | `system7.py:147` | 低 |
 | B8 | **final_allocation stop が固定 2×ATR 両側 + entry=Close fallback** — B1 と合成で fill bias が sizing (shares) に波及 | `final_allocation.py:1253,1277–1279` | 中 |
+| B9 | **sys7 exit の doc-vs-code 不整合** — 仕様「損切り 50日 3ATR」に対し code は `stop_atr_period=20, multiplier=5.0` (sys1 と同値の copy-paste 疑い)。70日高値 exit も `SYSTEM_TRADE_RULES` 外に分散。comment `# SPY固定、詳細は要確認` | `common/trade_management.py:276-286` | 高 |
 
 > 注: B1/B2 は「comment=翌日寄付 vs 格納=当日Close」という記述と実装の乖離であり、
 > **実約定パイプラインが entry_price を約定値として再取得しているか**を確認すれば white/black が確定する。
 > core 不変制約下では確認のみ推奨、修正は別 branch。
+
+---
+
+## Part 1B: Exit Rules (system 別 — 仕様書 + code alignment)
+
+**発掘場所**: 仕様書 `docs/systems/システム1-7.txt`、実装 `common/trade_management.py::SYSTEM_TRADE_RULES` (L194-287)。
+補助: trailing = `scripts/update_trailing_stops.py`、time/SPY-high 判定 = `common/profit_protection.py`、
+経過日数 = `common/position_age.py`。
+
+| sys | side | 損切り (stop) | trailing | 利食い (profit target) | time stop | 実装 (`trade_management.py`) | 仕様書 |
+|-----|------|---------------|----------|------------------------|-----------|------------------------------|--------|
+| 1 | long | 20日 5ATR | **25%** | なし | なし | L195-206 | システム1.txt:20-30 |
+| 2 | short | 10日 3ATR | なし | 終値+4% で翌大引け決済 | **2日** 未達で翌大引け | L207-220 | システム2.txt:19-32 |
+| 3 | long | 10日 2.5ATR | なし | 終値+4% で翌大引け決済 | **3日** 未達で翌大引け | L221-234 | システム3.txt:21-32 |
+| 4 | long | 40日 1.5ATR | **20%** | なし | なし | L235-246 | システム4.txt:20-30 |
+| 5 | long | 10日 3ATR | なし | 10日 1ATR 目標、翌寄付決済 | **6日** 未達で翌寄付 | L247-261 | システム5.txt:22-33 |
+| 6 | short | 10日 3ATR | なし | +5% で翌大引け決済 | **3日** で翌大引け | L262-275 | システム6.txt:32-43 |
+| 7 | short | 仕様=**50日 3ATR** / code=**20日 5ATR** ⚠ | なし | なし | SPY が **70日高値**更新で翌寄付決済 | — | システム7.txt:18-22 |
+
+**要点**:
+- exit trigger は主に **price cross (ATR stop / limit target)**、**% トレーリング** (sys1/4)、
+  **N-day time stop** (sys2=2, sys3=3, sys5=6, sys6=3)、**regime exit** (sys7 = SPY 70日高値)。
+- sys1/4 は利食いなし (trailing で利益保護)、sys2/3/5/6 は明示利食い + time stop の併用。
+
+### code alignment チェック結果
+
+| sys | 仕様 ⇔ code | 判定 |
+|-----|-------------|------|
+| 1,2,3,4,5,6 | stop ATR 期間/倍率・trailing%・利食い・time stop すべて一致 | ✅ 整合 |
+| **7** | 仕様「損切り=**50日 3ATR**」に対し code は `stop_atr_period=20, stop_atr_multiplier=5.0` (=sys1 と同値、copy-paste 疑い) | ❌ **不整合** |
+| **7** | 仕様「SPY が 70日高値→翌寄付決済」は `SYSTEM_TRADE_RULES` に無く、`profit_protection.is_new_70day_high` / `_next_action_hint` (system7) 側に分散実装。code comment 自体が `# SPY固定、詳細は要確認` (`trade_management.py:279`) | ⚠ **要検証** |
+
+> **結論**: exit rule は「doc のみで未実装」ではなく、sys1-6 は**仕様通り実装済**。
+> **sys7 のみ doc-vs-code 不整合** (stop ATR パラメータ乖離 + 70日高値 exit の実装分散) が確認された。
 
 ---
 
@@ -271,7 +312,8 @@ def check_signal_anomalies(signals_df, alloc_df, skip_today, skip_prev, baseline
 | TD3 | **system6 実行時間過剰** — cache 再利用時も 50 日分を全再計算 (ATR/rolling) | 同 §2, `core/system6.py:145–399` | 性能 | 未修正 |
 | TD4 | `recover_spy_cache.py` エラー解析 — SPY cache 復旧経路の error handling 不備 | 同 §3 | 運用 | 未修正 |
 | TD5 | エラーメッセージ体系 / CLI-UI ログ同期 / 進捗率乖離 | 同 §1,4,5,6,8 | UX/運用 | 部分 |
-| TD6 | Exit 関連テスト未整備 (`test_exit_planner` / `test_trade_history` 推奨) | `docs/CODE_REVIEW_2025-11-03.md` | 品質 | 未着手 |
+| TD6 | **sys7 exit の doc-vs-code 不整合** (仕様 50日3ATR vs code 20日5ATR、70日高値 exit が `SYSTEM_TRADE_RULES` 外に分散、comment=要確認) | `common/trade_management.py:276-286`, `docs/systems/システム7.txt:18-22` | 品質 | 未修正 |
+| TD7 | exit 全般: sys1-6 は仕様通り実装済・22/22 テスト pass (`ENTRY_EXIT_TEST_RESULTS.md`)。ただし **live/paper 実行経路での exit 適用検証は別途必要** | `docs/ENTRY_EXIT_TEST_RESULTS.md` | 品質 | 部分検証 |
 
 **技術的負債 top 3**: TD1 (CI/cron 停止 → 自動配信の生命線が手動)、TD2 (SPY 欠損の無警告継続 → hedge/regime 誤判定)、TD3 (system6 性能 → 日次バッチ遅延リスク)。
 
@@ -285,7 +327,7 @@ def check_signal_anomalies(signals_df, alloc_df, skip_today, skip_prev, baseline
 | **2** | **日次 signal/alloc/skip の時系列が未保存** (上書き型)。異常検知 (Part 3 R1–R3,R5) も事後監査も不可能 | 顧客損失検知不能 / 法務(監査証跡) | 常時 | date-stamped snapshot 保存 + 30 日 retention。**1–2 日 / downtime ~0** |
 | **3** | **entry_price = 同足 Close の look-ahead 疑い** (B1/B2)。backtest 実績が実約定より楽観的なら誇大広告・顧客損失 | 顧客損失 / 法務(誇大表示) | 常時 (全 signal) | 実約定 vs entry_price の突合監査。leak 確定なら next-open 化。**2–3 日 (core 別branch) / downtime ~0** |
 | **4** | **SPY 欠損時の無警告継続** (TD2)。hedge (sys7) と regime gate が誤動作 → 過大 short / 無ヘッジ | 顧客損失 / システム | 稀 (feed 障害時) | フェーズ0で SPY 鮮度検証、欠損は FAIL 停止 + 復旧導線。**1 日 / downtime = 障害時のみ** |
-| **5** | **Exit ロジックが core 外 + 未テスト** (TD6)。stop/target の regression が無検知で本番混入 | 顧客損失 | 月次(改修時) | `test_exit_planner`/`test_trade_history` 追加、entry-exit E2E。**2 日 / downtime ~0** |
+| **5** | **sys7 exit の doc-vs-code 不整合** (B9) + doc-vs-code drift 全般。exit は sys1-6 は実装済・22/22 テスト pass だが、**sys7 の損切りが仕様 50日3ATR に対し code は 20日5ATR**。hedge の stop が設計より乖離 → 破局時に想定外の損失/早期決済 | 顧客損失 / hedge 機能不全 | 稀 (SPY 急落時に顕在化) | sys7 rule を仕様に合わせ修正 + 70日高値 exit を `SYSTEM_TRADE_RULES` に統合、回帰テスト追加。**1–2 日 / downtime ~0** |
 
 ---
 
