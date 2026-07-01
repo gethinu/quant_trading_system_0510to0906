@@ -70,13 +70,22 @@ def _load_env() -> None:
 
 
 def _get_api_key() -> str:
-    """API キーを環境変数から読み込む。無ければ ValueError で fail-fast。"""
+    """API キーを環境変数から読み込む。無ければ ValueError で fail-fast。
+
+    Polygon.io は Massive.com にリブランドされたため、``MASSIVE_API_KEY`` /
+    ``MASSIVE_KEY`` も同義キーとして受け付ける (env 変数名の揺れに両対応)。
+    """
     _load_env()
-    api_key = os.getenv("POLYGON_API_KEY") or os.getenv("POLYGON_KEY")
+    api_key = (
+        os.getenv("POLYGON_API_KEY")
+        or os.getenv("MASSIVE_API_KEY")
+        or os.getenv("POLYGON_KEY")
+        or os.getenv("MASSIVE_KEY")
+    )
     if not api_key:
         raise ValueError(
-            "Polygon API 認証情報が未設定です。環境変数 POLYGON_API_KEY を "
-            ".env に設定してください。無料 tier 取得先: "
+            "Polygon/Massive API 認証情報が未設定です。環境変数 POLYGON_API_KEY "
+            "(または MASSIVE_API_KEY) を .env に設定してください。無料 tier 取得先: "
             "https://polygon.io/dashboard/signup"
         )
     return api_key

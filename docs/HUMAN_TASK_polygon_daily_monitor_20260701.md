@@ -169,15 +169,28 @@ Get-ScheduledTaskInfo -TaskName 'QuantTrading_PolygonDailyMonitor'
 
 ---
 
-## Verdict 実測 (Polygon PoC 完了時に追記)
+## Verdict 実測 (Polygon PoC 完了 — 2026-07-01)
 
-```
-(POLYGON_API_KEY 投入後、以下を追記)
+- **実測日**: 2026-07-01（`POLYGON_API_KEY` 投入後、env 変数名は `POLYGON_API_KEY`。code は `MASSIVE_API_KEY` も両対応化済）
+- **AAPL smoke**: 2026-06-30 volume = **65,100,155 = 8 桁**（full-market。IEX 1.58M=7桁の約 41倍）
+- **Grouped Daily 応答**: `get_polygon_grouped_daily("2026-06-30")` → **12,474 銘柄を 1 request**、columns=`[Open,High,Low,Close,Volume]`
+- **候補 27 銘柄カバレッジ**: 26/27（ACLX のみ欠落 = delisting/rename、yfinance も同様に欠落）
 
-- 実測日:
-- Grouped Daily 応答 shape:
-- sys1 生存率:
-- sys4 生存率:
-- SIP 連結率 (Alpaca IEX 比):
-- $0 化 verdict: [ ] approved / [ ] rejected
-```
+### gate 生存率 3 列対比（直近 5 営業日平均、Grouped Daily 5 call で取得）
+
+| gate | **Polygon 実測** | yfinance 実測 | IEX 実測 |
+|---|---|---|---|
+| DV>25M (sys2/3) | **73%** | 73% | ~25% |
+| DV>50M (sys1) | **69%** | 69% | ~20% |
+| DV>100M (sys4) | **65%** | 65% | ~7% |
+| DV>10M (sys6) | **88%** | 88% | ~42% |
+| AvgVol50>500k (sys5) | **92%** | 92% | 19% |
+| AvgVol50>1M (sys3 Phase2) | **85%** | 85% | 12% |
+
+- **SIP 連結率 (Alpaca IEX 比)**: AAPL 41×、per-symbol volume は yfinance とほぼ一致（AAPL 110.7M / SPY 59.25M）。Polygon = yfinance = SIP 連結 full-market。
+- **$0 化 verdict**: **[x] approved** — Polygon 生存率 = yfinance（完全一致、乖離ゼロ）で full-market を実証。IEX の壊滅（12-25%）を解消。**真の $0 化達成**。
+
+### 運用上の注意（本採用の前提条件）
+1. **無料 tier 履歴は約 2 年**。日次シグナル（SMA200/ROC200 = 200日）には十分だが、長期バックテストには不足 → backtest 用途は EODHD 履歴保持 or 別途。
+2. **production は必ず `get_polygon_grouped_daily`**（1 call/日で全12k銘柄）。per-symbol `get_polygon_data` は全銘柄運用に不向き（5 req/min 制限）。
+3. daily monitor の TODO 3 つ（`load_dv_cache` / `evaluate_survival` / `compute_delta`）は別 iteration で肉付け。

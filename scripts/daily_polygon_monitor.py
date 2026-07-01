@@ -226,7 +226,7 @@ def main(argv: list[str] | None = None) -> int:
         report.survival_by_system = {k: v.as_dict() for k, v in survivals.items()}
         compute_delta(report, previous_path)
     except ValueError as exc:
-        # POLYGON_API_KEY 未設定
+        # POLYGON_API_KEY / MASSIVE_API_KEY 未設定 (共に common.polygon_data で判定)
         logger.error("fail-fast: %s", exc)
         return 1
     except Exception as exc:  # noqa: BLE001
