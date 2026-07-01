@@ -64,6 +64,12 @@ class NtfyPublisher(Publisher):
         message = SignalMessage(payload=signals_json)
         warn = message.has_warnings()
 
+        # AI narrative (meta.narrative) があれば headline/summary を活かす。
+        # base.py (Publisher ABC) は不変のまま payload から直接読む。
+        narrative = (signals_json.get("meta") or {}).get("narrative") or {}
+        headline = str(narrative.get("headline") or "").strip()
+        summary = str(narrative.get("summary") or "").strip()
+
         lines = message.system_summary_lines()
         hedge = message.hedge
         hedge_str = (
@@ -71,7 +77,11 @@ class NtfyPublisher(Publisher):
             if hedge and hedge.get("symbol")
             else "none"
         )
-        body = "\n".join(lines) if lines else "(no signals today)"
+        body = ""
+        if summary:
+            # narrator.summary を body 冒頭に (300 文字で丸める)。
+            body += summary[:300].rstrip() + "\n\n"
+        body += "\n".join(lines) if lines else "(no signals today)"
         body += f"\n\nportfolio: {message.total_signals} signals · hedge: {hedge_str}"
         body += f"\n{message.footer()}"
         if len(body) > _BODY_LIMIT:
@@ -83,9 +93,13 @@ class NtfyPublisher(Publisher):
         # urgent(5) if WARN else configured priority
         priority = 5 if warn else self.priority
 
-        title = message.title()
-        # ヘッダは ASCII 制約が安全。絵文字はタグ(X-Tags)側で表現し、title は素の text に。
-        safe_title = title.encode("ascii", "ignore").decode("ascii").strip() or "Today's Signals"
+        # X-Title は narrator.headline 優先。ヘッダは ASCII 制約が安全なので
+        # 非 ASCII (日本語 headline 等) を除去し、空になれば既存 title へ fallback。
+        raw_title = headline or message.title()
+        safe_title = raw_title.encode("ascii", "ignore").decode("ascii").strip()
+        if not safe_title:
+            safe_title = message.title().encode("ascii", "ignore").decode("ascii").strip()
+        safe_title = safe_title or "Today's Signals"
 
         headers = {
             "X-Title": safe_title,

@@ -52,6 +52,11 @@ class EmailPublisher(Publisher):
         return bool(self.api_key and self.from_email and self.to_emails)
 
     # -- rendering ------------------------------------------------------
+    @staticmethod
+    def _narrative(message: SignalMessage) -> dict[str, Any]:
+        """meta.narrative を取得 (base.py 不変のため payload から直接読む)。"""
+        return (message.payload.get("meta") or {}).get("narrative") or {}
+
     def _render_text(self, message: SignalMessage) -> str:
         lines = message.system_summary_lines()
         body = "\n".join(lines) if lines else "(no signals today)"
@@ -61,8 +66,12 @@ class EmailPublisher(Publisher):
             if hedge and hedge.get("symbol")
             else "none"
         )
+        narrative = self._narrative(message)
+        narr_block = ""
+        if narrative.get("headline") or narrative.get("summary"):
+            narr_block = f"{narrative.get('headline', '')}\n{narrative.get('summary', '')}\n\n"
         return (
-            f"{message.title()}\n\n{body}\n\n"
+            f"{message.title()}\n\n{narr_block}{body}\n\n"
             f"portfolio: {message.total_signals} signals · hedge: {hedge_str}\n"
             f"{message.footer()}"
         )
@@ -85,10 +94,34 @@ class EmailPublisher(Publisher):
             if warn
             else ""
         )
+        # AI narrative card (headline 大見出し + summary + per-symbol reasons)。
+        narrative = self._narrative(message)
+        narr_card = ""
+        if narrative.get("headline") or narrative.get("summary"):
+            reasons = narrative.get("per_symbol_reasons") or {}
+            reason_rows = "".join(
+                f"<li style='margin:2px 0'><b>{sym}</b>: {why}</li>"
+                for sym, why in reasons.items()
+            )
+            reason_html = (
+                f"<ul style='padding-left:18px;font-size:12px;color:#333'>{reason_rows}</ul>"
+                if reason_rows
+                else ""
+            )
+            narr_card = (
+                "<div style='background:#eef2ff;border-left:4px solid #6366f1;"
+                "padding:10px 12px;border-radius:6px;margin-bottom:12px'>"
+                f"<div style='font-weight:700;font-size:15px;margin-bottom:4px'>"
+                f"🧠 {narrative.get('headline', '')}</div>"
+                f"<div style='font-size:13px;color:#333'>{narrative.get('summary', '')}</div>"
+                f"{reason_html}"
+                "</div>"
+            )
         return (
             "<div style='font-family:-apple-system,Segoe UI,sans-serif;max-width:520px'>"
             f"<h2 style='margin:0 0 8px'>{message.title()}</h2>"
             f"{warn_banner}"
+            f"{narr_card}"
             f"<ul style='padding-left:18px;font-size:14px'>{rows}</ul>"
             f"<p style='font-size:13px'>portfolio: <b>{message.total_signals}</b> "
             f"signals · hedge: {hedge_str}</p>"

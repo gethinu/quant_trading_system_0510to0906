@@ -12,6 +12,7 @@
       1. [cache]    scripts/cache_daily_polygon.py  --start/--end {date}   (Polygon fetch)
       2. [signals]  apps/app_today_signals.py --headless --output-json ...  (シグナル生成)
       3. [coverage] scripts/daily_polygon_monitor.py --date {date}          (gate 生存率)
+      3.5 [narrator] scripts/narrate_signals.py --input {json}       (AI 解説を meta.narrative へ)
       4. [publish]  scripts/publish_signals.py --input {json}          (ntfy + email 配信)
 
     step 失敗は log に残し、パイプラインは可能な範囲で継続する (signals が出れば coverage/publish は進む)。
@@ -23,8 +24,19 @@
 .PARAMETER Symbols
     signals step の対象シンボル (comma 区切り)。未指定なら full universe。
 
+.PARAMETER AccountEquity
+    orders preview step の口座資産 (USD)。未指定なら env ACCOUNT_EQUITY_USD、
+    それも無ければ 10000。tier (small/medium/large) と position sizing に使われる。
+
+.PARAMETER SkipOrdersPreview
+    Step 3.7 (orders preview dry-run) をスキップ。
+
 .PARAMETER SkipCache
     step1 (Polygon fetch) をスキップ。cache が別 task で更新済のとき用。
+
+.PARAMETER SkipNarrate
+    step3.5 (AI narrator) をスキップ。ANTHROPIC_API_KEY 未設定でも narrator は
+    fail-safe (空 narrative + exit 0) なので通常は skip 不要。
 
 .PARAMETER SkipPublish
     step4 (ntfy/email 配信) をスキップ。
@@ -50,11 +62,20 @@
 param(
     [string]$Date = "",
     [string]$Symbols = "",
+    [double]$AccountEquity = 0,
     [switch]$SkipCache = $false,
+    [switch]$SkipNarrate = $false,
+    [switch]$SkipOrdersPreview = $false,
     [switch]$SkipPublish = $false,
     [switch]$DryRunPublish = $false,
     [switch]$SkipLatestCheck = $false
 )
+
+# AccountEquity 未指定 (=0) なら env ACCOUNT_EQUITY_USD、それも無ければ 10000。
+if ($AccountEquity -le 0) {
+    if ($env:ACCOUNT_EQUITY_USD) { $AccountEquity = [double]$env:ACCOUNT_EQUITY_USD }
+    else { $AccountEquity = 10000 }
+}
 
 $ErrorActionPreference = "Continue"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -168,6 +189,48 @@ try {
     # coverage は exit=2 が「閾値割れ WARN」で失敗ではない
     if ($v -eq 1) { $Failures += "coverage(exit=1)" }
     elseif ($v -eq 2) { Write-Log "[coverage] WARN: gate 閾値割れ検知 (JSON status=warn)" }
+
+    # --- Step 3.5: narrator (AI 自然文解説を meta.narrative へ付与) -------
+    # ANTHROPIC_API_KEY 未設定でも narrator は空 narrative を書き exit 0 (fail-safe)。
+    # 事業差別化の核: 「signals だけ」でなく解説付きで配信/表示する。
+    if ($SkipNarrate) {
+        Write-Log "[narrator] SkipNarrate 指定によりスキップ"
+    }
+    elseif (-not (Test-Path $SignalsJson)) {
+        Write-Log "[narrator] signals JSON が無いためスキップ: $SignalsJson"
+    }
+    else {
+        $narrArgs = @(
+            (Join-Path $ProjectRoot "scripts\narrate_signals.py"),
+            "--input", $SignalsJson
+        )
+        $n = Invoke-Step -Name "narrator" -PyArgs $narrArgs
+        # narrator は非致命 (fail-safe)。exit!=0 は WARN 集計するが publish は続行。
+        if ($n -ne 0) { $Failures += "narrator(exit=$n)" }
+    }
+
+    # --- Step 3.7: orders preview (dry-run のみ、実発注しない) ------------
+    # signals JSON から account_equity scale の orders preview を生成し
+    # results_csv\orders_preview_YYYYMMDD_${equity}.json に書き出す。
+    # daily_pipeline は **絶対に実発注しない** (safety)。実発注は user が翌朝
+    # dashboard 確認 -> paper_trading_submit.py --confirm --yes を手動 kick。
+    if ($SkipOrdersPreview) {
+        Write-Log "[orders_preview] SkipOrdersPreview 指定によりスキップ"
+    }
+    elseif (-not (Test-Path $SignalsJson)) {
+        Write-Log "[orders_preview] signals JSON が無いためスキップ: $SignalsJson"
+    }
+    else {
+        $ordArgs = @(
+            (Join-Path $ProjectRoot "scripts\paper_trading_dryrun.py"),
+            "--date", $Date,
+            "--signals-json", $SignalsJson,
+            "--account-equity", $AccountEquity,
+            "--output-dir", (Join-Path $ProjectRoot "results_csv")
+        )
+        $o = Invoke-Step -Name "orders_preview" -PyArgs $ordArgs
+        if ($o -ne 0) { $Failures += "orders_preview(exit=$o)" }
+    }
 
     # --- Step 4: publish (ntfy primary + email backup) -----------------
     if ($SkipPublish) {
