@@ -17,6 +17,10 @@ pydantic>=2,<3
 # Notifications (optional)
 slack_sdk>=3.26,<4
 
+# AI narrator (common/narrator.py — 当日シグナルの自然文解説)
+# 未 install でも narrator は lazy import + fail-safe で pipeline を止めない。
+anthropic>=0.40,<1
+
 # Trading & market data (Alpaca 無料 IEX feed)
 alpaca-py>=0.30.0
 
