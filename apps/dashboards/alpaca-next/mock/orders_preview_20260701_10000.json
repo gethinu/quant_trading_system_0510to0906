@@ -1,0 +1,146 @@
+{
+  "date": "2026-07-01",
+  "account_equity": 10000.0,
+  "tier": "medium",
+  "orders": [
+    {
+      "symbol": "AAPL",
+      "side": "buy",
+      "notional_usd": 1800.0,
+      "qty": 6.223206,
+      "fractional": true,
+      "order_type": "market",
+      "system": "system1",
+      "weight": 0.18,
+      "rank": 1,
+      "client_order_id": "sys1_AAPL_20260701"
+    },
+    {
+      "symbol": "MSFT",
+      "side": "buy",
+      "notional_usd": 1500.0,
+      "qty": 2.926258,
+      "fractional": true,
+      "order_type": "market",
+      "system": "system1",
+      "weight": 0.15,
+      "rank": 2,
+      "client_order_id": "sys1_MSFT_20260701"
+    },
+    {
+      "symbol": "NVDA",
+      "side": "buy",
+      "notional_usd": 1200.0,
+      "qty": 6.707658,
+      "fractional": true,
+      "order_type": "market",
+      "system": "system1",
+      "weight": 0.12,
+      "rank": 3,
+      "client_order_id": "sys1_NVDA_20260701"
+    },
+    {
+      "symbol": "TSLA",
+      "side": "sell",
+      "notional_usd": 1100.0,
+      "qty": 4.478827,
+      "fractional": true,
+      "order_type": "market",
+      "system": "system2",
+      "weight": 0.11,
+      "rank": 1,
+      "client_order_id": "sys2_TSLA_20260701"
+    },
+    {
+      "symbol": "COIN",
+      "side": "sell",
+      "notional_usd": 800.0,
+      "qty": 1.989555,
+      "fractional": true,
+      "order_type": "market",
+      "system": "system2",
+      "weight": 0.08,
+      "rank": 2,
+      "client_order_id": "sys2_COIN_20260701"
+    },
+    {
+      "symbol": "AMD",
+      "side": "buy",
+      "notional_usd": 900.0,
+      "qty": 5.344418,
+      "fractional": true,
+      "order_type": "market",
+      "system": "system3",
+      "weight": 0.09,
+      "rank": 1,
+      "client_order_id": "sys3_AMD_20260701"
+    },
+    {
+      "symbol": "GOOGL",
+      "side": "buy",
+      "notional_usd": 1000.0,
+      "qty": 4.957858,
+      "fractional": true,
+      "order_type": "market",
+      "system": "system4",
+      "weight": 0.1,
+      "rank": 1,
+      "client_order_id": "sys4_GOOGL_20260701"
+    },
+    {
+      "symbol": "META",
+      "side": "buy",
+      "notional_usd": 900.0,
+      "qty": 1.202726,
+      "fractional": true,
+      "order_type": "market",
+      "system": "system4",
+      "weight": 0.09,
+      "rank": 2,
+      "client_order_id": "sys4_META_20260701"
+    },
+    {
+      "symbol": "JPM",
+      "side": "buy",
+      "notional_usd": 800.0,
+      "qty": 2.56,
+      "fractional": true,
+      "order_type": "market",
+      "system": "system5",
+      "weight": 0.08,
+      "rank": 1,
+      "client_order_id": "sys5_JPM_20260701"
+    },
+    {
+      "symbol": "XOM",
+      "side": "sell",
+      "notional_usd": 700.0,
+      "qty": 5.922166,
+      "fractional": true,
+      "order_type": "market",
+      "system": "system6",
+      "weight": 0.07,
+      "rank": 1,
+      "client_order_id": "sys6_XOM_20260701"
+    },
+    {
+      "symbol": "SPY",
+      "side": "sell",
+      "notional_usd": 600.0,
+      "qty": 0.934871,
+      "fractional": true,
+      "order_type": "market",
+      "system": "system7",
+      "weight": 0.06,
+      "rank": 1,
+      "client_order_id": "sys7_SPY_20260701"
+    }
+  ],
+  "skipped": [],
+  "summary": {
+    "total_notional": 11300.0,
+    "n_orders": 11,
+    "n_skipped": 0,
+    "hedge_notional": 600.0
+  }
+}

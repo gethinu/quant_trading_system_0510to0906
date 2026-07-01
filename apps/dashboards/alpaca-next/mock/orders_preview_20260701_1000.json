@@ -1,0 +1,98 @@
+{
+  "date": "2026-07-01",
+  "account_equity": 1000.0,
+  "tier": "small",
+  "orders": [
+    {
+      "symbol": "AAPL",
+      "side": "buy",
+      "notional_usd": 180.0,
+      "qty": 0.622321,
+      "fractional": true,
+      "order_type": "market",
+      "system": "system1",
+      "weight": 0.18,
+      "rank": 1,
+      "client_order_id": "sys1_AAPL_20260701"
+    },
+    {
+      "symbol": "TSLA",
+      "side": "sell",
+      "notional_usd": 110.0,
+      "qty": 0.447883,
+      "fractional": true,
+      "order_type": "market",
+      "system": "system2",
+      "weight": 0.11,
+      "rank": 1,
+      "client_order_id": "sys2_TSLA_20260701"
+    },
+    {
+      "symbol": "AMD",
+      "side": "buy",
+      "notional_usd": 90.0,
+      "qty": 0.534442,
+      "fractional": true,
+      "order_type": "market",
+      "system": "system3",
+      "weight": 0.09,
+      "rank": 1,
+      "client_order_id": "sys3_AMD_20260701"
+    },
+    {
+      "symbol": "GOOGL",
+      "side": "buy",
+      "notional_usd": 100.0,
+      "qty": 0.495786,
+      "fractional": true,
+      "order_type": "market",
+      "system": "system4",
+      "weight": 0.1,
+      "rank": 1,
+      "client_order_id": "sys4_GOOGL_20260701"
+    },
+    {
+      "symbol": "JPM",
+      "side": "buy",
+      "notional_usd": 80.0,
+      "qty": 0.256,
+      "fractional": true,
+      "order_type": "market",
+      "system": "system5",
+      "weight": 0.08,
+      "rank": 1,
+      "client_order_id": "sys5_JPM_20260701"
+    },
+    {
+      "symbol": "XOM",
+      "side": "sell",
+      "notional_usd": 70.0,
+      "qty": 0.592217,
+      "fractional": true,
+      "order_type": "market",
+      "system": "system6",
+      "weight": 0.07,
+      "rank": 1,
+      "client_order_id": "sys6_XOM_20260701"
+    },
+    {
+      "symbol": "SPY",
+      "side": "sell",
+      "notional_usd": 60.0,
+      "qty": 0.093487,
+      "fractional": true,
+      "order_type": "market",
+      "system": "system7",
+      "weight": 0.06,
+      "rank": 1,
+      "client_order_id": "sys7_SPY_20260701"
+    }
+  ],
+  "skipped": [],
+  "summary": {
+    "total_notional": 690.0,
+    "n_orders": 7,
+    "n_skipped": 0,
+    "hedge_notional": 60.0
+  }
+}

@@ -1,5 +1,6 @@
 import { loadCoverage } from '@/lib/loadCoverage';
 import { loadSignals } from '@/lib/loadSignals';
+import { loadOrdersPreview, SCALES } from '@/lib/loadOrders';
 import type {
   CoverageDay,
   SystemStat,
@@ -7,6 +8,7 @@ import type {
   Signal,
   SystemSignals,
   Narrative,
+  OrdersPreview,
 } from '@/lib/types';
 
 export const dynamic = 'force-static';
@@ -368,12 +370,162 @@ function CoverageSection({
   );
 }
 
+function tierBadge(tier: string): string {
+  if (tier === 'small') return 'bg-warn/20 text-warn';
+  if (tier === 'large') return 'bg-ok/20 text-ok';
+  return 'bg-white/10 text-cardfg';
+}
+
+function OrdersPreviewScale({
+  scaleLabel,
+  preview,
+  open,
+}: {
+  scaleLabel: string;
+  preview: OrdersPreview | null;
+  open: boolean;
+}) {
+  if (!preview) {
+    return (
+      <details className="rounded-lg bg-white/[0.03] border border-white/5">
+        <summary className="cursor-pointer select-none list-none px-3 py-2 flex items-center gap-2">
+          <span className="font-medium">{scaleLabel}</span>
+          <span className="text-xs text-muted">no preview</span>
+        </summary>
+        <div className="px-3 pb-3 text-xs text-muted">
+          Run <code className="text-cardfg">paper_trading_dryrun.py --account-equity …</code>
+        </div>
+      </details>
+    );
+  }
+  const s = preview.summary;
+  return (
+    <details className="rounded-lg bg-white/[0.03] border border-white/5" open={open}>
+      <summary className="cursor-pointer select-none list-none px-3 py-2 flex items-center justify-between gap-2">
+        <span className="flex items-center gap-2">
+          <span className="font-medium">{scaleLabel}</span>
+          <span
+            className={`inline-block px-2 py-0.5 rounded-full text-[10px] uppercase ${tierBadge(
+              preview.tier,
+            )}`}
+          >
+            {preview.tier}
+          </span>
+          <span className="inline-block px-2 py-0.5 rounded-full bg-white/10 text-[10px] tabular-nums">
+            {s.n_orders} order{s.n_orders === 1 ? '' : 's'}
+          </span>
+        </span>
+        <span className="text-[11px] tabular-nums text-muted">
+          ${Math.round(s.total_notional).toLocaleString()}
+          {s.hedge_notional > 0 ? (
+            <span className="text-fail"> · hedge ${Math.round(s.hedge_notional).toLocaleString()}</span>
+          ) : null}
+        </span>
+      </summary>
+      <div className="px-3 pb-3">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-muted text-[10px] uppercase">
+              <th className="text-left font-normal py-1">sym</th>
+              <th className="text-left font-normal py-1">side</th>
+              <th className="text-right font-normal py-1">notional</th>
+              <th className="text-right font-normal py-1">qty</th>
+              <th className="text-right font-normal py-1">type</th>
+            </tr>
+          </thead>
+          <tbody>
+            {preview.orders.map((o) => {
+              const buy = o.side.toLowerCase() === 'buy';
+              return (
+                <tr key={o.client_order_id} className="border-t border-white/5">
+                  <td className="py-1.5 font-medium">{o.symbol}</td>
+                  <td className="py-1.5">
+                    <span
+                      className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                        buy ? 'bg-ok/20 text-ok' : 'bg-fail/20 text-fail'
+                      }`}
+                    >
+                      {o.side.toUpperCase()}
+                    </span>
+                  </td>
+                  <td className="py-1.5 text-right tabular-nums">
+                    ${Math.round(o.notional_usd).toLocaleString()}
+                  </td>
+                  <td className="py-1.5 text-right tabular-nums text-[11px]">
+                    {o.qty.toFixed(o.fractional ? 4 : 0)}
+                  </td>
+                  <td className="py-1.5 text-right text-[10px]">
+                    {o.fractional ? (
+                      <span className="inline-block px-1.5 py-0.5 rounded bg-white/10 text-muted">
+                        frac
+                      </span>
+                    ) : (
+                      <span className="text-muted">{o.order_type}</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {preview.skipped.length > 0 ? (
+          <div className="mt-2 text-[10px] text-muted">
+            skipped: {preview.skipped.map((k) => k.symbol).join(', ')}
+          </div>
+        ) : null}
+      </div>
+    </details>
+  );
+}
+
+function OrdersPreviewSection({
+  previews,
+}: {
+  previews: Record<string, OrdersPreview | null>;
+}) {
+  const any = SCALES.some((sc) => previews[sc.key]);
+  return (
+    <section className="bg-card rounded-xl p-4 shadow-lg">
+      <div className="flex items-baseline justify-between mb-2">
+        <h2 className="text-xs uppercase tracking-wider text-muted">
+          Today&apos;s Orders Preview
+        </h2>
+        <span className="text-[9px] uppercase bg-warn/20 text-warn px-1.5 py-0.5 rounded">
+          dry-run
+        </span>
+      </div>
+      {any ? (
+        <div className="space-y-2">
+          {SCALES.map((sc, i) => (
+            <OrdersPreviewScale
+              key={sc.key}
+              scaleLabel={`${sc.label} · ${sc.key}`}
+              preview={previews[sc.key]}
+              open={i === 1}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="text-sm text-muted">
+          No orders preview yet. Run{' '}
+          <code className="text-cardfg">paper_trading_dryrun.py --account-equity 10000</code>.
+        </div>
+      )}
+      <div className="mt-2 text-[10px] text-muted">
+        Preview only — orders are NEVER auto-submitted. Manual:{' '}
+        <code className="text-cardfg">paper_trading_submit.py --confirm --yes</code>
+      </div>
+    </section>
+  );
+}
+
 export default function Home() {
   const payload = loadCoverage();
   const history = payload.history;
   const latest: CoverageDay | undefined = history[history.length - 1];
   const signals: SignalsPayload | null = loadSignals();
   const narrative = signals?.meta?.narrative;
+  const ordersPreview = loadOrdersPreview();
 
   return (
     <main className="max-w-md lg:max-w-5xl mx-auto p-4 sm:p-6">
@@ -404,6 +556,7 @@ export default function Home() {
         </div>
         <div className="space-y-4">
           <SignalsSection payload={signals} />
+          <OrdersPreviewSection previews={ordersPreview} />
         </div>
       </div>
 
