@@ -53,6 +53,7 @@ export interface SignalsMeta {
   cli_version: string;
   run_id: string;
   elapsed_seconds: number | null;
+  publish_status?: 'ok' | 'partial' | 'failed';
 }
 
 export interface SignalsPayload {

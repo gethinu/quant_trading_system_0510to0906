@@ -167,7 +167,23 @@ function SignalsSection({ payload }: { payload: SignalsPayload | null }) {
         <h2 className="text-xs uppercase tracking-wider text-muted">
           Today&apos;s Signals
         </h2>
-        <span className="text-[10px] text-muted">{payload.date}</span>
+        <span className="flex items-center gap-2">
+          {payload.meta?.publish_status ? (
+            <span
+              className={`inline-block px-1.5 py-0.5 rounded text-[9px] uppercase ${
+                payload.meta.publish_status === 'failed'
+                  ? 'bg-fail/20 text-fail'
+                  : payload.meta.publish_status === 'partial'
+                  ? 'bg-warn/20 text-warn'
+                  : 'bg-ok/20 text-ok'
+              }`}
+              title="publish_status (ntfy/email 配信結果)"
+            >
+              publish: {payload.meta.publish_status}
+            </span>
+          ) : null}
+          <span className="text-[10px] text-muted">{payload.date}</span>
+        </span>
       </div>
 
       <div className="flex items-center gap-4 mb-3 text-sm tabular-nums">
