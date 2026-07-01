@@ -16,3 +16,51 @@ export interface CoverageDay {
 export interface CoveragePayload {
   history: CoverageDay[];
 }
+
+// --- Today's Signals (today_signals_YYYYMMDD.json, schema version 1.0) ------
+
+export type Side = 'BUY' | 'SELL';
+
+export interface Signal {
+  symbol: string;
+  side: Side;
+  entry_price: number | null;
+  weight: number | null;
+  rank: number | null;
+  reason: string | null;
+}
+
+export interface SystemSignals {
+  signals: Signal[];
+  n_candidates_input: number;
+  n_signals_output: number;
+  gate_survival_ratio: number;
+}
+
+export interface Hedge {
+  symbol: string | null;
+  side: Side | string | null;
+  entry_price?: number | null;
+}
+
+export interface SignalsPortfolio {
+  total_signals: number;
+  total_notional_usd: number;
+  hedge: Hedge | null;
+}
+
+export interface SignalsMeta {
+  cli_version: string;
+  run_id: string;
+  elapsed_seconds: number | null;
+}
+
+export interface SignalsPayload {
+  version: string;
+  date: string;
+  generated_at: string;
+  provider: string;
+  systems: Record<string, SystemSignals>;
+  portfolio: SignalsPortfolio;
+  meta: SignalsMeta;
+}
