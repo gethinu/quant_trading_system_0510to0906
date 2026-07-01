@@ -4,7 +4,7 @@
     1 スクリプトで通す Windows Task Scheduler 用 orchestrator。
 
 .DESCRIPTION
-    Phase 1 事業化: 「signal 生成 -> Vercel 反映用 JSON -> Discord 配信」を無人化する。
+    Phase 1 事業化: 「signal 生成 -> Vercel 反映用 JSON -> ntfy/email 配信」を無人化する。
     既存 Task 'QuantTrading_PolygonDailyMonitor' の呼び先を本スクリプトに差し替えるだけで
     4 段パイプラインに拡張される。各 step は idempotent (cache/JSON 上書き) で再実行安全。
 
@@ -12,10 +12,10 @@
       1. [cache]    scripts/cache_daily_polygon.py  --start/--end {date}   (Polygon fetch)
       2. [signals]  apps/app_today_signals.py --headless --output-json ...  (シグナル生成)
       3. [coverage] scripts/daily_polygon_monitor.py --date {date}          (gate 生存率)
-      4. [publish]  scripts/publish_signals.py --date {date}                (Discord 配信)
+      4. [publish]  scripts/publish_signals.py --input {json}          (ntfy + email 配信)
 
     step 失敗は log に残し、パイプラインは可能な範囲で継続する (signals が出れば coverage/publish は進む)。
-    いずれかが失敗したら最後に Discord webhook (DISCORD_WEBHOOK_URL) へ WARN を送る。
+    いずれかが失敗したら最後に ntfy (NTFY_TOPIC) へ WARN を送る。
 
 .PARAMETER Date
     対象日 (YYYY-MM-DD)。未指定なら今日 (ローカル)。
@@ -27,7 +27,7 @@
     step1 (Polygon fetch) をスキップ。cache が別 task で更新済のとき用。
 
 .PARAMETER SkipPublish
-    step4 (Discord 配信) をスキップ。
+    step4 (ntfy/email 配信) をスキップ。
 
 .PARAMETER DryRunPublish
     step4 を送信せず payload 検証のみ (--dry-run)。
@@ -93,21 +93,22 @@ function Invoke-Step {
     return $code
 }
 
-# 失敗時 Discord WARN (best-effort、DISCORD_WEBHOOK_URL 未設定なら黙ってスキップ)
-function Send-DiscordWarn {
+# 失敗時 ntfy WARN (best-effort、NTFY_TOPIC 未設定なら黙ってスキップ)
+function Send-Warn {
     param([string]$Text)
-    $hook = $env:DISCORD_WEBHOOK_URL
-    if (-not $hook) {
-        Write-Log "WARN 通知スキップ (DISCORD_WEBHOOK_URL 未設定)"
+    $topic = $env:NTFY_TOPIC
+    if (-not $topic) {
+        Write-Log "WARN 通知スキップ (NTFY_TOPIC 未設定)"
         return
     }
+    $base = if ($env:NTFY_URL) { $env:NTFY_URL.TrimEnd('/') } else { "https://ntfy.sh" }
     try {
-        $body = @{ content = ":warning: **daily_pipeline** $Date`n$Text" } | ConvertTo-Json
-        Invoke-RestMethod -Uri $hook -Method Post -ContentType "application/json" -Body $body | Out-Null
-        Write-Log "Discord WARN 送信済"
+        $headers = @{ "X-Title" = "daily_pipeline WARN $Date"; "X-Priority" = "5"; "X-Tags" = "warning" }
+        Invoke-RestMethod -Uri "$base/$topic" -Method Post -Headers $headers -Body $Text | Out-Null
+        Write-Log "ntfy WARN 送信済"
     }
     catch {
-        Write-Log "Discord WARN 送信失敗: $_"
+        Write-Log "ntfy WARN 送信失敗: $_"
     }
 }
 
@@ -168,7 +169,7 @@ try {
     if ($v -eq 1) { $Failures += "coverage(exit=1)" }
     elseif ($v -eq 2) { Write-Log "[coverage] WARN: gate 閾値割れ検知 (JSON status=warn)" }
 
-    # --- Step 4: publish (Discord 配信) ---------------------------------
+    # --- Step 4: publish (ntfy primary + email backup) -----------------
     if ($SkipPublish) {
         Write-Log "[publish] SkipPublish 指定によりスキップ"
     }
@@ -197,7 +198,7 @@ try {
         $summary = $Failures -join ", "
         Write-Log "Daily Pipeline 完了 (一部失敗): $summary"
         Write-Log "========================================="
-        Send-DiscordWarn -Text "step 失敗: $summary  (log: $LogFile)"
+        Send-Warn -Text "step 失敗: $summary  (log: $LogFile)"
         exit 2
     }
 }
@@ -206,6 +207,6 @@ catch {
     Write-Log "FATAL: $_"
     Write-Log $_.ScriptStackTrace
     Write-Log "========================================="
-    Send-DiscordWarn -Text "FATAL: $_"
+    Send-Warn -Text "FATAL: $_"
     exit 1
 }

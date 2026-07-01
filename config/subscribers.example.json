@@ -1,5 +1,5 @@
 {
-  "_comment": "Phase 2 配信の下地。config/subscribers.json にコピーして使う。secret は env 変数名で参照し、生値は置かない。Phase 1 では tier / systems フィルタは未使用 (全 system を全 subscriber へ)。",
+  "_comment": "Phase 2 配信の下地。config/subscribers.json にコピーして使う。secret は env 変数名で参照し、生値は置かない。Phase 1 では PublisherRegistry (ntfy primary + email backup) が全 system を自分へ配信する。Phase 2 で tier / systems フィルタと per-subscriber fan-out を実装する。",
   "version": "1.0",
   "subscribers": [
     {
@@ -8,7 +8,8 @@
       "tier": "internal",
       "systems": ["*"],
       "channels": [
-        { "type": "discord", "webhook_env": "DISCORD_WEBHOOK_URL" }
+        { "type": "ntfy", "topic_env": "NTFY_TOPIC" },
+        { "type": "email", "to_env": "SENDGRID_TO_EMAIL" }
       ]
     },
     {
@@ -17,8 +18,8 @@
       "tier": "basic",
       "systems": ["sys1", "sys4", "sys7"],
       "channels": [
-        { "type": "discord", "webhook_env": "BETA001_DISCORD_WEBHOOK_URL" },
-        { "type": "line", "to": "Uxxxxxxxxxxxxxxxx" }
+        { "type": "ntfy", "topic_env": "BETA001_NTFY_TOPIC" },
+        { "type": "email", "to": "beta001@example.com" }
       ]
     }
   ]

@@ -122,18 +122,24 @@ class SignalMessage:
 
 
 class Publisher(ABC):
-    """配信先 1 種を表す抽象基底。実装は publish() のみ必須。"""
+    """配信先 1 種を表す抽象基底。
+
+    Phase 2/3 で Discord / LINE Messaging API / SMS / Slack を追加する際も、
+    この 2 メソッド (send / is_configured) を実装し registry に登録するだけで済む。
+    """
 
     #: 短い識別名 (log / PublishResult に載る)
     name: str = "base"
 
     @abstractmethod
-    def publish(
-        self, message: SignalMessage, *, dry_run: bool = False
-    ) -> PublishResult:
-        """``message`` を配信する。dry_run=True では送信せず payload だけ検証。"""
+    def send(self, signals_json: dict[str, Any], *, dry_run: bool = False) -> PublishResult:
+        """当日シグナル JSON (schema v1.0 dict) を配信する。
+
+        dry_run=True では送信せず、生成 payload を PublishResult.detail に載せて返す。
+        """
         raise NotImplementedError
 
+    @abstractmethod
     def is_configured(self) -> bool:
-        """送信可能 (webhook/token 等が揃っている) かを返す。"""
-        return True
+        """送信に必要な env vars (topic/api key 等) が揃っているかを返す。"""
+        raise NotImplementedError

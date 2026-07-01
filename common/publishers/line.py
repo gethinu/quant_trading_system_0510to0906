@@ -1,14 +1,16 @@
 """LINE publisher (Phase 2 skeleton)。
 
-LINE Messaging API / Notify で subscriber へ push する想定。Phase 2 で
-per-subscriber の LINE user_id または group_id を subscribers DB から引き、
-channel access token で push する。Phase 1 では interface のみ用意。
+Publisher ABC の拡張性デモも兼ねる。Phase 2 で LINE Messaging API push を
+実装する (per-subscriber の user_id / group_id を subscribers DB から解決)。
+新 publisher は send / is_configured の 2 メソッドを実装し registry に登録する
+だけで chain に組み込める。
 """
 
 from __future__ import annotations
 
 import logging
 import os
+from typing import Any
 
 from common.publishers.base import Publisher, PublishResult, SignalMessage
 
@@ -26,15 +28,13 @@ class LinePublisher(Publisher):
         env_var: str = "LINE_CHANNEL_ACCESS_TOKEN",
     ) -> None:
         self.access_token = access_token or os.getenv(env_var) or ""
-        self.to = to  # LINE user_id / group_id (Phase 2 で subscribers から)
+        self.to = to  # Phase 2 で subscribers から解決
 
     def is_configured(self) -> bool:
         return bool(self.access_token and self.to)
 
-    def publish(
-        self, message: SignalMessage, *, dry_run: bool = False
-    ) -> PublishResult:
-        # Phase 2 実装予定: LINE Messaging API push
+    def send(self, signals_json: dict[str, Any], *, dry_run: bool = False) -> PublishResult:
+        message = SignalMessage(payload=signals_json)
         detail = (
             "LinePublisher は Phase 2 で実装予定 (LINE Messaging API push)。"
             f" would send run_id={message.run_id} to={self.to}"
@@ -42,7 +42,7 @@ class LinePublisher(Publisher):
         logger.info(detail)
         return PublishResult(
             publisher=self.name,
-            ok=dry_run,  # dry_run では ok 扱い、本番は未実装として False
+            ok=dry_run,
             detail=detail,
             target=str(self.to or "unset"),
         )

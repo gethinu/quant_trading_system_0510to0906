@@ -1,23 +1,25 @@
-"""当日シグナル JSON を配信する (Phase 1: Discord, Phase 2/3 拡張の礎)。
+"""当日シグナル JSON を配信する (Phase 1: ntfy.sh primary + SendGrid Email backup)。
 
-``results_csv/today_signals_YYYYMMDD.json`` を読み、``common.publishers`` の
-Publisher 経由で配信する。Phase 1 では env ``DISCORD_WEBHOOK_URL`` 単一宛先。
-``config/subscribers.json`` があれば per-subscriber routing (skeleton) に切替える。
+``results_csv/today_signals_YYYYMMDD.json`` を読み、PublisherRegistry で
+primary→backup の chain 配信を行う。すべて失敗したら signals JSON の
+``meta.publish_status`` に "failed" を書き戻し、Vercel dashboard 側で検知可能にする。
 
 Usage:
-    python scripts/publish_signals.py --date 2026-07-01
-    python scripts/publish_signals.py --input results_csv/today_signals_20260701.json
-    python scripts/publish_signals.py --date 2026-07-01 --dry-run   # 送信せず payload 検証
+    python scripts/publish_signals.py --date 2026-07-01                 # ntfy (default)
+    python scripts/publish_signals.py --input <json> --publisher all    # ntfy + email 並列
+    python scripts/publish_signals.py --date 2026-07-01 --fallback      # ntfy 失敗時 email
+    python scripts/publish_signals.py --dry-run --publisher email       # 送信せず payload 検証
 
 Exit codes:
-    0 : 全宛先へ配信成功 (または dry-run)
-    1 : 実行時エラー (入力欠損 / webhook 未設定 等)
-    2 : 一部/全宛先で配信失敗
+    0 : 配信成功 (status=ok/partial) または dry-run
+    1 : 実行時エラー (入力欠損 / 全 publisher 未設定)
+    2 : 全宛先で配信失敗 (status=failed)
 """
 
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 import json
 import logging
 import os
@@ -27,16 +29,13 @@ import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from common.publishers import (  # noqa: E402
-    Publisher,
-    PublishResult,
+    EmailPublisher,
+    NtfyPublisher,
+    PublisherRegistry,
     SignalMessage,
-    build_publisher,
 )
-from common.publishers.discord import DiscordPublisher  # noqa: E402
 
 logger = logging.getLogger(__name__)
-
-DEFAULT_SUBSCRIBERS_PATH = Path("config") / "subscribers.json"
 
 
 def _default_input_path(date_str: str) -> Path:
@@ -49,60 +48,57 @@ def load_payload(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _publishers_from_subscribers(
-    subscribers_path: Path,
-) -> list[tuple[str, Publisher]]:
-    """subscribers.json (Phase 2 の下地) から (subscriber_id, publisher) を構築。
-
-    schema:
-        {"subscribers": [
-            {"id": "...", "tier": "...", "systems": ["*"],
-             "channels": [{"type": "discord", "webhook_env": "DISCORD_WEBHOOK_URL"}]}
-        ]}
-
-    Phase 1 では tier / systems フィルタは未使用 (全 system を全 subscriber へ)。
-    Phase 2 で per-subscriber の system 絞り込み・課金 tier ゲートを実装する。
-    """
-    data = json.loads(subscribers_path.read_text(encoding="utf-8"))
-    out: list[tuple[str, Publisher]] = []
-    for sub in data.get("subscribers", []):
-        sub_id = str(sub.get("id", "?"))
-        for ch in sub.get("channels", []):
-            kind = str(ch.get("type", "")).lower()
-            cfg: dict = {}
-            # webhook_env / token_env 経由で secret を env から解決 (JSON に生値を置かない)
-            if ch.get("webhook_env"):
-                env_val = os.getenv(str(ch["webhook_env"]))
-                if kind == "discord":
-                    cfg["webhook_url"] = env_val
-                    cfg["target_label"] = f"{sub_id}:{ch['webhook_env']}"
-                elif kind == "webhook":
-                    cfg["url"] = env_val
-                    cfg["target_label"] = f"{sub_id}:{ch['webhook_env']}"
-            if ch.get("to"):
-                cfg["to"] = ch["to"]
-            try:
-                pub = build_publisher(kind, **cfg)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("subscriber %s channel %s 構築失敗: %s", sub_id, kind, exc)
-                continue
-            out.append((sub_id, pub))
-    return out
+def _configure_logging(level: str) -> None:
+    log_dir = Path("logs")
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    log_file = log_dir / f"publish_{datetime.now().strftime('%Y%m%d')}.log"
+    handlers: list[logging.Handler] = [logging.StreamHandler()]
+    try:
+        handlers.append(logging.FileHandler(log_file, encoding="utf-8"))
+    except Exception:
+        pass
+    logging.basicConfig(
+        level=str(level).upper(),
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        handlers=handlers,
+    )
 
 
-def resolve_publishers(
-    subscribers_path: Path,
-) -> list[tuple[str, Publisher]]:
-    """配信先 publisher 群を決める。subscribers.json 優先、無ければ env Discord 単発。"""
-    if subscribers_path.exists():
-        logger.info("subscribers routing: %s", subscribers_path)
-        pubs = _publishers_from_subscribers(subscribers_path)
-        if pubs:
-            return pubs
-        logger.warning("subscribers.json に有効な channel が無いため default に fallback")
+def build_registry(kind: str, *, fallback: bool) -> PublisherRegistry:
+    """--publisher と --fallback / EMAIL_ALWAYS から registry を組む。"""
+    email_always = os.getenv("EMAIL_ALWAYS", "0").strip() in {"1", "true", "yes"}
+    kind = kind.lower()
 
-    # Phase 1 default: env の DISCORD_WEBHOOK_URL 単発
-    return [("owner", DiscordPublisher())]
+    if kind == "email":
+        return PublisherRegistry(primary=EmailPublisher())
+
+    if kind == "all":
+        # ntfy + email を常に並列 (both) 送信
+        return PublisherRegistry(
+            primary=NtfyPublisher(), secondary=EmailPublisher(), always_secondary=True
+        )
+
+    # default: ntfy primary。--fallback または EMAIL_ALWAYS で email を副に。
+    secondary = EmailPublisher() if (fallback or email_always) else None
+    return PublisherRegistry(
+        primary=NtfyPublisher(),
+        secondary=secondary,
+        always_secondary=email_always,
+    )
+
+
+def _write_publish_status(input_path: Path, payload: dict, status: str) -> None:
+    """signals JSON の meta.publish_status を書き戻す (dashboard monitoring 用)。"""
+    try:
+        payload.setdefault("meta", {})["publish_status"] = status
+        tmp = input_path.with_suffix(input_path.suffix + ".tmp")
+        tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(input_path)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("publish_status 書き戻し失敗: %s", exc)
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -110,10 +106,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--date", type=str, default=None, help="対象日 (YYYY-MM-DD)。--input 未指定時に使用。")
     p.add_argument("--input", type=str, default=None, help="signals JSON path (直接指定)。")
     p.add_argument(
-        "--subscribers",
-        type=str,
-        default=str(DEFAULT_SUBSCRIBERS_PATH),
-        help="subscribers.json path (存在すれば per-subscriber routing)。",
+        "--publisher",
+        choices=["ntfy", "email", "all"],
+        default="ntfy",
+        help="配信先 (default: ntfy)。all=ntfy+email 並列。",
+    )
+    p.add_argument(
+        "--fallback",
+        action="store_true",
+        help="primary (ntfy) 失敗時に email へ自動 fallback。",
     )
     p.add_argument("--dry-run", action="store_true", help="送信せず payload を検証・表示。")
     p.add_argument("--log-level", default="INFO", help="ログレベル。")
@@ -122,17 +123,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
-    logging.basicConfig(
-        level=str(args.log_level).upper(),
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    )
+    _configure_logging(args.log_level)
 
-    # 入力 path 解決
     if args.input:
         input_path = Path(args.input)
     else:
-        from datetime import datetime
-
         date_str = args.date or datetime.now().strftime("%Y-%m-%d")
         input_path = _default_input_path(date_str)
 
@@ -144,51 +139,44 @@ def main(argv: list[str] | None = None) -> int:
 
     message = SignalMessage(payload=payload)
     logger.info(
-        "publish: date=%s run_id=%s total_signals=%d warn=%s",
+        "publish: date=%s run_id=%s total_signals=%d warn=%s publisher=%s",
         message.date,
         message.run_id,
         message.total_signals,
         message.has_warnings(),
+        args.publisher,
     )
 
-    publishers = resolve_publishers(Path(args.subscribers))
+    registry = build_registry(args.publisher, fallback=args.fallback)
 
-    # fail-fast: 本番 (非 dry-run) で configured な publisher が 1 つも無ければエラー
-    if not args.dry_run and not any(p.is_configured() for _, p in publishers):
-        logger.error(
-            "配信先が 1 つも設定されていません。.env の DISCORD_WEBHOOK_URL を設定するか "
-            "config/subscribers.json を用意してください。"
+    # fail-fast: 本番で configured な publisher が 1 つも無ければエラー
+    if not args.dry_run:
+        configured = registry.primary.is_configured() or (
+            registry.secondary is not None and registry.secondary.is_configured()
         )
-        return 1
+        if not configured:
+            logger.error(
+                "配信先が未設定です。.env の NTFY_TOPIC (primary) か "
+                "SENDGRID_* (backup) を設定してください。"
+            )
+            return 1
 
-    results: list[PublishResult] = []
-    for sub_id, pub in publishers:
-        res = pub.publish(message, dry_run=args.dry_run)
-        res.target = res.target or sub_id
-        results.append(res)
-        status = "OK" if res.ok else "FAIL"
-        logger.info(
-            "[%s] %s -> %s (%s) %s",
-            status,
-            pub.name,
-            res.target,
-            res.status_code,
-            "" if res.ok else res.detail,
-        )
+    result = registry.publish(payload, dry_run=args.dry_run)
+
+    for r in result.results:
+        tag = "OK" if r.ok else "FAIL"
+        logger.info("[%s] %s -> %s %s", tag, r.publisher, r.target, "" if r.ok else r.detail)
         if args.dry_run:
-            logger.info("  payload: %s", res.detail[:500])
+            logger.info("  payload: %s", r.detail[:600])
 
-    n_ok = sum(1 for r in results if r.ok)
-    n_total = len(results)
-    logger.info("配信完了: %d/%d 成功", n_ok, n_total)
+    logger.info("配信 status=%s (%d results)", result.status, len(result.results))
+
+    if not args.dry_run:
+        _write_publish_status(input_path, payload, result.status)
 
     if args.dry_run:
         return 0
-    if n_ok == 0:
-        return 2
-    if n_ok < n_total:
-        return 2
-    return 0
+    return 0 if result.status in {"ok", "partial"} else 2
 
 
 if __name__ == "__main__":

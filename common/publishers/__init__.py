@@ -1,10 +1,12 @@
-"""配信 publisher パッケージ (Phase 1: Discord/Webhook, Phase 2: LINE/Email)。
+"""配信 publisher パッケージ。
 
-    from common.publishers import Publisher, SignalMessage, build_publisher
+Phase 1: ntfy.sh (primary) + SendGrid Email (backup)。
+Phase 2/3: 同じ Publisher ABC の下で Discord / LINE Messaging API / SMS / Slack を
+いつでも追加可能 (registry に登録するだけ)。
 
-`build_publisher(kind, **cfg)` で kind ("discord"|"webhook"|"line"|"email")
-から具体 publisher を生成する factory。subscribers.json の channel type を
-そのまま kind として渡せる。
+    from common.publishers import build_publisher, PublisherRegistry, SignalMessage
+
+`build_publisher(kind, **cfg)` で kind ("ntfy"|"email"|"line") から publisher を生成。
 """
 
 from __future__ import annotations
@@ -17,16 +19,15 @@ from common.publishers.base import (
     SignalMessage,
     WARN_SURVIVAL_THRESHOLD,
 )
-from common.publishers.discord import DiscordPublisher
 from common.publishers.email import EmailPublisher
 from common.publishers.line import LinePublisher
-from common.publishers.webhook import WebhookPublisher
+from common.publishers.ntfy import NtfyPublisher
+from common.publishers.registry import PublisherRegistry, RegistryResult
 
 _REGISTRY: dict[str, type[Publisher]] = {
-    "discord": DiscordPublisher,
-    "webhook": WebhookPublisher,
-    "line": LinePublisher,
+    "ntfy": NtfyPublisher,
     "email": EmailPublisher,
+    "line": LinePublisher,
 }
 
 
@@ -34,9 +35,7 @@ def build_publisher(kind: str, **cfg: Any) -> Publisher:
     """kind から publisher を生成する factory。未知 kind は ValueError。"""
     cls = _REGISTRY.get(str(kind).lower())
     if cls is None:
-        raise ValueError(
-            f"未知の publisher kind: {kind!r} (対応: {sorted(_REGISTRY)})"
-        )
+        raise ValueError(f"未知の publisher kind: {kind!r} (対応: {sorted(_REGISTRY)})")
     return cls(**cfg)
 
 
@@ -44,10 +43,11 @@ __all__ = [
     "Publisher",
     "PublishResult",
     "SignalMessage",
-    "DiscordPublisher",
-    "WebhookPublisher",
-    "LinePublisher",
+    "NtfyPublisher",
     "EmailPublisher",
+    "LinePublisher",
+    "PublisherRegistry",
+    "RegistryResult",
     "build_publisher",
     "WARN_SURVIVAL_THRESHOLD",
 ]
