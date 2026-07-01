@@ -142,7 +142,7 @@ def test_grouped_daily_empty_on_holiday(monkeypatch):
 
 def test_get_polygon_data_missing_creds_raises(monkeypatch):
     monkeypatch.setattr(pg, "_load_env", lambda: None)
-    for key in ["POLYGON_API_KEY", "POLYGON_KEY"]:
+    for key in ["POLYGON_API_KEY", "MASSIVE_API_KEY", "POLYGON_KEY", "MASSIVE_KEY"]:
         monkeypatch.delenv(key, raising=False)
     with pytest.raises(ValueError):
         get_polygon_data("AAPL")
