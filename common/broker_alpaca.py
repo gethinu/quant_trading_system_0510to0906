@@ -107,11 +107,15 @@ def submit_order(
     stop_loss: float | None = None,
     trail_percent: float | None = None,
     time_in_force: str = "GTC",
+    client_order_id: str | None = None,
     log_callback=None,
 ):
     """注文を送信する共通関数。
 
     order_type: "market" | "limit" | "oco" | "trailing_stop"
+
+    client_order_id: 指定すると Alpaca 側の冪等キーとして送信される。
+        同一 client_order_id の再送は 422 (duplicate) となり、重複発注を防げる。
     """
     _require_sdk()
 
@@ -126,12 +130,18 @@ def submit_order(
         else TimeInForce.GTC
     )
 
+    # client_order_id は全 request 種別で共通の冪等キー。None の場合は付与しない。
+    _coid: dict[str, Any] = (
+        {"client_order_id": client_order_id} if client_order_id else {}
+    )
+
     if order_type == "market":
         req = MarketOrderRequest(  # type: ignore[call-arg]
             symbol=symbol,
             qty=qty,
             side=side_enum,
             time_in_force=tif,
+            **_coid,
         )
     elif order_type == "limit":
         if limit_price is None:
@@ -142,6 +152,7 @@ def submit_order(
             side=side_enum,
             limit_price=limit_price,
             time_in_force=tif,
+            **_coid,
         )
     elif order_type == "oco":
         if take_profit is None or stop_loss is None:
@@ -196,6 +207,7 @@ def submit_order_with_retry(
     stop_loss: float | None = None,
     trail_percent: float | None = None,
     time_in_force: str = "GTC",
+    client_order_id: str | None = None,
     retries: int = 2,
     backoff_seconds: float = 1.0,
     rate_limit_seconds: float = 0.0,
@@ -221,6 +233,7 @@ def submit_order_with_retry(
                 stop_loss=stop_loss,
                 trail_percent=trail_percent,
                 time_in_force=time_in_force,
+                client_order_id=client_order_id,
                 log_callback=log_callback,
             )
             if rate_limit_seconds > 0:
