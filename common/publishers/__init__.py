@@ -23,11 +23,16 @@ from common.publishers.email import EmailPublisher
 from common.publishers.line import LinePublisher
 from common.publishers.ntfy import NtfyPublisher
 from common.publishers.registry import PublisherRegistry, RegistryResult
+from common.publishers.substack import SubstackPublisher
+from common.publishers.twitter import TwitterPublisher
 
 _REGISTRY: dict[str, type[Publisher]] = {
     "ntfy": NtfyPublisher,
     "email": EmailPublisher,
     "line": LinePublisher,
+    # Phase 2 skeleton: 同じ narrative を public/subscriber へ fan-out する下地。
+    "twitter": TwitterPublisher,
+    "substack": SubstackPublisher,
 }
 
 
@@ -46,6 +51,8 @@ __all__ = [
     "NtfyPublisher",
     "EmailPublisher",
     "LinePublisher",
+    "TwitterPublisher",
+    "SubstackPublisher",
     "PublisherRegistry",
     "RegistryResult",
     "build_publisher",
