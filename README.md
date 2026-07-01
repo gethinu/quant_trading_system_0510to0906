@@ -211,16 +211,41 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-2. `.env` を用意し `EODHD_API_KEY` に加え、Alpaca 連携を行う場合は
-   `APCA_API_KEY_ID` と `APCA_API_SECRET_KEY` を設定します。
+2. `.env` を用意し、日次データ取得用に `ALPACA_API_KEY` と `ALPACA_SECRET_KEY`
+   を設定します（ブローカー連携を行う場合は `APCA_API_KEY_ID` /
+   `APCA_API_SECRET_KEY` も設定）。
 
 ### 主要な環境変数
 
-- `EODHD_API_KEY`: EOD Historical Data API キー（必須）
+- `ALPACA_API_KEY`, `ALPACA_SECRET_KEY`: 日次 OHLCV 取得用（**必須**、無料 IEX feed）
+- `ALPACA_FEED`: データ feed（既定 `iex`。`sip` は有料）
+- `EODHD_API_KEY`: EOD Historical Data API キー（**deprecated**、legacy スクリプト用に残置）
 - `APCA_API_KEY_ID`, `APCA_API_SECRET_KEY`: Alpaca ブローカー連携用（**Paper Trading対応済み**）
 - `ALPACA_PAPER`: `true` でペーパートレード、`false` で本番取引（デフォルト: `true`）
 - `SLACK_WEBHOOK_URL` または `SLACK_BOT_TOKEN`+`SLACK_CHANNEL`: Slack 通知設定
 - `DISCORD_WEBHOOK_URL`: Discord 通知設定
+
+## データソース (Data source)
+
+日次 OHLCV は **Alpaca 無料 tier に切替済** です（旧 EODHD 有料 $20/月 → $0）。
+
+- **API キー取得先**: <https://app.alpaca.markets/>
+- **feed**: 既定は **IEX**（無料）。SIP は有料（$99/月）のため使用しません。
+- **取得関数**: `common/alpaca_data.py` の `get_alpaca_data(symbol)`。
+  旧 `get_eodhd_data(symbol)` と同一スキーマ（columns / index / dtypes）の
+  drop-in replacement です。
+- **環境変数**: `ALPACA_API_KEY`, `ALPACA_SECRET_KEY`（未設定なら `ValueError` で fail-fast）。
+
+> ⚠️ **既知の制限（IEX feed の出来高過小）**
+> IEX feed の出来高は NASDAQ/NYSE 全体の **2〜3% しか反映されません**。
+> このため Volume は過小評価され、`min ADV`（最低平均出来高）系の
+> **流動性フィルタが全銘柄を棄却するリスク**があります。
+> 桁数が想定より小さい場合の選択肢:
+> 1. **SIP feed に切替**（`ALPACA_FEED=sip`、有料 $99/月）
+> 2. **Stooq フォールバック**（`common/stooq_data.py`、無料・日足のみ・出来高は取引所全体ベース。現状 stub 未実装）
+>
+> どちらを採るかは smoke test（`tests/test_alpaca_data_smoke.py`）の
+> 直近 Volume 桁数を確認して判断してください。
 
 ### Bulk API 品質設定（2025-10-12 改善）
 

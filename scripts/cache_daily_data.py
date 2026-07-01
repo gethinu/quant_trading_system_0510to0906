@@ -68,6 +68,7 @@ def _migrate_root_csv_to_full() -> None:
 # 親ディレクトリ（リポジトリ ルート）を import パスに追加して、
 # 直下モジュール `indicators_common.py` を解決可能にする
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+from common.alpaca_data import get_alpaca_data  # noqa: E402
 from common.cache_format import round_dataframe, safe_filename  # noqa: E402
 from common.cache_manager import (  # noqa: E402
     CacheManager,
@@ -650,7 +651,9 @@ def _prepare_cache_job(
                 success=True,
             )
 
-    df = get_eodhd_data(symbol)
+    # EODHD (有料) から Alpaca 無料 IEX feed へ切替。
+    # get_alpaca_data は get_eodhd_data と同一スキーマの drop-in replacement。
+    df = get_alpaca_data(symbol)
     if df is not None and not df.empty:
         return CacheJob(
             symbol=symbol,

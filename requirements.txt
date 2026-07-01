@@ -17,8 +17,8 @@ pydantic>=2,<3
 # Notifications (optional)
 slack_sdk>=3.26,<4
 
-# Trading
-alpaca-py
+# Trading & market data (Alpaca 無料 IEX feed)
+alpaca-py>=0.30.0
 
 # Network stack pins to satisfy dependencies
 urllib3>=2,<3
