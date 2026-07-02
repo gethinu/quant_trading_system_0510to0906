@@ -15,7 +15,7 @@
 | Part4 | `SYSTEM_TRADE_RULES["system7"]` の未使用 20日5ATR stub (時限バグ) | P0 | stub 完全削除 + 説明コメント | `0bcda0c` | logic (削除) |
 | Part3 | entry_price=Close コメント不整合 (look-ahead ではないが誤読を招く) | P1/P2 | System1/4/7 のコメントを sizing proxy と明示 | `fcd58cb` | comment only |
 | P0-1 | System5 setup 乖離 (ADX7>55/RSI3<50/100SMA+ATR 未 enforce) | **P0** | filter/setup を spec 準拠に是正 + predicate 統合 + tests | `aeaa990` | **logic** |
-| P1-6 | System3 filter 乖離 (Close≥5/DV20>25M は spec より厳しい) | P1 | 意図的乖離を確認・文書化 (logic 不変) | `c1f7c85` | doc only |
+| P1-6 | System3 filter 乖離 (Close≥5/DV20>25M は spec より厳しい) | P1 | ①暫定: 意図的乖離を文書化 (`c1f7c85`) → ②**user 判定で spec 準拠に revert** (`a87e809`) | logic |
 | P2-9 | determinism: `validate_predicate_equivalence` の random.shuffle 未 seed | P2 | seed 固定ローカル RNG 化 | `8af946e` | logic (検証専用) |
 
 ### 明示的に defer した項目 (scope creep 回避 / backtest 必須 / analysis 推奨)
@@ -51,8 +51,17 @@
 - `common/system_setup_predicates.py`: `system5_setup_predicate` を同条件に統合 (P2-7 部分対応)。
 - 実装ロジックは既存 `common/today_signals.py:1168-1203` の表示ロジック (Close>SMA100+ATR10 / ADX7>55 / RSI3<50) と同値。
 
-### 2.4 System3 filter 確認 (`c1f7c85`) — doc only
-- `core/system3.py` の定数に、Close≥5 / DV20>25M が spec (price≥1 / 50日出来高≥100万株) より**意図的に厳しい**旨を明記。logic 不変。
+### 2.4 System3 filter/setup — spec 準拠に revert (`c1f7c85` → `a87e809`)
+- **`c1f7c85`** (暫定): Close≥5 / DV20>25M を「意図的に spec より厳しい」と文書化 (logic 不変)。
+- **`a87e809`** (最終, user 判定「doc = single source of truth, ルールは全て書いてある」):
+  spec (`docs/systems/システム3.txt`) 通りに revert。
+  - **filter**: `Low ≥ 1` (最低株価1ドル、旧 Close≥5)、`AvgVolume50 ≥ 100万株` (旧 dollarvolume20>25M = 売買代金基準 → **株数基準**に変更)、`atr_ratio ≥ 0.05` (不変)。
+  - **setup**: `Close > sma150` を追加 enforce (旧実装は filter & drop3d のみで **150SMA 条件が欠落**していた)、`drop3d ≥ 0.125` (不変)。
+  - `SYSTEM5_REQUIRED_INDICATORS` 同様に `avgvolume50`, `sma150` を required に追加。
+  - `system3_setup_predicate` も同値に統合 (docstring は元々 spec を記述していたが code が未一致だった)。
+  - fast-path/normal-path とも spec helper 経由で drift 防止。
+- **subscriber 影響**: 価格フロア緩和 ($5→$1) で低位株が新規参入する一方、出来高基準が株数ベースに変わり setup に 150SMA 条件が加わる (厳格化)。**候補数の純変化は実データ backtest で要確認**。
+- test: `test_core_system3_enhanced.py` の fixture/assertion を spec に更新 (pre-existing 2 failures を解消、新規失敗 0)。`tests/test_audit_remediation_20260702.py` に System3 spec テスト 7 件追加。
 
 ### 2.5 determinism (`8af946e`) — P2, 検証専用
 - `random.shuffle(rows)` → `random.Random(seed).shuffle(rows)` (default seed 20260702, env `VALIDATE_SETUP_PREDICATE_SEED` で上書き可)。グローバル random 状態を汚さない。本番シグナル生成は非関与。
@@ -99,5 +108,5 @@
 ## 6. user 手動 review 推奨箇所
 1. **System5 実データ影響** (最重要): 候補数減少が事業的に許容範囲か。実 backtest で勝率/DD を再測定。
 2. **System7 stub 削除の live 経路**: `create_trade_entry("system7")` が None を返す挙動 (graceful skip) が live allocation で意図通りか。従来は誤った 20日5ATR で enhancement されていた。
-3. **System3 の spec vs code**: spec を code (Close≥5/DV20>25M) に合わせて更新するか、code を spec (price≥1) に戻すか。今回は code 維持 + 文書化。
+3. **System3 spec 準拠 revert 後の影響** (user 判定済 = spec 採用): 低位株($1〜$5)の新規参入 + 出来高基準の株数化 + 150SMA setup 追加による候補数変化を実データで確認。特に低位株のスリッページ/約定品質を live 前に検証推奨。
 4. **pre-existing test 債務**: `test_system1_strategy` (simulate_trades_with_risk) と `test_validate_predicate_equivalence` の order-flake は別 PR での cleanup 推奨。
