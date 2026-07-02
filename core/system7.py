@@ -263,7 +263,12 @@ def generate_candidates_system7(
                 setup_date = df.index[-1]
                 entry_date = resolve_signal_entry_date(setup_date)
                 if not pd.isna(entry_date):
-                    # last_price（直近終値）
+                    # last_price（直近終値）:
+                    # System7 の実発注は entry_date (翌営業日) の寄り付き成行。
+                    # ここでの entry_price は候補 payload の表示/サイジング用 proxy として
+                    # setup 日の終値を使う (シグナル生成時点で確定済みの既知値)。
+                    # 実約定 Open は strategies/system7_strategy.py が entry_idx で使用。
+                    # 未来データは参照しておらず look-ahead ではない。
                     entry_price = None
                     if "Close" in df.columns and not df["Close"].empty:
                         entry_price = df["Close"].iloc[-1]

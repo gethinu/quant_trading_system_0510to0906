@@ -343,6 +343,11 @@ def generate_candidates_system4(
                     continue
 
                 # Entry/Stop価格計算用の値取得
+                # System4: 実発注は「翌営業日の寄り付きで成行買い」。
+                # entry_price はライブのサイジング用 proxy として当日終値 (無い場合のみ
+                # 当日 Open) を使用。シグナル生成時点で既知の値のみで、翌日 Open 等の
+                # 未来データは参照しない (look-ahead ではない)。backtest の実約定は
+                # strategies/base_strategy.py が翌日 Open を用いる。
                 close_val = last_row.get("Close", 0)
                 open_val = last_row.get("Open", 0)
                 high_val = last_row.get("High", 0)
