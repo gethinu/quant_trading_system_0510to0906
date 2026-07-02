@@ -214,14 +214,35 @@ def build_signals_json(
         signals_by_sys.setdefault(sk, []).append(_row_signal(row, sk))
 
     # --- 候補数 (per_system) を集計 -------------------------------------
+    # ``per_system`` は本来 {system: 候補 DataFrame} の dict だが、
+    # ``compute_today_signals`` は AllocationSummary を返すため、その場合は
+    # 候補数フィールド (slot_candidates → final_counts) から件数を取り出す。
     candidate_counts: dict[str, int] = {}
     all_sys_keys: set[str] = set(signals_by_sys.keys())
-    for raw_name, df in per_system.items():
-        sk = normalize_system_key(raw_name)
-        if sk is None:
-            continue
-        candidate_counts[sk] = len(_iter_rows(df))
-        all_sys_keys.add(sk)
+    if isinstance(per_system, dict):
+        for raw_name, df in per_system.items():
+            sk = normalize_system_key(raw_name)
+            if sk is None:
+                continue
+            candidate_counts[sk] = len(_iter_rows(df))
+            all_sys_keys.add(sk)
+    else:
+        # AllocationSummary 互換: 候補数を持つ dict フィールドを優先順に採用
+        counts: dict[str, Any] = {}
+        for attr in ("slot_candidates", "final_counts"):
+            val = getattr(per_system, attr, None)
+            if isinstance(val, dict) and val:
+                counts = val
+                break
+        for raw_name, cnt in counts.items():
+            sk = normalize_system_key(raw_name)
+            if sk is None:
+                continue
+            try:
+                candidate_counts[sk] = int(cnt or 0)
+            except (TypeError, ValueError):
+                continue
+            all_sys_keys.add(sk)
 
     # --- portfolio 集計 (weight 計算のため total notional を先に) --------
     total_notional = 0.0

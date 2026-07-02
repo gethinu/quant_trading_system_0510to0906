@@ -141,11 +141,21 @@ def _load_dv_from_base_cache(cache_dir: Path) -> dict[str, dict[str, float]]:
             continue
         last = df.iloc[-1]
         sym = fp.stem.upper()
+
+        def _safe_float(v: object) -> float:
+            # pd.NA / None / 変換不能値は nan に落とす (float(pd.NA) は TypeError)。
+            try:
+                if v is None or pd.isna(v):
+                    return float("nan")
+                return float(v)  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                return float("nan")
+
         rec: dict[str, float] = {}
         if dv20c is not None:
-            rec["DollarVolume20"] = float(last.get(dv20c, float("nan")))
+            rec["DollarVolume20"] = _safe_float(last.get(dv20c))
         if dv50c is not None:
-            rec["DollarVolume50"] = float(last.get(dv50c, float("nan")))
+            rec["DollarVolume50"] = _safe_float(last.get(dv50c))
         out[sym] = rec
     return out
 
