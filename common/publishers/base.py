@@ -81,6 +81,21 @@ class SignalMessage:
     def hedge(self) -> dict[str, Any] | None:
         return self.payload.get("portfolio", {}).get("hedge")
 
+    @property
+    def narrative(self) -> dict[str, Any]:
+        """AI narrator の出力 (optional)。未設定なら空 dict。
+
+        publish_signals.py が narrative_YYYYMMDD.json を payload['narrative']
+        に merge して渡す。narrator layer が無くても publisher は既存挙動で動く。
+        """
+        return self.payload.get("narrative", {}) or {}
+
+    def narrative_headline(self) -> str:
+        return str(self.narrative.get("headline", "")).strip()
+
+    def narrative_summary(self) -> str:
+        return str(self.narrative.get("summary", "")).strip()
+
     def title(self) -> str:
         return f"📊 Today's Signals — {self.date}"
 

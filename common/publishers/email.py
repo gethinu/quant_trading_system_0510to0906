@@ -61,8 +61,13 @@ class EmailPublisher(Publisher):
             if hedge and hedge.get("symbol")
             else "none"
         )
+        headline = message.narrative_headline()
+        summary = message.narrative_summary()
+        narrative_block = ""
+        if headline or summary:
+            narrative_block = "\n".join(p for p in (headline, summary) if p) + "\n\n"
         return (
-            f"{message.title()}\n\n{body}\n\n"
+            f"{message.title()}\n\n{narrative_block}{body}\n\n"
             f"portfolio: {message.total_signals} signals · hedge: {hedge_str}\n"
             f"{message.footer()}"
         )
@@ -85,9 +90,30 @@ class EmailPublisher(Publisher):
             if warn
             else ""
         )
+        # narrative section (optional): headline + summary を上部に配置
+        headline = message.narrative_headline()
+        summary = message.narrative_summary()
+        narrative_html = ""
+        if headline or summary:
+            head_html = (
+                f"<div style='font-weight:600;font-size:15px;margin-bottom:4px'>{headline}</div>"
+                if headline
+                else ""
+            )
+            sum_html = (
+                f"<div style='font-size:13px;color:#444'>{summary}</div>" if summary else ""
+            )
+            narrative_html = (
+                "<div style='background:#eef2ff;border:1px solid #c7d2fe;"
+                "border-radius:8px;padding:10px 12px;margin-bottom:10px'>"
+                "<div style='font-size:10px;text-transform:uppercase;letter-spacing:.05em;"
+                "color:#6366f1;margin-bottom:4px'>AI narrator</div>"
+                f"{head_html}{sum_html}</div>"
+            )
         return (
             "<div style='font-family:-apple-system,Segoe UI,sans-serif;max-width:520px'>"
             f"<h2 style='margin:0 0 8px'>{message.title()}</h2>"
+            f"{narrative_html}"
             f"{warn_banner}"
             f"<ul style='padding-left:18px;font-size:14px'>{rows}</ul>"
             f"<p style='font-size:13px'>portfolio: <b>{message.total_signals}</b> "

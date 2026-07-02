@@ -48,6 +48,29 @@ def load_payload(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _default_narrative_path(signals_path: Path) -> Path:
+    """today_signals_YYYYMMDD.json と同じ dir の narrative_YYYYMMDD.json。"""
+    name = signals_path.name.replace("today_signals_", "narrative_")
+    return signals_path.with_name(name)
+
+
+def merge_narrative(payload: dict, narrative_path: Path | None, signals_path: Path) -> None:
+    """narrative JSON を payload['narrative'] に merge (optional, best-effort)。
+
+    明示 path が無ければ signals と同じ dir の narrative_YYYYMMDD.json を探す。
+    見つからない/壊れていても publish は既存 body で継続する。"""
+    path = narrative_path or _default_narrative_path(signals_path)
+    if not path.exists():
+        return
+    try:
+        narrative = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(narrative, dict) and (narrative.get("headline") or narrative.get("summary")):
+            payload["narrative"] = narrative
+            logger.info("narrative merged: %s (headline=%r)", path, narrative.get("headline", ""))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("narrative 読み込み失敗 (無視して継続): %s", exc)
+
+
 def _configure_logging(level: str) -> None:
     log_dir = Path("logs")
     try:
@@ -94,8 +117,11 @@ def _write_publish_status(input_path: Path, payload: dict, status: str) -> None:
     """signals JSON の meta.publish_status を書き戻す (dashboard monitoring 用)。"""
     try:
         payload.setdefault("meta", {})["publish_status"] = status
+        # merge した transient な narrative は signals JSON に残さない
+        # (narrative は narrative_YYYYMMDD.json 側が single source of truth)
+        to_write = {k: v for k, v in payload.items() if k != "narrative"}
         tmp = input_path.with_suffix(input_path.suffix + ".tmp")
-        tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.write_text(json.dumps(to_write, ensure_ascii=False, indent=2), encoding="utf-8")
         tmp.replace(input_path)
     except Exception as exc:  # noqa: BLE001
         logger.warning("publish_status 書き戻し失敗: %s", exc)
@@ -115,6 +141,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--fallback",
         action="store_true",
         help="primary (ntfy) 失敗時に email へ自動 fallback。",
+    )
+    p.add_argument(
+        "--narrative",
+        type=str,
+        default=None,
+        help="narrative JSON path (未指定なら signals と同じ dir の narrative_YYYYMMDD.json を自動探索)。",
     )
     p.add_argument("--dry-run", action="store_true", help="送信せず payload を検証・表示。")
     p.add_argument("--log-level", default="INFO", help="ログレベル。")
@@ -136,6 +168,10 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:  # noqa: BLE001
         logger.error("入力読み込み失敗: %s", exc)
         return 1
+
+    # narrative (optional): AI narrator 出力を payload に merge (無ければ既存 body)
+    narrative_path = Path(args.narrative) if args.narrative else None
+    merge_narrative(payload, narrative_path, input_path)
 
     message = SignalMessage(payload=payload)
     logger.info(

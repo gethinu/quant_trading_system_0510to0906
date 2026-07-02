@@ -72,6 +72,12 @@ class NtfyPublisher(Publisher):
             else "none"
         )
         body = "\n".join(lines) if lines else "(no signals today)"
+        # narrative (optional): headline + summary を本文冒頭に (UTF-8 で iPhone に表示)
+        headline = message.narrative_headline()
+        summary = message.narrative_summary()
+        if headline or summary:
+            narrative_block = "\n".join(p for p in (headline, summary) if p)
+            body = f"{narrative_block}\n\n{body}"
         body += f"\n\nportfolio: {message.total_signals} signals · hedge: {hedge_str}"
         body += f"\n{message.footer()}"
         if len(body) > _BODY_LIMIT:
@@ -83,8 +89,11 @@ class NtfyPublisher(Publisher):
         # urgent(5) if WARN else configured priority
         priority = 5 if warn else self.priority
 
-        title = message.title()
-        # ヘッダは ASCII 制約が安全。絵文字はタグ(X-Tags)側で表現し、title は素の text に。
+        # narrator.headline を優先し X-Title に (無ければ既存 title)。
+        # ヘッダは ASCII 制約が安全なので、非 ASCII (日本語 headline 等) は
+        # 落ちて既存 title に fallback する (body 側には UTF-8 で全文載せている)。
+        title = message.narrative_headline() or message.title()
+        # 絵文字/非 ASCII はタグ(X-Tags)/body 側で表現し、title は素の text に。
         safe_title = title.encode("ascii", "ignore").decode("ascii").strip() or "Today's Signals"
 
         headers = {
