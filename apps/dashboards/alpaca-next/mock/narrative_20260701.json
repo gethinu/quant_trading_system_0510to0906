@@ -1,0 +1,13 @@
+{
+  "date": "2026-07-01",
+  "headline": "本日はメガテック集中買い、SPY hedge on",
+  "summary": "sys1 は AAPL/MSFT/NVDA を SMA200 breakout / ROC200 momentum で 3 銘柄集中。sys2 は TSLA/COIN の overbought fade で short。sys7 catastrophe hedge は SPY short で発火し、全体 net long のリスクを相殺。gate 生存率は各 system 9-17% と平常域。",
+  "per_symbol_reasons": {
+    "AAPL": "SMA200 breakout + 3日連続volume拡大",
+    "NVDA": "SMA200 breakout, 半導体セクター強",
+    "SPY": "catastrophe hedge (index short)"
+  },
+  "model": "claude-haiku-4-5-20251001",
+  "cost_usd": 0.006,
+  "elapsed_seconds": 3.1
+}

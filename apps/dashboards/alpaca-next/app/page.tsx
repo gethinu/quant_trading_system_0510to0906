@@ -1,11 +1,14 @@
 import { loadCoverage } from '@/lib/loadCoverage';
 import { loadSignals } from '@/lib/loadSignals';
+import { loadNarrative } from '@/lib/loadNarrative';
+import { NarrativeCard } from '@/components/NarrativeCard';
 import type {
   CoverageDay,
   SystemStat,
   SignalsPayload,
   Signal,
   SystemSignals,
+  Narrative,
 } from '@/lib/types';
 
 export const dynamic = 'force-static';
@@ -241,6 +244,7 @@ export default function Home() {
   const history = payload.history;
   const latest: CoverageDay | undefined = history[history.length - 1];
   const signals: SignalsPayload | null = loadSignals();
+  const narrative: Narrative | null = loadNarrative();
 
   return (
     <main className="max-w-5xl mx-auto p-4 sm:p-6">
@@ -257,6 +261,8 @@ export default function Home() {
           {latest ? `latest: ${latest.date}` : ''}
         </div>
       </header>
+
+      <NarrativeCard narrative={narrative} />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-start">
       <section className="bg-card rounded-xl p-4 shadow-lg">

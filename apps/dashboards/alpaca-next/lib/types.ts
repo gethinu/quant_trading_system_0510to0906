@@ -65,3 +65,15 @@ export interface SignalsPayload {
   portfolio: SignalsPortfolio;
   meta: SignalsMeta;
 }
+
+// --- Narrative (narrative_YYYYMMDD.json, AI narrator 出力) ------------------
+
+export interface Narrative {
+  date: string;
+  headline: string;
+  summary: string;
+  per_symbol_reasons?: Record<string, string>;
+  model?: string;
+  cost_usd?: number;
+  elapsed_seconds?: number;
+}
