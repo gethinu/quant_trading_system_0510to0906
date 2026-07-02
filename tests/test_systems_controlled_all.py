@@ -227,11 +227,16 @@ def test_systems_controlled_top10_latest_only(system_name):
             }
             add(sym, _make_series_frame(vals))
         elif system_name == "system5":
+            # audit-remediation 2026-07-02: spec setup now enforces
+            # Close>SMA100+ATR10 (60 > 50+0.6) and RSI3<50 in addition to
+            # ADX7>55 and ATR_Pct>2.5%.
             vals = {
                 "Close": 60.0,
                 "adx7": rank_val + 50.0,
                 "atr_pct": 0.03 + 0.01,
                 "atr10": 0.6,
+                "sma100": 50.0,
+                "rsi3": 30.0,
             }
             add(sym, _make_series_frame(vals))
         elif system_name == "system6":

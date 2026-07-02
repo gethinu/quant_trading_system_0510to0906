@@ -162,11 +162,12 @@ def system3_setup_predicate(
         from typing import cast as _cast
 
         row_map: _Mapping[str, Any] = _cast(_Mapping[str, Any], row)
-        # Phase 2 filter (safety check)
-        # NOTE: keep this logic consistent with core/system3.prepare_data_vectorized_system3
-        # which uses Close >= 5 and dollarvolume20 > 25_000_000 as the Phase2 filter.
-        close_v: float = indicator_to_float(get_indicator(row_map, "Close"))
-        dv20_v: float = indicator_to_float(get_indicator(row_map, "dollarvolume20"))
+        # Phase 2 filter (spec 準拠, docs/systems/システム3.txt:6-9)
+        # audit-remediation 2026-07-02: core/system3 と同値に統合。以前は
+        # Close>=5 & dollarvolume20>25M だったが spec (最低株価≥1ドル /
+        # 50日平均出来高≥100万株 / ATR10≥5%) に revert した。
+        low_v: float = indicator_to_float(get_indicator(row_map, "Low"))
+        avgvol50_v: float = indicator_to_float(get_indicator(row_map, "avgvolume50"))
         atr_ratio: float = indicator_to_float(get_indicator(row_map, "atr_ratio"))
 
         # ATR 閾値（テスト時は環境変数による上書きを許可）
@@ -181,10 +182,10 @@ def system3_setup_predicate(
             # 環境の取得に失敗しても既定値で継続
             atr_thr = 0.05
 
-        if math.isnan(close_v) or math.isnan(dv20_v) or math.isnan(atr_ratio):
+        if math.isnan(low_v) or math.isnan(avgvol50_v) or math.isnan(atr_ratio):
             result = (False, "missing_filter_fields")
             return result if return_reason else result[0]
-        if not (close_v >= 5.0 and dv20_v > 25_000_000 and atr_ratio >= atr_thr):
+        if not (low_v >= 1.0 and avgvol50_v >= 1_000_000 and atr_ratio >= atr_thr):
             result = (False, "filter_phase2")
             return result if return_reason else result[0]
 
@@ -262,7 +263,12 @@ def system4_setup_predicate(row: pd.Series) -> bool:
 
 
 # --- System5 -----------------------------------------------------------------
-# 条件 (filter == setup): Close>=5, adx7>35, atr_pct>DEFAULT_ATR_PCT_THRESHOLD
+# audit-remediation 2026-07-02 (P0 System5 setup 乖離 + P2 予測子二重実装統合):
+# core/system5.py の filter/setup と同値になるよう spec 準拠へ是正。
+#   filter: Close>=5, adx7>55, atr_pct>DEFAULT_ATR_PCT_THRESHOLD
+#   setup : filter & Close>SMA100+ATR10 & RSI3<50
+MIN_ADX_SYSTEM5: float = 55.0
+MAX_RSI3_SYSTEM5: float = 50.0
 
 
 def system5_setup_predicate(
@@ -272,14 +278,28 @@ def system5_setup_predicate(
         close = _to_float(row.get("Close"))
         adx7 = _to_float(row.get("adx7"))
         atr_pct = _to_float(row.get("atr_pct"))
+        # case-insensitive access for SMA100 / ATR10 / RSI3
+        from typing import Mapping as _Mapping
+        from typing import cast as _cast
+
+        row_map = _cast(_Mapping[str, Any], row)
+        sma100 = indicator_to_float(get_indicator(row_map, "sma100"))
+        atr10 = indicator_to_float(get_indicator(row_map, "atr10"))
+        rsi3 = indicator_to_float(get_indicator(row_map, "rsi3"))
         threshold = (
             atr_pct_threshold
             if atr_pct_threshold is not None
             else DEFAULT_ATR_PCT_THRESHOLD
         )
-        if not _all_not_nan([close, adx7, atr_pct]):
+        if not _all_not_nan([close, adx7, atr_pct, sma100, atr10, rsi3]):
             return False
-        return (close >= 5.0) and (adx7 > 35.0) and (atr_pct > threshold)
+        return (
+            (close >= 5.0)
+            and (adx7 > MIN_ADX_SYSTEM5)
+            and (atr_pct > threshold)
+            and (close > (sma100 + atr10))
+            and (rsi3 < MAX_RSI3_SYSTEM5)
+        )
     except Exception:
         return False
 
@@ -413,8 +433,15 @@ def validate_predicate_equivalence(
         return
 
     # ランダムサンプル (行数多い場合)
+    # audit-remediation 2026-07-02 (P2 determinism): グローバル random 状態を
+    # 汚さず、かつ検証結果を再現可能にするため seed 固定のローカル RNG を使用する。
+    # (環境変数 VALIDATE_SETUP_PREDICATE_SEED で上書き可)
     if len(rows) > sample_max:
-        random.shuffle(rows)
+        try:
+            _seed = int(os.environ.get("VALIDATE_SETUP_PREDICATE_SEED", "20260702"))
+        except (TypeError, ValueError):
+            _seed = 20260702
+        random.Random(_seed).shuffle(rows)
         rows = rows[:sample_max]
 
     mismatches: list[str] = []

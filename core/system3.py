@@ -22,8 +22,9 @@
 """System3 core logic (Long mean-reversion).
 
 3-day drop mean-reversion strategy:
-- Indicators: atr10, dollarvolume20, atr_ratio, drop3d (precomputed only)
-- Setup conditions: Close>5, DollarVolume20>25M, atr_ratio>=0.05, drop3d>=0.125
+- Indicators: Low, avgvolume50, atr_ratio, sma150, drop3d (precomputed only)
+- Filter conditions (spec): Low>=1, AvgVolume50>=1M, atr_ratio>=0.05
+- Setup conditions (spec): filter & Close>sma150 & drop3d>=0.125
 - Candidate generation: drop3d descending ranking by date, extract top_n
 - Optimization: Removed all indicator calculations, using precomputed indicators only
 
@@ -58,24 +59,56 @@ except Exception:  # フォールバック
 # ============================================================================
 # System3 Strategy Constants
 # ============================================================================
-MIN_PRICE = 5.0  # Minimum closing price for filter
-MIN_DOLLAR_VOLUME_20 = 25_000_000  # Minimum 20-day dollar volume
-DEFAULT_ATR_RATIO_THRESHOLD = 0.05  # Default ATR ratio threshold (can be overridden)
-DROP_3D_THRESHOLD = 0.125  # 3-day drop threshold (12.5%)
+# audit-remediation 2026-07-02 (P1 System3 filter 乖離 — spec 準拠に是正):
+#   user 判定「ドキュメントと設計に合わせて。ルールは全て書いてある」→ doc
+#   (docs/systems/システム3.txt) が single source of truth。以前の「意図的に
+#   Close≥5 / DollarVolume20>2500万$」は spec 通りに revert した。
+#   spec フィルター (システム3.txt:6-9):
+#     - 最低株価 ≥ 1ドル          → Low >= MIN_PRICE (=1.0)
+#     - 50日平均出来高 ≥ 100万株   → AvgVolume50 >= MIN_AVG_VOLUME_50 (=1,000,000)
+#     - 過去10日ATR ≥ 5%          → atr_ratio >= DEFAULT_ATR_RATIO_THRESHOLD (=0.05)
+#   spec セットアップ (システム3.txt:11-13):
+#     - 終値 > 150日SMA           → Close > sma150
+#     - 過去3日で12.5%以上下落     → drop3d >= DROP_3D_THRESHOLD (=0.125)
+MIN_PRICE = 1.0  # spec: 最低株価 ≥ 1ドル (Low に適用)
+MIN_AVG_VOLUME_50 = 1_000_000  # spec: 50日平均出来高 ≥ 100万株 (AvgVolume50)
+DEFAULT_ATR_RATIO_THRESHOLD = 0.05  # spec: 過去10日ATR ≥ 5%
+DROP_3D_THRESHOLD = 0.125  # spec: 過去3日で 12.5%以上の下落
 
 
 # ============================================================================
 # Helper Functions
 # ============================================================================
+def _col_numeric_ci(df: pd.DataFrame, name: str, default: float = 0.0) -> pd.Series:
+    """Case-insensitive numeric column access (returns `default`-filled Series)."""
+    col = None
+    if name in df.columns:
+        col = df[name]
+    else:
+        low = name.lower()
+        for c in df.columns:
+            if isinstance(c, str) and c.lower() == low:
+                col = df[c]
+                break
+    if col is None:
+        return pd.Series(default, index=df.index)
+    return pd.to_numeric(col, errors="coerce").fillna(default)
+
+
 def _apply_filter_conditions(
     df: pd.DataFrame, atr_threshold: float = DEFAULT_ATR_RATIO_THRESHOLD
 ) -> pd.DataFrame:
-    """Apply System3 filter: Close>=MIN_PRICE, DollarVolume20>MIN, ATR>=threshold.
+    """Apply System3 filter (spec 準拠, docs/systems/システム3.txt:6-9):
+    Low>=MIN_PRICE(1), AvgVolume50>=MIN_AVG_VOLUME_50(1M), atr_ratio>=threshold(0.05).
+
+    audit-remediation 2026-07-02: 以前は Close>=5 & dollarvolume20>25M だったが、
+    user 判定で doc を single source of truth とし spec (最低株価≥1ドル /
+    50日平均出来高≥100万株 / ATR10≥5%) に revert した。
 
     Preserves existing 'filter' column if present for test compatibility.
 
     Args:
-        df: DataFrame with required columns (Close, dollarvolume20, atr_ratio)
+        df: DataFrame with required columns (Low, avgvolume50, atr_ratio)
         atr_threshold: ATR ratio threshold (default: DEFAULT_ATR_RATIO_THRESHOLD)
 
     Returns:
@@ -83,37 +116,13 @@ def _apply_filter_conditions(
     """
     x = df.copy()
 
-    # Coerce to numeric to avoid runtime/type issues
-    try:
-        _val_close = x.get("Close")
-        if _val_close is None:
-            _close = pd.Series(0.0, index=x.index)
-        else:
-            _close = pd.to_numeric(_val_close, errors="coerce").fillna(0.0)
-    except Exception:
-        _close = pd.Series(0.0, index=x.index)
-
-    try:
-        _val_dvol = x.get("dollarvolume20")
-        if _val_dvol is None:
-            _dvol = pd.Series(0.0, index=x.index)
-        else:
-            _dvol = pd.to_numeric(_val_dvol, errors="coerce").fillna(0.0)
-    except Exception:
-        _dvol = pd.Series(0.0, index=x.index)
-
-    try:
-        _val_atr = x.get("atr_ratio")
-        if _val_atr is None:
-            _atr_ratio = pd.Series(0.0, index=x.index)
-        else:
-            _atr_ratio = pd.to_numeric(_val_atr, errors="coerce").fillna(0.0)
-    except Exception:
-        _atr_ratio = pd.Series(0.0, index=x.index)
+    _low = _col_numeric_ci(x, "Low")
+    _avgvol50 = _col_numeric_ci(x, "avgvolume50")
+    _atr_ratio = _col_numeric_ci(x, "atr_ratio")
 
     computed_filter = (
-        (_close >= MIN_PRICE)
-        & (_dvol > MIN_DOLLAR_VOLUME_20)
+        (_low >= MIN_PRICE)
+        & (_avgvol50 >= MIN_AVG_VOLUME_50)
         & (_atr_ratio >= atr_threshold)
     ).fillna(False)
 
@@ -126,12 +135,16 @@ def _apply_filter_conditions(
 
 
 def _apply_setup_conditions(df: pd.DataFrame) -> pd.DataFrame:
-    """Apply System3 setup conditions: filter & drop3d>=DROP_3D_THRESHOLD.
+    """Apply System3 setup conditions (spec 準拠, docs/systems/システム3.txt:11-13):
+    filter & Close>sma150 & drop3d>=DROP_3D_THRESHOLD.
+
+    audit-remediation 2026-07-02: spec の「終値が150日SMAを上回る」を enforce する
+    (以前は filter & drop3d のみで sma150 条件が欠落していた)。
 
     Preserves existing 'setup' column if present for test compatibility.
 
     Args:
-        df: DataFrame with 'filter' and 'drop3d' columns
+        df: DataFrame with 'filter', 'Close', 'sma150', 'drop3d' columns
 
     Returns:
         DataFrame with 'setup' boolean column added/updated
@@ -147,8 +160,15 @@ def _apply_setup_conditions(df: pd.DataFrame) -> pd.DataFrame:
     except Exception:
         _drop3d = pd.Series(dtype=float, index=x.index)
 
+    _close = _col_numeric_ci(x, "Close", default=float("nan"))
+    _sma150 = _col_numeric_ci(x, "sma150", default=float("nan"))
+    _above_sma150 = (_close > _sma150).fillna(False)
+
     computed_setup = (
-        x["filter"].astype(bool) & (~_drop3d.isna()) & (_drop3d >= DROP_3D_THRESHOLD)
+        x["filter"].astype(bool)
+        & _above_sma150
+        & (~_drop3d.isna())
+        & (_drop3d >= DROP_3D_THRESHOLD)
     ).fillna(False)
 
     if "setup" in x.columns:
@@ -280,24 +300,21 @@ def prepare_data_vectorized_system3(
                 for symbol, df in valid_data_dict.items():
                     x = df.copy()
 
-                    # Filter: Close>=5, DollarVolume20>25M,
-                    # ATR_Ratio>=0.05 (test override allowed)
-                    _atr_thr = 0.05
+                    # Filter (spec): Low>=1, AvgVolume50>=1M, atr_ratio>=0.05
+                    # (test override allowed for atr threshold)
+                    _atr_thr = DEFAULT_ATR_RATIO_THRESHOLD
                     try:
                         if _get_env is not None:
                             _env = _get_env()
                             if _env.min_atr_ratio_for_test is not None:
                                 _atr_thr = float(_env.min_atr_ratio_for_test)
                     except Exception:
-                        _atr_thr = 0.05
-                    # Build filter mask in steps to avoid too-long expressions
-                    close_ok = x["Close"] >= 5.0
-                    vol_ok = x["dollarvolume20"] > 25_000_000
-                    atr_ok = x["atr_ratio"] >= _atr_thr
-                    x["filter"] = close_ok & vol_ok & atr_ok
-
-                    # Setup: Filter + drop3d>=0.125 (12.5% 3-day drop)
-                    x["setup"] = x["filter"] & (x["drop3d"] >= 0.125)
+                        _atr_thr = DEFAULT_ATR_RATIO_THRESHOLD
+                    # audit-remediation 2026-07-02: use the spec-compliant helpers so
+                    # fast-path and normal-path apply identical filter/setup logic.
+                    x = _apply_filter_conditions(x, atr_threshold=_atr_thr)
+                    # Setup (spec): filter & Close>sma150 & drop3d>=0.125
+                    x = _apply_setup_conditions(x)
 
                     prepared_dict[symbol] = x
 

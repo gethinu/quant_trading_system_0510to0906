@@ -36,9 +36,11 @@ SYSTEM2_MIN_DOLLAR_VOLUME = 25_000_000  # 25M
 SYSTEM2_ATR_RATIO_THRESHOLD = 0.03  # 3%
 
 # === System3 (Long mean-reversion) 定数 ===
-SYSTEM3_MIN_PRICE = 5.0
-SYSTEM3_MIN_DOLLAR_VOLUME = 25_000_000  # 25M
-SYSTEM3_ATR_RATIO_THRESHOLD = 0.05  # 5%
+# audit-remediation 2026-07-02: spec (システム3.txt) 準拠に是正。
+# 最低株価 ≥ 1ドル (Low), 50日平均出来高 ≥ 100万株 (AvgVolume50)。
+SYSTEM3_MIN_PRICE = 1.0  # spec: 最低株価 ≥ 1ドル
+SYSTEM3_MIN_AVG_VOLUME_50 = 1_000_000  # spec: 50日平均出来高 ≥ 100万株
+SYSTEM3_ATR_RATIO_THRESHOLD = 0.05  # spec: 過去10日ATR ≥ 5%
 SYSTEM3_DROP_3D_THRESHOLD = 0.125  # 12.5% 3日下落
 
 # === System4 (Long trend low-vol pullback) 定数 ===
@@ -91,9 +93,13 @@ SYSTEM2_REQUIRED_INDICATORS = [
 
 SYSTEM3_REQUIRED_INDICATORS = [
     "atr10",
-    "dollarvolume20",
+    "dollarvolume20",  # retained for downstream ranking/output compatibility
     "atr_ratio",
     "drop3d",
+    # audit-remediation 2026-07-02 (System3 spec 準拠): filter は spec 通り
+    # 50日平均出来高 (avgvolume50) と最低株価 (Low>=1), setup は sma150 を使う。
+    "avgvolume50",
+    "sma150",
 ]
 
 SYSTEM4_REQUIRED_INDICATORS = [
@@ -109,6 +115,10 @@ SYSTEM5_REQUIRED_INDICATORS = [
     "atr10",
     "dollarvolume20",
     "atr_pct",
+    # audit-remediation 2026-07-02 (P0 System5 setup 乖離): spec の setup 条件
+    # (Close>SMA100+ATR10, RSI3<50) を enforce するため追加。
+    "sma100",
+    "rsi3",
 ]
 
 SYSTEM6_REQUIRED_INDICATORS = [
@@ -144,7 +154,7 @@ SYSTEM_CONFIGS = {
         "min_rows": MIN_ROWS_SYSTEM3,
         "required_indicators": SYSTEM3_REQUIRED_INDICATORS,
         "min_price": SYSTEM3_MIN_PRICE,
-        "min_dollar_volume": SYSTEM3_MIN_DOLLAR_VOLUME,
+        "min_avg_volume_50": SYSTEM3_MIN_AVG_VOLUME_50,
         "atr_ratio_threshold": SYSTEM3_ATR_RATIO_THRESHOLD,
         "drop_3d_threshold": SYSTEM3_DROP_3D_THRESHOLD,
     },

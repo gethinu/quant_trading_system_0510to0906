@@ -1174,7 +1174,12 @@ def generate_candidates_system1(
                 atr20_val = _to_float(last_row.get("atr20", 0))
 
                 # エントリー価格とストップ価格の計算
-                # System1: 翌日寄り付きで買い、損切りは買値 - 5*ATR20
+                # System1: 実発注は「翌営業日の寄り付きで成行買い」。
+                # ここでの entry_price はライブのポジションサイジング用に当日終値
+                # (シグナル生成時点で確定済み=既知値) を代理値 (proxy) として使う。
+                # 未来データ (翌日 Open) は一切参照しておらず look-ahead ではない。
+                # backtest の実約定は strategies/base_strategy.py で翌日 Open を使用。
+                # 損切りは買値 - 5*ATR20。
                 entry_price = close_val if close_val > 0 else 0.0
                 stop_price = (
                     entry_price - (STOP_ATR_MULTIPLE_SYSTEM1 * atr20_val)
