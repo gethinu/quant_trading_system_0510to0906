@@ -162,11 +162,12 @@ def system3_setup_predicate(
         from typing import cast as _cast
 
         row_map: _Mapping[str, Any] = _cast(_Mapping[str, Any], row)
-        # Phase 2 filter (safety check)
-        # NOTE: keep this logic consistent with core/system3.prepare_data_vectorized_system3
-        # which uses Close >= 5 and dollarvolume20 > 25_000_000 as the Phase2 filter.
-        close_v: float = indicator_to_float(get_indicator(row_map, "Close"))
-        dv20_v: float = indicator_to_float(get_indicator(row_map, "dollarvolume20"))
+        # Phase 2 filter (spec 準拠, docs/systems/システム3.txt:6-9)
+        # audit-remediation 2026-07-02: core/system3 と同値に統合。以前は
+        # Close>=5 & dollarvolume20>25M だったが spec (最低株価≥1ドル /
+        # 50日平均出来高≥100万株 / ATR10≥5%) に revert した。
+        low_v: float = indicator_to_float(get_indicator(row_map, "Low"))
+        avgvol50_v: float = indicator_to_float(get_indicator(row_map, "avgvolume50"))
         atr_ratio: float = indicator_to_float(get_indicator(row_map, "atr_ratio"))
 
         # ATR 閾値（テスト時は環境変数による上書きを許可）
@@ -181,10 +182,10 @@ def system3_setup_predicate(
             # 環境の取得に失敗しても既定値で継続
             atr_thr = 0.05
 
-        if math.isnan(close_v) or math.isnan(dv20_v) or math.isnan(atr_ratio):
+        if math.isnan(low_v) or math.isnan(avgvol50_v) or math.isnan(atr_ratio):
             result = (False, "missing_filter_fields")
             return result if return_reason else result[0]
-        if not (close_v >= 5.0 and dv20_v > 25_000_000 and atr_ratio >= atr_thr):
+        if not (low_v >= 1.0 and avgvol50_v >= 1_000_000 and atr_ratio >= atr_thr):
             result = (False, "filter_phase2")
             return result if return_reason else result[0]
 

@@ -2,10 +2,11 @@
 
 System3 Strategy:
 - Long strategy: Mean-reversion on 3-day drop patterns
-- Key Indicators: atr10, dollarvolume20, atr_ratio, drop3d (precomputed)
-- Filter: Close>=5, DollarVolume20>25M, atr_ratio>=0.05
-- Setup: Filter + drop3d>=0.125 (12.5% drop threshold)
+- Key Indicators: Low, avgvolume50, atr_ratio, sma150, drop3d (precomputed)
+- Filter (spec): Low>=1, AvgVolume50>=1M, atr_ratio>=0.05
+- Setup (spec): filter & Close>sma150 & drop3d>=0.125 (12.5% drop threshold)
 - Ranking: drop3d descending order
+- audit-remediation 2026-07-02: reverted to spec (docs/systems/システム3.txt)
 """
 
 from unittest.mock import patch
@@ -31,11 +32,13 @@ class TestSystem3ComputeIndicators:
             {
                 "Open": [100, 101, 102],
                 "High": [105, 106, 107],
-                "Low": [95, 96, 97],
+                "Low": [95, 96, 97],  # spec: >= 1
                 "Close": [104, 103, 105],
                 "Volume": [10000, 11000, 12000],
                 "atr10": [2.5, 2.6, 2.7],
                 "dollarvolume20": [30_000_000, 35_000_000, 40_000_000],
+                "avgvolume50": [2_000_000, 2_000_000, 2_000_000],  # spec: >= 1M shares
+                "sma150": [100, 100, 100],  # Close > sma150 for all rows
                 "atr_ratio": [0.06, 0.07, 0.08],
                 "drop3d": [0.15, 0.20, 0.12],  # 15%, 20%, 12% drops
                 "filter": [True, True, True],  # Added required column
@@ -56,19 +59,24 @@ class TestSystem3ComputeIndicators:
             assert "filter" in result.columns
             assert "setup" in result.columns
 
-            # Check filter conditions (Close>=5, dollarvolume20>25M, atr_ratio>=0.05)
+            # Check filter conditions (spec: Low>=1, avgvolume50>=1M, atr_ratio>=0.05)
             expected_filter = (
-                (sample_data_with_indicators["Close"] >= 5.0)
-                & (sample_data_with_indicators["dollarvolume20"] > 25_000_000)
+                (sample_data_with_indicators["Low"] >= 1.0)
+                & (sample_data_with_indicators["avgvolume50"] >= 1_000_000)
                 & (sample_data_with_indicators["atr_ratio"] >= 0.05)
             )
             pd.testing.assert_series_equal(
                 result["filter"], expected_filter, check_names=False
             )
 
-            # Check setup conditions (filter + drop3d >= 0.125)
-            expected_setup = expected_filter & (
-                sample_data_with_indicators["drop3d"] >= 0.125
+            # Check setup conditions (spec: filter & Close>sma150 & drop3d>=0.125)
+            expected_setup = (
+                expected_filter
+                & (
+                    sample_data_with_indicators["Close"]
+                    > sample_data_with_indicators["sma150"]
+                )
+                & (sample_data_with_indicators["drop3d"] >= 0.125)
             )
             pd.testing.assert_series_equal(
                 result["setup"], expected_setup, check_names=False
@@ -115,11 +123,11 @@ class TestSystem3ComputeIndicators:
 
     def test_compute_indicators_filter_conditions(self, sample_data_with_indicators):
         """Test filter condition logic."""
-        # Test edge cases for filter conditions
+        # Test edge cases for spec filter conditions
         edge_case_data = sample_data_with_indicators.copy()
-        edge_case_data.loc[edge_case_data.index[0], "Close"] = 4.99  # Below 5 threshold
-        edge_case_data.loc[edge_case_data.index[1], "dollarvolume20"] = (
-            24_999_999  # Below 25M
+        edge_case_data.loc[edge_case_data.index[0], "Low"] = 0.99  # Below $1 threshold
+        edge_case_data.loc[edge_case_data.index[1], "avgvolume50"] = (
+            999_999  # Below 1M shares
         )
         edge_case_data.loc[edge_case_data.index[2], "atr_ratio"] = 0.049  # Below 0.05
 
@@ -132,8 +140,8 @@ class TestSystem3ComputeIndicators:
             assert result is not None
 
             # All filter conditions should be False due to edge cases
-            assert not result["filter"].iloc[0]  # Close < 5
-            assert not result["filter"].iloc[1]  # dollarvolume20 <= 25M
+            assert not result["filter"].iloc[0]  # Low < 1
+            assert not result["filter"].iloc[1]  # avgvolume50 < 1M
             assert not result["filter"].iloc[2]  # atr_ratio < 0.05
 
     def test_compute_indicators_setup_conditions(self, sample_data_with_indicators):
@@ -171,9 +179,12 @@ class TestSystem3PrepareDataVectorized:
         return {
             "TEST1": pd.DataFrame(
                 {
+                    "Low": [100, 101, 102],
                     "Close": [105, 106, 107],
                     "atr10": [2.5, 2.6, 2.7],
                     "dollarvolume20": [30_000_000, 35_000_000, 40_000_000],
+                    "avgvolume50": [2_000_000, 2_000_000, 2_000_000],
+                    "sma150": [90, 90, 90],
                     "atr_ratio": [0.06, 0.07, 0.08],
                     "drop3d": [0.15, 0.20, 0.13],
                     "filter": [True, True, True],  # Added required column
@@ -382,6 +393,8 @@ class TestSystem3Integration:
                         45_000_000,
                         50_000_000,
                     ],
+                    "avgvolume50": [2_000_000] * 5,
+                    "sma150": [90, 90, 90, 90, 90],
                     "atr_ratio": [0.06, 0.07, 0.08, 0.09, 0.10],
                     "drop3d": [0.15, 0.20, 0.13, 0.18, 0.16],
                     "filter": [True, True, True, True, True],  # Added required column
@@ -404,6 +417,8 @@ class TestSystem3Integration:
                         75_000_000,
                         80_000_000,
                     ],
+                    "avgvolume50": [2_000_000] * 5,
+                    "sma150": [180, 180, 180, 180, 180],
                     "atr_ratio": [0.08, 0.09, 0.10, 0.11, 0.12],
                     "drop3d": [0.17, 0.14, 0.19, 0.16, 0.15],
                     "filter": [True, True, True, True, True],  # Added required column
@@ -438,17 +453,21 @@ class TestSystem3Integration:
 
     def test_system3_edge_cases(self):
         """Test System3 with various edge cases."""
+        # spec edge cases: row0 fails filter (Low<1); rows 1&2 pass filter+setup
         edge_case_data = {
             "EDGE1": pd.DataFrame(
                 {
-                    "Close": [4.99, 5.01, 6.00],  # Edge case for Close >= 5 filter
+                    "Low": [0.99, 5.01, 6.00],  # Edge case for Low >= 1 filter
+                    "Close": [10.0, 12.0, 13.0],
                     "atr10": [2.5, 2.6, 2.7],
-                    "dollarvolume20": [
-                        24_999_999,
-                        25_000_001,
-                        30_000_000,
-                    ],  # Edge case for >25M filter
-                    "atr_ratio": [0.049, 0.050, 0.051],  # Edge case for >=0.05 filter
+                    "dollarvolume20": [30_000_000, 30_000_000, 30_000_000],
+                    "avgvolume50": [
+                        999_999,
+                        2_000_000,
+                        2_000_000,
+                    ],  # row0 also below 1M, row1/2 pass
+                    "sma150": [8.0, 8.0, 8.0],  # Close > sma150 for all
+                    "atr_ratio": [0.06, 0.050, 0.051],
                     "drop3d": [0.124, 0.125, 0.126],  # Edge case for >=0.125 setup
                     "filter": [True, True, True],  # Added required column
                     "setup": [True, True, True],  # Added required column
@@ -465,13 +484,13 @@ class TestSystem3Integration:
         assert isinstance(prepared_data, dict)
         assert "EDGE1" in prepared_data
 
-        # Check filter conditions
+        # Check filter conditions (spec: Low>=1, avgvolume50>=1M, atr_ratio>=0.05)
         df = prepared_data["EDGE1"]
-        assert not df["filter"].iloc[0]  # Close < 5 condition fails
-        assert df["filter"].iloc[1]  # All conditions pass for 5.01 close
+        assert not df["filter"].iloc[0]  # Low < 1 (and avgvolume50 < 1M) -> fails
+        assert df["filter"].iloc[1]  # All conditions pass
         assert df["filter"].iloc[2]  # All conditions pass
 
-        # Check setup conditions (if filter passes and Drop3D >=0.125, setup passes)
+        # Check setup (spec: filter & Close>sma150 & drop3d>=0.125)
         assert not df["setup"].iloc[0]  # Filter fails, so setup fails
-        assert df["setup"].iloc[1]  # Filter passes and Drop3D=0.125, so setup passes
-        assert df["setup"].iloc[2]  # Filter passes and Drop3D=0.126, so setup passes
+        assert df["setup"].iloc[1]  # Filter passes and drop3d=0.125 -> setup passes
+        assert df["setup"].iloc[2]  # Filter passes and drop3d=0.126 -> setup passes

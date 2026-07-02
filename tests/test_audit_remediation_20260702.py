@@ -3,7 +3,9 @@
 Covers the fixes tracked in docs/AUDIT_REMEDIATION_20260702.md:
   - P0  System7 unused stub removed from SYSTEM_TRADE_RULES
   - P0  System5 setup 乖離 (ADX7>55, RSI3<50, Close>SMA100+ATR10) enforced
-  - P2  system5_setup_predicate unified with core/system5 setup logic
+  - P1  System3 filter/setup reverted to spec (Low>=1, AvgVolume50>=1M,
+        Close>sma150, drop3d>=0.125)
+  - P2  system5/system3 predicate unified with core setup logic
   - P2  signal-count regression (old vs new setup selectivity)
 """
 
@@ -12,8 +14,13 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from common.system_setup_predicates import system5_setup_predicate
+from common.system_setup_predicates import (
+    system3_setup_predicate,
+    system5_setup_predicate,
+)
 from common.trade_management import SYSTEM_TRADE_RULES
+from core.system3 import _apply_filter_conditions as _s3_filter
+from core.system3 import _apply_setup_conditions as _s3_setup
 from core.system5 import (
     DEFAULT_ATR_PCT_THRESHOLD,
     MAX_RSI3,
@@ -135,3 +142,67 @@ def test_system5_setup_is_more_selective_than_old():
     assert (sub["rsi3"] < MAX_RSI3).all()
     assert (sub["Close"] > sub["sma100"] + sub["atr10"]).all()
     assert (sub["atr_pct"] > DEFAULT_ATR_PCT_THRESHOLD).all()
+
+
+# --- P1: System3 spec-compliant filter/setup --------------------------------
+def _s3_base_frame(**overrides) -> pd.DataFrame:
+    """A row that PASSES the spec filter+setup (docs/systems/システム3.txt)."""
+    row = {
+        "Low": 2.0,  # >= 1
+        "avgvolume50": 1_500_000,  # >= 1M shares
+        "atr_ratio": 0.06,  # >= 5%
+        "Close": 20.0,
+        "sma150": 10.0,  # Close(20) > sma150(10)
+        "drop3d": 0.20,  # >= 12.5%
+    }
+    row.update(overrides)
+    return pd.DataFrame([row])
+
+
+def _s3_setup_bool(df: pd.DataFrame) -> bool:
+    return bool(_s3_setup(_s3_filter(df))["setup"].iloc[0])
+
+
+def test_system3_setup_passes_spec_row():
+    assert _s3_setup_bool(_s3_base_frame()) is True
+
+
+def test_system3_accepts_low_priced_dollar_stock():
+    # spec: price >= $1 (old code required Close>=5). Low=1.2 must pass filter.
+    df = _s3_base_frame(Low=1.2, Close=1.5, sma150=1.0)
+    assert bool(_s3_filter(df)["filter"].iloc[0]) is True
+
+
+def test_system3_rejects_sub_dollar_price():
+    assert bool(_s3_filter(_s3_base_frame(Low=0.5))["filter"].iloc[0]) is False
+
+
+def test_system3_uses_share_volume_not_dollar_volume():
+    # avgvolume50 below 1M shares must fail even if dollar volume is huge.
+    df = _s3_base_frame(avgvolume50=500_000)
+    df["dollarvolume20"] = 999_000_000
+    assert bool(_s3_filter(df)["filter"].iloc[0]) is False
+
+
+def test_system3_setup_requires_close_above_sma150():
+    # spec setup: Close > 150SMA (previously not enforced)
+    assert _s3_setup_bool(_s3_base_frame(Close=9.0, sma150=10.0)) is False
+
+
+def test_system3_setup_requires_drop3d():
+    assert _s3_setup_bool(_s3_base_frame(drop3d=0.05)) is False
+
+
+def test_system3_predicate_matches_core_setup():
+    frames = [
+        _s3_base_frame(),
+        _s3_base_frame(Low=0.5),
+        _s3_base_frame(avgvolume50=500_000),
+        _s3_base_frame(Close=9.0, sma150=10.0),
+        _s3_base_frame(drop3d=0.05),
+        _s3_base_frame(atr_ratio=0.01),
+    ]
+    for df in frames:
+        core_setup = _s3_setup_bool(df)
+        pred = bool(system3_setup_predicate(df.iloc[0]))
+        assert core_setup == pred, f"mismatch on {df.iloc[0].to_dict()}"
