@@ -19,10 +19,10 @@
           "name": "FILpass",
           "label": "FILpass",
           "condition": "Close >= 5 かつ DollarVolume20 > 50M",
-          "count": 0,
+          "count": 2085,
           "measured": true,
-          "ratio_of_prev": 0.0,
-          "ratio_of_universe": 0.0
+          "ratio_of_prev": 0.167537,
+          "ratio_of_universe": 0.167537
         },
         {
           "name": "STUpass",
@@ -37,19 +37,19 @@
           "name": "TRDlist",
           "label": "TRDlist",
           "condition": "ROC200 降順 上位候補",
-          "count": 0,
+          "count": 10,
           "measured": false,
-          "ratio_of_prev": null,
-          "ratio_of_universe": 0.0
+          "ratio_of_prev": 0.004796,
+          "ratio_of_universe": 0.000804
         },
         {
           "name": "Entry",
           "label": "Entry",
           "condition": "allocation 後エントリ発火",
-          "count": 0,
+          "count": 9,
           "measured": false,
-          "ratio_of_prev": null,
-          "ratio_of_universe": 0.0
+          "ratio_of_prev": 0.9,
+          "ratio_of_universe": 0.000723
         },
         {
           "name": "Exit",
@@ -61,7 +61,7 @@
           "ratio_of_universe": null
         }
       ],
-      "final_signals": 0
+      "final_signals": 9
     },
     "sys2": {
       "system_id": "sys2",
@@ -79,10 +79,10 @@
           "name": "FILpass",
           "label": "FILpass",
           "condition": "Close >= 5 かつ DollarVolume20 > 25M かつ ATR_Ratio > 0.03",
-          "count": 0,
+          "count": 2745,
           "measured": true,
-          "ratio_of_prev": 0.0,
-          "ratio_of_universe": 0.0
+          "ratio_of_prev": 0.220571,
+          "ratio_of_universe": 0.220571
         },
         {
           "name": "STUpass",
@@ -97,19 +97,19 @@
           "name": "TRDlist",
           "label": "TRDlist",
           "condition": "ADX7 降順 上位候補",
-          "count": 0,
+          "count": 10,
           "measured": false,
-          "ratio_of_prev": null,
-          "ratio_of_universe": 0.0
+          "ratio_of_prev": 0.003643,
+          "ratio_of_universe": 0.000804
         },
         {
           "name": "Entry",
           "label": "Entry",
           "condition": "allocation 後エントリ発火",
-          "count": 0,
+          "count": 10,
           "measured": false,
-          "ratio_of_prev": null,
-          "ratio_of_universe": 0.0
+          "ratio_of_prev": 1.0,
+          "ratio_of_universe": 0.000804
         },
         {
           "name": "Exit",
@@ -121,7 +121,7 @@
           "ratio_of_universe": null
         }
       ],
-      "final_signals": 0
+      "final_signals": 10
     },
     "sys3": {
       "system_id": "sys3",
@@ -139,10 +139,10 @@
           "name": "FILpass",
           "label": "FILpass",
           "condition": "Close >= 5 かつ DollarVolume20 > 25M かつ ATR_Ratio >= 0.05",
-          "count": 0,
+          "count": 2745,
           "measured": true,
-          "ratio_of_prev": 0.0,
-          "ratio_of_universe": 0.0
+          "ratio_of_prev": 0.220571,
+          "ratio_of_universe": 0.220571
         },
         {
           "name": "STUpass",
@@ -157,19 +157,19 @@
           "name": "TRDlist",
           "label": "TRDlist",
           "condition": "drop3d 降順 上位候補",
-          "count": 0,
+          "count": 10,
           "measured": false,
-          "ratio_of_prev": null,
-          "ratio_of_universe": 0.0
+          "ratio_of_prev": 0.003643,
+          "ratio_of_universe": 0.000804
         },
         {
           "name": "Entry",
           "label": "Entry",
           "condition": "allocation 後エントリ発火",
-          "count": 0,
+          "count": 9,
           "measured": false,
-          "ratio_of_prev": null,
-          "ratio_of_universe": 0.0
+          "ratio_of_prev": 0.9,
+          "ratio_of_universe": 0.000723
         },
         {
           "name": "Exit",
@@ -181,7 +181,7 @@
           "ratio_of_universe": null
         }
       ],
-      "final_signals": 0
+      "final_signals": 9
     },
     "sys4": {
       "system_id": "sys4",
@@ -199,10 +199,10 @@
           "name": "FILpass",
           "label": "FILpass",
           "condition": "DollarVolume50 > 100M かつ HV50 in [10,40]",
-          "count": 0,
+          "count": 1374,
           "measured": true,
-          "ratio_of_prev": 0.0,
-          "ratio_of_universe": 0.0
+          "ratio_of_prev": 0.110406,
+          "ratio_of_universe": 0.110406
         },
         {
           "name": "STUpass",
@@ -217,19 +217,19 @@
           "name": "TRDlist",
           "label": "TRDlist",
           "condition": "RSI4 昇順 上位候補 (最も oversold)",
-          "count": 0,
+          "count": 10,
           "measured": false,
-          "ratio_of_prev": null,
-          "ratio_of_universe": 0.0
+          "ratio_of_prev": 0.007278,
+          "ratio_of_universe": 0.000804
         },
         {
           "name": "Entry",
           "label": "Entry",
           "condition": "allocation 後エントリ発火",
-          "count": 0,
+          "count": 10,
           "measured": false,
-          "ratio_of_prev": null,
-          "ratio_of_universe": 0.0
+          "ratio_of_prev": 1.0,
+          "ratio_of_universe": 0.000804
         },
         {
           "name": "Exit",
@@ -241,7 +241,7 @@
           "ratio_of_universe": null
         }
       ],
-      "final_signals": 0
+      "final_signals": 10
     },
     "sys5": {
       "system_id": "sys5",
@@ -277,19 +277,19 @@
           "name": "TRDlist",
           "label": "TRDlist",
           "condition": "ADX7 降順 上位候補",
-          "count": 0,
+          "count": 10,
           "measured": false,
-          "ratio_of_prev": 0.0,
-          "ratio_of_universe": 0.0
+          "ratio_of_prev": 0.000955,
+          "ratio_of_universe": 0.000804
         },
         {
           "name": "Entry",
           "label": "Entry",
           "condition": "allocation 後エントリ発火",
-          "count": 0,
+          "count": 10,
           "measured": false,
-          "ratio_of_prev": null,
-          "ratio_of_universe": 0.0
+          "ratio_of_prev": 1.0,
+          "ratio_of_universe": 0.000804
         },
         {
           "name": "Exit",
@@ -301,7 +301,7 @@
           "ratio_of_universe": null
         }
       ],
-      "final_signals": 0
+      "final_signals": 10
     },
     "sys6": {
       "system_id": "sys6",
@@ -319,10 +319,10 @@
           "name": "FILpass",
           "label": "FILpass",
           "condition": "Low >= 5 かつ DollarVolume50 > 10M",
-          "count": 0,
+          "count": 3537,
           "measured": true,
-          "ratio_of_prev": 0.0,
-          "ratio_of_universe": 0.0
+          "ratio_of_prev": 0.284211,
+          "ratio_of_universe": 0.284211
         },
         {
           "name": "STUpass",
@@ -337,19 +337,19 @@
           "name": "TRDlist",
           "label": "TRDlist",
           "condition": "return_6d 降順 上位候補",
-          "count": 0,
+          "count": 1,
           "measured": false,
-          "ratio_of_prev": null,
-          "ratio_of_universe": 0.0
+          "ratio_of_prev": 0.000283,
+          "ratio_of_universe": 8e-05
         },
         {
           "name": "Entry",
           "label": "Entry",
           "condition": "allocation 後エントリ発火",
-          "count": 0,
+          "count": 1,
           "measured": false,
-          "ratio_of_prev": null,
-          "ratio_of_universe": 0.0
+          "ratio_of_prev": 1.0,
+          "ratio_of_universe": 8e-05
         },
         {
           "name": "Exit",
@@ -361,7 +361,7 @@
           "ratio_of_universe": null
         }
       ],
-      "final_signals": 0
+      "final_signals": 1
     },
     "sys7": {
       "system_id": "sys7",

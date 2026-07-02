@@ -4,32 +4,32 @@
   "n_candidates_total": 12445,
   "survival_by_system": {
     "sys1": {
-      "n_pass": 0,
+      "n_pass": 2085,
       "n_total": 12445,
-      "ratio": 0.0,
+      "ratio": 0.1675,
       "warn_threshold": 0.05,
-      "status": "warn"
+      "status": "ok"
     },
     "sys2": {
-      "n_pass": 0,
+      "n_pass": 2745,
       "n_total": 12445,
-      "ratio": 0.0,
+      "ratio": 0.2206,
       "warn_threshold": 0.06,
-      "status": "warn"
+      "status": "ok"
     },
     "sys3": {
-      "n_pass": 0,
+      "n_pass": 2745,
       "n_total": 12445,
-      "ratio": 0.0,
+      "ratio": 0.2206,
       "warn_threshold": 0.06,
-      "status": "warn"
+      "status": "ok"
     },
     "sys4": {
-      "n_pass": 0,
+      "n_pass": 1374,
       "n_total": 12445,
-      "ratio": 0.0,
+      "ratio": 0.1104,
       "warn_threshold": 0.04,
-      "status": "warn"
+      "status": "ok"
     },
     "sys5": {
       "n_pass": 10468,
@@ -39,11 +39,11 @@
       "status": "ok"
     },
     "sys6": {
-      "n_pass": 0,
+      "n_pass": 3537,
       "n_total": 12445,
-      "ratio": 0.0,
+      "ratio": 0.2842,
       "warn_threshold": 0.1,
-      "status": "warn"
+      "status": "ok"
     },
     "sys7": {
       "n_pass": 1,
@@ -55,59 +55,59 @@
   },
   "rejected_top10": [
     {
-      "symbol": "MU",
+      "symbol": "SOXS",
+      "reason": "price_below_5"
+    },
+    {
+      "symbol": "MBGL",
       "reason": "no_dv20_cache"
     },
     {
-      "symbol": "SPY",
+      "symbol": "HONA",
       "reason": "no_dv20_cache"
     },
     {
-      "symbol": "QQQ",
+      "symbol": "LHAI",
+      "reason": "price_below_5"
+    },
+    {
+      "symbol": "TZA",
+      "reason": "price_below_5"
+    },
+    {
+      "symbol": "BSP",
       "reason": "no_dv20_cache"
     },
     {
-      "symbol": "NVDA",
+      "symbol": "RAM",
       "reason": "no_dv20_cache"
     },
     {
-      "symbol": "META",
+      "symbol": "ECHO",
       "reason": "no_dv20_cache"
     },
     {
-      "symbol": "SNDK",
-      "reason": "no_dv20_cache"
+      "symbol": "OPEN",
+      "reason": "price_below_5"
     },
     {
-      "symbol": "MSFT",
-      "reason": "no_dv20_cache"
-    },
-    {
-      "symbol": "SPCX",
-      "reason": "no_dv20_cache"
-    },
-    {
-      "symbol": "TSLA",
-      "reason": "no_dv20_cache"
-    },
-    {
-      "symbol": "AMD",
+      "symbol": "SPCH",
       "reason": "no_dv20_cache"
     }
   ],
   "delta_vs_previous": {
-    "sys1": -0.1659,
-    "sys2": -0.2193,
-    "sys3": -0.2193,
-    "sys4": -0.1114,
+    "sys1": 0.0016,
+    "sys2": 0.0013,
+    "sys3": 0.0013,
+    "sys4": -0.001,
     "sys5": 0.001,
-    "sys6": -0.2884,
+    "sys6": -0.0042,
     "sys7": 0.0
   },
   "consecutive_drops": {
-    "sys1": 1,
-    "sys2": 1,
-    "sys3": 1,
+    "sys1": 0,
+    "sys2": 0,
+    "sys3": 0,
     "sys4": 1,
     "sys5": 0,
     "sys6": 1,
