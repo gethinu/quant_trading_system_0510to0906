@@ -58,8 +58,14 @@ except Exception:  # フォールバック
 # ============================================================================
 # System3 Strategy Constants
 # ============================================================================
-MIN_PRICE = 5.0  # Minimum closing price for filter
-MIN_DOLLAR_VOLUME_20 = 25_000_000  # Minimum 20-day dollar volume
+# audit-remediation 2026-07-02 (P1 System3 filter 乖離 — 確認・文書化):
+#   仕様 (docs/systems/システム3.txt) は「株価≥1、50日平均出来高≥100万株」だが、
+#   実装は意図的に **より厳しい** ユニバース (Close≥5、DollarVolume20>2500万$) を
+#   採用する。低位株・低流動性株を除外して約定/スリッページ品質を優先する設計判断。
+#   この乖離は既知かつ意図的であり (spec を緩める方向には戻さない)、下の filter で
+#   enforce 済みであることを確認した (Close>=MIN_PRICE, dollarvolume20>MIN_DV20)。
+MIN_PRICE = 5.0  # Minimum closing price for filter (spec≥1 だが意図的に≥5)
+MIN_DOLLAR_VOLUME_20 = 25_000_000  # 20日売買代金 (spec は50日平均出来高≥100万株)
 DEFAULT_ATR_RATIO_THRESHOLD = 0.05  # Default ATR ratio threshold (can be overridden)
 DROP_3D_THRESHOLD = 0.125  # 3-day drop threshold (12.5%)
 
