@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "date": "2026-07-01",
-  "generated_at": "2026-07-02T13:56:18+09:00",
+  "generated_at": "2026-07-02T13:58:58+09:00",
   "provider": "polygon",
   "systems": {},
   "portfolio": {
@@ -11,7 +11,7 @@
   },
   "meta": {
     "cli_version": "0.1.0",
-    "run_id": "20260702_135501_18cacf",
-    "elapsed_seconds": 76.8
+    "run_id": "20260702_135752_d1249c",
+    "elapsed_seconds": 65.9
   }
 }
