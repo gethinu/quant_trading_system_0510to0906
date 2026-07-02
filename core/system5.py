@@ -2,20 +2,22 @@
 # 🧠 Context Note
 # このファイルは System5（ロング ミーン・リバージョン 高 ADX）のロジック専門
 #
-# 前提条件：
-#   - 高 ADX 環境（ADX7 > 35）でのミーン・リバージョン狙い
+# 前提条件（audit-remediation 2026-07-02 で spec 準拠に是正）：
+#   - 高 ADX 環境（ADX7 > 55）でのミーン・リバージョン狙い
 #   - ATR_Pct による変動性フィルター（> 2.5%）
-#   - RSI3 < 50 で過売り確認
+#   - Close > SMA100 + ATR10（100SMA+ATR バンドの上）
+#   - RSI3 < 50 で一時的な押し目（リバージョン環境）確認
 #   - 指標は precomputed のみ使用（ADX7 でランキング）
 #   - フロー: setup() → rank() → signals() の順序実行
 #
 # ロジック単位：
-#   setup()       → フィルター条件チェック（ADX7>55、ATR_Pct>2.5% など）
+#   filter()      → Close>=5, ADX7>55, ATR_Pct>2.5%
+#   setup()       → filter & Close>SMA100+ATR10 & RSI3<50
 #   rank()        → ADX7 の降順ランキング（強いトレンド環境優先）
 #   signals()     → スコア付きシグナル抽出
 #
 # Copilot へ：
-#   → ADX 閾値（35）の変更は慎重に。他システムとの競合検証必須
+#   → ADX 閾値（55, spec 準拠）の変更は慎重に。他システムとの競合検証必須
 #   → RSI3 条件（< 50）の役割は「リバージョン環境確認」。ロジック変更禁止
 #   → ATR_Pct > 2.5% は変動性フィルター。下限変更は制御テストで確認
 # ============================================================================
@@ -23,9 +25,11 @@
 """System5 core logic (Long mean-reversion with high ADX).
 
 High ADX mean-reversion strategy:
-- Indicators: adx7, atr10, dollarvolume20, atr_pct (precomputed only)
-- Setup conditions: Close>=5, AvgVol50>500k, DV50>2.5M, ATR_Pct>2.5%,
-    Close>SMA100+ATR10, ADX7>35, RSI3<50
+- Indicators: adx7, atr10, dollarvolume20, atr_pct, sma100, rsi3 (precomputed only)
+- Filter conditions: Close>=5, ADX7>55, ATR_Pct>2.5%
+- Setup conditions: filter & Close>SMA100+ATR10 & RSI3<50
+    (audit-remediation 2026-07-02: spec 準拠に是正。旧実装は setup==filter で
+     100SMA+ATR バンド / RSI3<50 が未 enforce、ADX 閾値も 35 と緩かった)
 - Candidate generation: ADX7 descending ranking by date, extract top_n
 - Optimization: Removed all indicator calculations, using precomputed indicators only
 """
@@ -56,8 +60,13 @@ from common.utils import get_cached_data
 MIN_PRICE = 5.0  # Minimum closing price for candidates
 
 # ADX-based filters
-MIN_ADX = 35.0  # Minimum ADX7 for high trend strength environment
-MIN_ADX_FULL_SCAN = 35.0  # ADX7 threshold for full-scan filtering
+# audit-remediation 2026-07-02 (P0): spec (システム5.txt) は ADX7>55。
+# 旧実装は 35 で緩すぎたため 55 に是正 (SYSTEM5_ADX_THRESHOLD と一致)。
+MIN_ADX = 55.0  # Minimum ADX7 for high trend strength environment (spec: >55)
+MIN_ADX_FULL_SCAN = 55.0  # ADX7 threshold for full-scan filtering (spec: >55)
+
+# Mean-reversion setup thresholds (audit-remediation 2026-07-02, P0)
+MAX_RSI3 = 50.0  # spec: 3日RSI < 50 (一時的な押し目確認)
 
 # Volatility filters
 DEFAULT_ATR_PCT_THRESHOLD = 0.025  # 2.5% minimum ATR percentage
@@ -107,22 +116,48 @@ def _apply_filter_conditions(df: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
-def _apply_setup_conditions(df: pd.DataFrame) -> pd.DataFrame:
-    """Apply System5 setup conditions, preserving existing 'setup' column if present.
+def _col_numeric_ci(df: pd.DataFrame, name: str) -> pd.Series:
+    """Case-insensitive numeric column access (returns NaN Series if absent)."""
+    if name in df.columns:
+        return pd.to_numeric(df[name], errors="coerce")
+    low = name.lower()
+    for c in df.columns:
+        if isinstance(c, str) and c.lower() == low:
+            return pd.to_numeric(df[c], errors="coerce")
+    return pd.Series(float("nan"), index=df.index)
 
-    For System5, setup conditions are identical to filter conditions.
+
+def _apply_setup_conditions(df: pd.DataFrame) -> pd.DataFrame:
+    """Apply System5 setup conditions on top of the filter.
+
+    audit-remediation 2026-07-02 (P0 System5 setup 乖離):
+    仕様 (docs/systems/システム5.txt) の setup 条件を enforce する。
+        setup = filter (Close>=5, ADX7>55, ATR_Pct>2.5%)
+                & Close > SMA100 + ATR10   (100SMA+ATR バンド上)
+                & RSI3 < 50                (一時的な押し目 = リバージョン環境)
+    旧実装は setup == filter で 100SMA+ATR バンドと RSI3<50 が未 enforce だった。
 
     Args:
-        df: DataFrame with 'filter' column
+        df: DataFrame with 'filter' column and Close/sma100/atr10/rsi3
 
     Returns:
         DataFrame with 'setup' column added/updated
     """
     result = df.copy()
 
-    computed_setup = (
+    filter_ok = (
         pd.Series(result["filter"], index=result.index).fillna(False).astype(bool)
     )
+
+    close = _col_numeric_ci(result, "Close")
+    sma100 = _col_numeric_ci(result, "sma100")
+    atr10 = _col_numeric_ci(result, "atr10")
+    rsi3 = _col_numeric_ci(result, "rsi3")
+
+    price_band_ok = (close > (sma100 + atr10)).fillna(False)
+    rsi_ok = (rsi3 < MAX_RSI3).fillna(False)
+
+    computed_setup = filter_ok & price_band_ok & rsi_ok
 
     if "setup" in result.columns:
         existing = (
@@ -379,15 +414,26 @@ def generate_candidates_system5(
                         close_val = last_row.get("Close", float("nan"))
                         adx_val = last_row.get("adx7", float("nan"))
                         atr_pct_val = last_row.get("atr_pct", float("nan"))
+                        # audit-remediation 2026-07-02 (P0): spec setup 条件を
+                        # deep-fallback にも反映 (100SMA+ATR バンド, RSI3<50)。
+                        sma100_val = last_row.get("sma100", last_row.get("SMA100"))
+                        atr10_val_m = last_row.get("atr10", last_row.get("ATR10"))
+                        rsi3_val = last_row.get("rsi3", last_row.get("RSI3"))
                         if (
                             pd.notna(close_val)
                             and pd.notna(adx_val)
                             and pd.notna(atr_pct_val)
+                            and pd.notna(sma100_val)
+                            and pd.notna(atr10_val_m)
+                            and pd.notna(rsi3_val)
                         ):
                             manual_pass = bool(
                                 float(close_val) >= MIN_PRICE
                                 and float(adx_val) > MIN_ADX
                                 and float(atr_pct_val) > DEFAULT_ATR_PCT_THRESHOLD
+                                and float(close_val)
+                                > (float(sma100_val) + float(atr10_val_m))
+                                and float(rsi3_val) < MAX_RSI3
                             )
                     except Exception:
                         manual_pass = False

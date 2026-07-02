@@ -109,6 +109,10 @@ SYSTEM5_REQUIRED_INDICATORS = [
     "atr10",
     "dollarvolume20",
     "atr_pct",
+    # audit-remediation 2026-07-02 (P0 System5 setup 乖離): spec の setup 条件
+    # (Close>SMA100+ATR10, RSI3<50) を enforce するため追加。
+    "sma100",
+    "rsi3",
 ]
 
 SYSTEM6_REQUIRED_INDICATORS = [

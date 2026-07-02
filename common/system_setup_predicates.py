@@ -262,7 +262,12 @@ def system4_setup_predicate(row: pd.Series) -> bool:
 
 
 # --- System5 -----------------------------------------------------------------
-# 条件 (filter == setup): Close>=5, adx7>35, atr_pct>DEFAULT_ATR_PCT_THRESHOLD
+# audit-remediation 2026-07-02 (P0 System5 setup 乖離 + P2 予測子二重実装統合):
+# core/system5.py の filter/setup と同値になるよう spec 準拠へ是正。
+#   filter: Close>=5, adx7>55, atr_pct>DEFAULT_ATR_PCT_THRESHOLD
+#   setup : filter & Close>SMA100+ATR10 & RSI3<50
+MIN_ADX_SYSTEM5: float = 55.0
+MAX_RSI3_SYSTEM5: float = 50.0
 
 
 def system5_setup_predicate(
@@ -272,14 +277,28 @@ def system5_setup_predicate(
         close = _to_float(row.get("Close"))
         adx7 = _to_float(row.get("adx7"))
         atr_pct = _to_float(row.get("atr_pct"))
+        # case-insensitive access for SMA100 / ATR10 / RSI3
+        from typing import Mapping as _Mapping
+        from typing import cast as _cast
+
+        row_map = _cast(_Mapping[str, Any], row)
+        sma100 = indicator_to_float(get_indicator(row_map, "sma100"))
+        atr10 = indicator_to_float(get_indicator(row_map, "atr10"))
+        rsi3 = indicator_to_float(get_indicator(row_map, "rsi3"))
         threshold = (
             atr_pct_threshold
             if atr_pct_threshold is not None
             else DEFAULT_ATR_PCT_THRESHOLD
         )
-        if not _all_not_nan([close, adx7, atr_pct]):
+        if not _all_not_nan([close, adx7, atr_pct, sma100, atr10, rsi3]):
             return False
-        return (close >= 5.0) and (adx7 > 35.0) and (atr_pct > threshold)
+        return (
+            (close >= 5.0)
+            and (adx7 > MIN_ADX_SYSTEM5)
+            and (atr_pct > threshold)
+            and (close > (sma100 + atr10))
+            and (rsi3 < MAX_RSI3_SYSTEM5)
+        )
     except Exception:
         return False
 
