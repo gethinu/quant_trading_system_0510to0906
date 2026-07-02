@@ -12,7 +12,8 @@
       1. [cache]    scripts/cache_daily_polygon.py  --start/--end {date}   (Polygon fetch)
       2. [signals]  apps/app_today_signals.py --headless --output-json ...  (シグナル生成)
       3. [coverage] scripts/daily_polygon_monitor.py --date {date}          (gate 生存率)
-      4. [publish]  scripts/publish_signals.py --input {json}          (ntfy + email 配信)
+      4. [narrator] scripts/generate_narrative.py --signals {json} --output ... (AI 解説, optional)
+      5. [publish]  scripts/publish_signals.py --input {json}          (ntfy + email 配信)
 
     step 失敗は log に残し、パイプラインは可能な範囲で継続する (signals が出れば coverage/publish は進む)。
     いずれかが失敗したら最後に ntfy (NTFY_TOPIC) へ WARN を送る。
@@ -26,8 +27,12 @@
 .PARAMETER SkipCache
     step1 (Polygon fetch) をスキップ。cache が別 task で更新済のとき用。
 
+.PARAMETER SkipNarrator
+    narrator step (AI 解説生成) をスキップ。ANTHROPIC_API_KEY 未設定でも
+    narrator は fail-safe で空スキップするため通常は不要。
+
 .PARAMETER SkipPublish
-    step4 (ntfy/email 配信) をスキップ。
+    publish step (ntfy/email 配信) をスキップ。
 
 .PARAMETER DryRunPublish
     step4 を送信せず payload 検証のみ (--dry-run)。
@@ -51,6 +56,7 @@ param(
     [string]$Date = "",
     [string]$Symbols = "",
     [switch]$SkipCache = $false,
+    [switch]$SkipNarrator = $false,
     [switch]$SkipPublish = $false,
     [switch]$DryRunPublish = $false,
     [switch]$SkipLatestCheck = $false
@@ -65,6 +71,7 @@ if (-not $Date) { $Date = Get-Date -Format "yyyy-MM-dd" }
 $DateCompact = $Date -replace "-", ""
 $LogFile = Join-Path $LogDir "daily_pipeline_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
 $SignalsJson = Join-Path $ProjectRoot "results_csv\today_signals_$DateCompact.json"
+$NarrativeJson = Join-Path $ProjectRoot "results_csv\narrative_$DateCompact.json"
 
 if (-not (Test-Path $LogDir)) {
     New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
@@ -169,7 +176,29 @@ try {
     if ($v -eq 1) { $Failures += "coverage(exit=1)" }
     elseif ($v -eq 2) { Write-Log "[coverage] WARN: gate 閾値割れ検知 (JSON status=warn)" }
 
-    # --- Step 4: publish (ntfy primary + email backup) -----------------
+    # --- Step 4: narrator (AI 解説生成、optional / fail-safe) -----------
+    # narrator は失敗しても pipeline を止めない (publish は narrative 無しで流す)。
+    # ANTHROPIC_API_KEY 未設定なら generate_narrative.py が空スキップ (exit 0)。
+    if ($SkipNarrator) {
+        Write-Log "[narrator] SkipNarrator 指定によりスキップ"
+    }
+    elseif (-not (Test-Path $SignalsJson)) {
+        Write-Log "[narrator] signals JSON が無いためスキップ: $SignalsJson"
+    }
+    else {
+        $narrArgs = @(
+            (Join-Path $ProjectRoot "scripts\generate_narrative.py"),
+            "--signals", $SignalsJson,
+            "--output", $NarrativeJson
+        )
+        $n = Invoke-Step -Name "narrator" -PyArgs $narrArgs
+        # narrator は best-effort。exit!=0 は WARN 止まり (Failures に入れない)。
+        if ($n -ne 0) { Write-Log "[narrator] WARN: 生成失敗 (exit=$n)、narrative 無しで継続" }
+    }
+
+    # --- Step 5: publish (ntfy primary + email backup) -----------------
+    # publish_signals.py は signals と同じ dir の narrative_YYYYMMDD.json を
+    # 自動探索して X-Title / email に載せる (無ければ既存 body)。
     if ($SkipPublish) {
         Write-Log "[publish] SkipPublish 指定によりスキップ"
     }
