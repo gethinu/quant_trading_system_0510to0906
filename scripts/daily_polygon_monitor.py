@@ -323,6 +323,166 @@ def evaluate_survival(
     return results
 
 
+# --- Signal pipeline (絞込フロー) ---------------------------------------
+# user 指摘: 単一 "survival rate" は評価軸ではない。universe → filter → setup →
+# ... → final の phase 別絞込を「参考数値」として可視化するため、grouped-daily で
+# 実測できる phase (universe / price / DV) の通過銘柄数を計測し JSON 出力する。
+# setup 以降 (指標依存) は monitor では計測不能なので count=None を返す。
+
+
+def _measurable_counts_for_system(
+    sysname: str,
+    grouped_df: Any,
+    dv_cache: dict[str, dict[str, float]],
+) -> dict[str, int]:
+    """grouped-daily から実測できる phase 名 -> 通過銘柄数 の dict を返す。
+
+    key は SYSTEM_PIPELINE_PHASES の phase ``name`` に一致させる:
+    ``Tgt`` (ユニバース) と ``FILpass`` (Phase2 事前フィルター通過 = price + DV)。
+    STUpass 以降は指標依存で monitor では計測できない。
+    """
+    import math
+
+    cfg = SYSTEM_GATES.get(sysname, {})
+
+    # sys7: SPY 固定。Tgt/FILpass = SPY があれば 1。
+    if cfg.get("spy_only"):
+        symbols = {str(s).upper() for s in grouped_df.index}
+        n = 1 if "SPY" in symbols else 0
+        return {"Tgt": n, "FILpass": n}
+
+    close = grouped_df["Close"].astype("float64")
+    low = grouped_df["Low"].astype("float64") if "Low" in grouped_df.columns else close
+    symbols = [str(s).upper() for s in grouped_df.index]
+
+    min_price = cfg.get("min_price")
+    min_col = cfg.get("min_col", "Close")
+    price_series = low if min_col == "Low" else close
+    dv_col = cfg.get("dv_col")
+    dv_min = cfg.get("dv_min")
+
+    universe = 0
+    filpass = 0
+    for i, sym in enumerate(symbols):
+        px = float(price_series.iloc[i])
+        if math.isnan(px):
+            continue
+        universe += 1
+        if min_price is not None and px < min_price:
+            continue
+        if dv_col is not None:
+            rec = dv_cache.get(sym) or {}
+            dv = float(rec.get(dv_col, float("nan")))
+            if math.isnan(dv) or dv <= float(dv_min):
+                continue
+        filpass += 1
+
+    return {"Tgt": universe, "FILpass": filpass}
+
+
+def build_pipeline_report(
+    grouped_df: Any,
+    dv_cache: dict[str, dict[str, float]],
+    target_date: str,
+    *,
+    signals_dir: Path | None = None,
+) -> dict[str, Any]:
+    """sys1-7 の phase 別絞込フロー JSON を組み立てる (新 schema: signal_pipeline/v1)。
+
+    各 system は SYSTEM_PIPELINE_PHASES の phase 定義を辿り、grouped-daily で
+    実測できる phase には count / ratio_of_prev / ratio_of_universe を、実測不能な
+    phase (setup 以降) には count=None を入れる。今日の signals JSON があれば
+    ``final`` phase を n_signals_output で補完する。
+
+    NOTE: ratio は「絞込透明性のための参考数値」であり評価軸ではない。
+    """
+    from common.system_constants import SYSTEM_PIPELINE_PHASES
+
+    empty = grouped_df is None or getattr(grouped_df, "empty", True)
+
+    # 今日の today_signals (あれば) から TRDlist / Entry phase を補完:
+    #   TRDlist ≈ n_candidates_input (ランキング抽出後の候補数)
+    #   Entry   ≈ n_signals_output   (allocation 後の最終エントリ数)
+    trdlist_counts: dict[str, int] = {}
+    entry_counts: dict[str, int] = {}
+    if signals_dir is not None:
+        sig_path = signals_dir / f"today_signals_{target_date.replace('-', '')}.json"
+        if sig_path.exists():
+            try:
+                sig = json.loads(sig_path.read_text(encoding="utf-8"))
+                for sysname, entry in (sig.get("systems") or {}).items():
+                    ci = entry.get("n_candidates_input")
+                    so = entry.get("n_signals_output")
+                    if isinstance(ci, (int, float)):
+                        trdlist_counts[sysname] = int(ci)
+                    if isinstance(so, (int, float)):
+                        entry_counts[sysname] = int(so)
+            except Exception as exc:  # pragma: no cover
+                logger.warning("today_signals 読込失敗 (%s): %s", sig_path, exc)
+
+    def _ratio(numer: int | None, denom: int | None) -> float | None:
+        if numer is None or not denom:
+            return None
+        return round(numer / denom, 6)
+
+    # phase name -> 当日 today_signals からの補完値 (monitor では未計測な phase 用)
+    def _signal_fill(sysname: str, name: str) -> int | None:
+        if name == "TRDlist":
+            return trdlist_counts.get(sysname)
+        if name == "Entry":
+            return entry_counts.get(sysname)
+        return None
+
+    systems_out: dict[str, Any] = {}
+    for sysname, phase_defs in SYSTEM_PIPELINE_PHASES.items():
+        measured = {} if empty else _measurable_counts_for_system(sysname, grouped_df, dv_cache)
+        universe_count = measured.get("Tgt", 0)
+
+        phases_out: list[dict[str, Any]] = []
+        prev_count: int | None = None
+        for pdef in phase_defs:
+            name = str(pdef["name"])
+            count: int | None = measured.get(name)
+            measured_flag = count is not None
+            if count is None:
+                count = _signal_fill(sysname, name)
+
+            phases_out.append(
+                {
+                    "name": name,
+                    "label": pdef.get("label", name),
+                    "condition": pdef.get("condition", ""),
+                    "count": count,
+                    # measured=True は grouped-daily monitor の実測のみ (補完値は False)
+                    "measured": measured_flag,
+                    "ratio_of_prev": _ratio(count, prev_count),
+                    "ratio_of_universe": _ratio(count, universe_count),
+                }
+            )
+            if count is not None:
+                prev_count = count
+
+        systems_out[sysname] = {
+            "system_id": sysname,
+            "phases": phases_out,
+            "final_signals": entry_counts.get(sysname),
+        }
+
+    return {
+        "date": target_date,
+        "provider": "polygon_grouped_daily",
+        "schema": "signal_pipeline/v1",
+        "systems": systems_out,
+        "notes": [
+            "phases (Tgt/FILpass/STUpass/TRDlist/Entry/Exit) は絞込透明性のための"
+            "参考数値 (evaluation ではない)。",
+            "monitor が実測するのは Tgt / FILpass のみ。STUpass/Exit は未計測 (null)、"
+            "TRDlist/Entry は当日 today_signals があれば補完。",
+            "ratio_of_prev = count / 直前計測 phase; ratio_of_universe = count / Tgt。",
+        ],
+    }
+
+
 def compute_delta(current: CoverageReport, previous_path: Path | None) -> None:
     """前日 JSON との diff を current.delta_vs_previous / consecutive_drops に埋める。
 
@@ -475,16 +635,25 @@ def main(argv: list[str] | None = None) -> int:
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     output_path = args.output_dir / f"polygon_daily_coverage_{target_date.replace('-', '')}.json"
+    # 新 schema (絞込フロー) の出力先。旧 coverage と並行して書き出す (Pack4 移行期)。
+    pipeline_path = args.output_dir / f"pipeline_{target_date.replace('-', '')}.json"
     previous_path = args.output_dir / f"polygon_daily_coverage_{previous_business_day(datetime.strptime(target_date, '%Y-%m-%d').date()).strftime('%Y%m%d')}.json"
 
-    logger.info("target_date=%s  output=%s  dry_run=%s", target_date, output_path, args.dry_run)
+    logger.info("target_date=%s  output=%s  pipeline=%s  dry_run=%s",
+                target_date, output_path, pipeline_path, args.dry_run)
 
     report = CoverageReport(date=target_date)
 
     if args.dry_run:
         report.notes.append("dry_run: skeleton only (fetch skipped)")
         output_path.write_text(report.to_json(), encoding="utf-8")
-        logger.info("[dry-run] wrote skeleton report -> %s", output_path)
+        # 新 schema も skeleton (grouped 空) で書き出し、下流の存在チェックを通す。
+        pipeline = build_pipeline_report(None, {}, target_date, signals_dir=args.output_dir)
+        pipeline["notes"].append("dry_run: skeleton only (counts unmeasured)")
+        pipeline_path.write_text(
+            json.dumps(pipeline, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        logger.info("[dry-run] wrote skeleton reports -> %s , %s", output_path, pipeline_path)
         return 0
 
     try:
@@ -499,6 +668,9 @@ def main(argv: list[str] | None = None) -> int:
         report.survival_by_system = {k: v.as_dict() for k, v in survivals.items()}
         report.rejected_top10 = _build_rejected_top10(grouped, dv_cache, survivals)
         compute_delta(report, previous_path)
+        pipeline = build_pipeline_report(
+            grouped, dv_cache, target_date, signals_dir=args.output_dir
+        )
     except ValueError as exc:
         # POLYGON_API_KEY / MASSIVE_API_KEY 未設定 (共に common.polygon_data で判定)
         logger.error("fail-fast: %s", exc)
@@ -508,7 +680,10 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     output_path.write_text(report.to_json(), encoding="utf-8")
-    logger.info("wrote %s (n_total=%d)", output_path, report.n_candidates_total)
+    pipeline_path.write_text(
+        json.dumps(pipeline, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    logger.info("wrote %s and %s (n_total=%d)", output_path, pipeline_path, report.n_candidates_total)
     return notify_warnings(report)
 
 

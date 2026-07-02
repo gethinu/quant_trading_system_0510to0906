@@ -187,6 +187,76 @@ SYSTEM_CONFIGS = {
     },
 }
 
+# === Signal pipeline phases (絞込フロー / narrowing flow) ===
+# 各 system の signal 生成が Tgt → FILpass → STUpass → TRDlist → Entry → Exit へ
+# 絞り込まれる 6 段階を宣言的に列挙する「参考メタデータ」。
+#
+# phase 名は既存 UI メトリクス行 (Streamlit `apps/app_today_signals.py`) と揃えた
+# ユーザ慣用の abbrev を尊重する。定義は docs/ui_metrics_mapping.md 参照:
+#   - Tgt     : ユニバース対象銘柄数 (全 system 共通)
+#   - FILpass : Phase2 事前フィルター通過数 (common/today_signals.py::_compute_filter_pass)
+#   - STUpass : setup 条件成立数 (common/today_signals.py::_compute_setup_pass)
+#   - TRDlist : ランキング抽出後の候補数 (strategy.generate_candidates 出力)
+#   - Entry   : allocation 後の最終エントリ数 (core/final_allocation.AllocationSummary)
+#   - Exit    : 本日手仕舞い数 (analyze_exit_candidates)
+#
+# 重要:
+#   - これは **評価軸ではなく参考数値** のためのラベル定義。通過率が低いこと自体は
+#     要件でも異常でもない (厳しい gate ほど TRDlist/Entry は少数になる設計)。
+#   - 各 phase の ``name`` は monitor / dashboard の JSON key として使う安定 ID。
+#   - ``measurable_from_grouped_daily=True`` の phase (Tgt / FILpass) のみ
+#     daily_polygon_monitor.py が grouped-daily (全 US ユニバース) から実測できる。
+#     STUpass 以降は指標/allocation 依存で full today-pipeline 実行が必要なため、
+#     monitor では count=None (未計測)。TRDlist/Entry は当日 today_signals があれば補完。
+#   - pass 条件は core/system{1..7}.py の実装に対応 (2026-07 時点)。DV 閾値は
+#     daily_polygon_monitor.SYSTEM_GATES (= 実際に集計に使う値) に揃える。
+
+# system 別に異なるのは FILpass / STUpass の条件と TRDlist ランキング基準のみ。
+_PIPELINE_FILPASS_COND: dict[str, str] = {
+    "sys1": "Close >= 5 かつ DollarVolume20 > 50M",
+    "sys2": "Close >= 5 かつ DollarVolume20 > 25M かつ ATR_Ratio > 0.03",
+    "sys3": "Close >= 5 かつ DollarVolume20 > 25M かつ ATR_Ratio >= 0.05",
+    "sys4": "DollarVolume50 > 100M かつ HV50 in [10,40]",
+    "sys5": "Close >= 5 かつ ATR_Pct > 0.025",
+    "sys6": "Low >= 5 かつ DollarVolume50 > 10M",
+    "sys7": "SPY 固定 (共通フィルター無し)",
+}
+_PIPELINE_STUPASS_COND: dict[str, str] = {
+    "sys1": "SMA25 > SMA50 かつ ROC200 > 0",
+    "sys2": "RSI3 > 90 かつ twodayup",
+    "sys3": "drop3d >= 0.125",
+    "sys4": "Close > SMA200",
+    "sys5": "ADX7 > 55 かつ Close > SMA100+ATR10 かつ RSI3 < 50",
+    "sys6": "return_6d > 0.20 かつ UpTwoDays",
+    "sys7": "Low <= Min_50 (52週安値)",
+}
+_PIPELINE_TRDLIST_COND: dict[str, str] = {
+    "sys1": "ROC200 降順 上位候補",
+    "sys2": "ADX7 降順 上位候補",
+    "sys3": "drop3d 降順 上位候補",
+    "sys4": "RSI4 昇順 上位候補 (最も oversold)",
+    "sys5": "ADX7 降順 上位候補",
+    "sys6": "return_6d 降順 上位候補",
+    "sys7": "ATR50 (position sizing) 上位候補",
+}
+
+
+def _build_pipeline_phases(sysname: str) -> list[dict[str, object]]:
+    return [
+        {"name": "Tgt", "label": "Tgt", "condition": "ユニバース対象銘柄数", "measurable_from_grouped_daily": True},
+        {"name": "FILpass", "label": "FILpass", "condition": _PIPELINE_FILPASS_COND[sysname], "measurable_from_grouped_daily": True},
+        {"name": "STUpass", "label": "STUpass", "condition": _PIPELINE_STUPASS_COND[sysname], "measurable_from_grouped_daily": False},
+        {"name": "TRDlist", "label": "TRDlist", "condition": _PIPELINE_TRDLIST_COND[sysname], "measurable_from_grouped_daily": False},
+        {"name": "Entry", "label": "Entry", "condition": "allocation 後エントリ発火", "measurable_from_grouped_daily": False},
+        {"name": "Exit", "label": "Exit", "condition": "本日手仕舞い発火", "measurable_from_grouped_daily": False},
+    ]
+
+
+SYSTEM_PIPELINE_PHASES: dict[str, list[dict[str, object]]] = {
+    sysname: _build_pipeline_phases(sysname)
+    for sysname in ("sys1", "sys2", "sys3", "sys4", "sys5", "sys6", "sys7")
+}
+
 
 def get_system_config(system_name: str) -> dict:
     """指定されたシステムの設定を取得する。
@@ -228,4 +298,6 @@ __all__ = [
     # 設定管理
     "SYSTEM_CONFIGS",
     "get_system_config",
+    # signal pipeline 絞込フロー (参考メタ)
+    "SYSTEM_PIPELINE_PHASES",
 ]

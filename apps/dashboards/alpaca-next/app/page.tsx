@@ -1,10 +1,11 @@
-import { loadCoverage } from '@/lib/loadCoverage';
+import { loadPipeline } from '@/lib/loadPipeline';
 import { loadSignals } from '@/lib/loadSignals';
 import { loadNarrative } from '@/lib/loadNarrative';
 import { NarrativeCard } from '@/components/NarrativeCard';
 import type {
-  CoverageDay,
-  SystemStat,
+  PipelinePayload,
+  SystemPipeline,
+  SystemPipelinePhase,
   SignalsPayload,
   Signal,
   SystemSignals,
@@ -15,65 +16,6 @@ export const dynamic = 'force-static';
 
 const SYSTEMS = ['sys1', 'sys2', 'sys3', 'sys4', 'sys5', 'sys6', 'sys7'];
 
-// gate 生存率がこれ未満なら WARN 扱い (common/publishers/base.py と揃える)
-const WARN_SURVIVAL_THRESHOLD = 0.05;
-
-/**
- * card sort: WARN (低 survival) を先頭へ、その後 PICKS 多い順。
- * mobile 単列でも重要な system が上に来るようにする。
- */
-function sortSystemsForDisplay(
-  systems: Record<string, SystemSignals>,
-): string[] {
-  return SYSTEMS.filter((s) => systems[s]).sort((a, b) => {
-    const A = systems[a];
-    const B = systems[b];
-    const aWarn = A.gate_survival_ratio < WARN_SURVIVAL_THRESHOLD ? 1 : 0;
-    const bWarn = B.gate_survival_ratio < WARN_SURVIVAL_THRESHOLD ? 1 : 0;
-    if (aWarn !== bWarn) return bWarn - aWarn; // WARN 優先
-    if (B.n_signals_output !== A.n_signals_output) {
-      return B.n_signals_output - A.n_signals_output; // PICKS 多い順
-    }
-    return SYSTEMS.indexOf(a) - SYSTEMS.indexOf(b); // 安定化 (sys 番号)
-  });
-}
-
-function statusClass(s: string): string {
-  if (s === 'warn') return 'text-warn';
-  if (s === 'fail') return 'text-fail';
-  return 'text-ok';
-}
-
-function Sparkline({ values }: { values: number[] }) {
-  if (values.length === 0) return null;
-  const W = 120;
-  const H = 24;
-  const maxV = Math.max(...values, 0.001);
-  const points = values
-    .map((v, i) => {
-      const x = (i / Math.max(values.length - 1, 1)) * W;
-      const y = H - (v / maxV) * H;
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(' ');
-  return (
-    <svg
-      viewBox={`0 0 ${W} ${H}`}
-      width={W}
-      height={H}
-      preserveAspectRatio="none"
-      className="inline-block align-middle"
-    >
-      <polyline
-        fill="none"
-        stroke="#60a5fa"
-        strokeWidth="1.5"
-        points={points}
-      />
-    </svg>
-  );
-}
-
 function fmtPrice(v: number | null): string {
   return v == null ? '—' : `$${v.toFixed(2)}`;
 }
@@ -82,11 +24,134 @@ function fmtWeight(v: number | null): string {
   return v == null ? '—' : `${(v * 100).toFixed(1)}%`;
 }
 
-function survivalClass(ratio: number): string {
-  if (ratio < 0.05) return 'text-fail';
-  if (ratio < 0.1) return 'text-warn';
-  return 'text-ok';
+function fmtRatio(v: number | null): string {
+  if (v == null) return '—';
+  if (v >= 0.1) return `${(v * 100).toFixed(1)}%`;
+  if (v >= 0.001) return `${(v * 100).toFixed(2)}%`;
+  return `${(v * 100).toFixed(3)}%`;
 }
+
+function fmtCount(v: number | null): string {
+  return v == null ? '—' : v.toLocaleString();
+}
+
+// ---------------- Signal Pipeline (絞込フロー) ----------------
+
+function universeOf(sys: SystemPipeline | undefined): number | null {
+  if (!sys) return null;
+  return sys.phases.find((p) => p.name === 'Tgt')?.count ?? null;
+}
+
+function finalOf(sys: SystemPipeline): number | null {
+  if (sys.final_signals != null) return sys.final_signals;
+  return sys.phases.find((p) => p.name === 'Entry')?.count ?? null;
+}
+
+/** 各 phase を 1 行で。bar は「直前 phase に対する残存率」(絞込の勢い) を表す。 */
+function PhaseRow({ phase }: { phase: SystemPipelinePhase }) {
+  const measured = phase.count != null;
+  // bar 幅: ratio_of_prev があればそれ、無ければ universe phase は満幅。
+  const barPct =
+    phase.ratio_of_prev != null
+      ? Math.max(2, Math.min(100, phase.ratio_of_prev * 100))
+      : phase.name === 'Tgt'
+      ? 100
+      : 0;
+  return (
+    <div className="py-1.5 border-t border-white/5">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-[13px] font-medium truncate">{phase.label}</span>
+        <span
+          className={`text-[13px] tabular-nums ${
+            measured ? '' : 'text-muted italic'
+          }`}
+        >
+          {measured ? fmtCount(phase.count) : 'not measured'}
+        </span>
+      </div>
+      {/* narrowing bar (ratio of previous phase) */}
+      <div className="mt-1 h-1.5 w-full rounded bg-white/5 overflow-hidden">
+        <div
+          className={`h-full rounded ${
+            measured ? 'bg-sky-400/70' : 'bg-white/10'
+          }`}
+          style={{ width: `${barPct}%` }}
+        />
+      </div>
+      <div className="mt-0.5 flex justify-between text-[10px] text-muted tabular-nums">
+        <span className="truncate mr-2">{phase.condition ?? ''}</span>
+        <span className="shrink-0">
+          prev {fmtRatio(phase.ratio_of_prev)} · univ{' '}
+          {fmtRatio(phase.ratio_of_universe)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function SystemPipelineAccordion({ sys }: { sys: SystemPipeline }) {
+  const universe = universeOf(sys);
+  const final = finalOf(sys);
+  return (
+    <details className="rounded-lg bg-white/[0.03] border border-white/5">
+      <summary className="cursor-pointer select-none list-none px-3 py-2 flex items-center justify-between gap-2">
+        <span className="flex items-center gap-2">
+          <span className="font-medium">{sys.system_id}</span>
+          <span className="text-[10px] text-muted tabular-nums">
+            {fmtCount(universe)} → {fmtCount(final)}
+          </span>
+        </span>
+        <span className="inline-block px-2 py-0.5 rounded-full bg-white/10 text-[10px] tabular-nums">
+          {final == null ? '—' : final} final
+        </span>
+      </summary>
+      <div className="px-3 pb-2">
+        {sys.phases.map((p) => (
+          <PhaseRow key={p.name} phase={p} />
+        ))}
+      </div>
+    </details>
+  );
+}
+
+function PipelineSection({ payload }: { payload: PipelinePayload | null }) {
+  return (
+    <section className="bg-card rounded-xl p-4 shadow-lg">
+      <div className="flex items-baseline justify-between mb-1">
+        <h2 className="text-xs uppercase tracking-wider text-muted">
+          Signal Pipeline
+        </h2>
+        {payload?.date ? (
+          <span className="text-[10px] text-muted">{payload.date}</span>
+        ) : null}
+      </div>
+      <p className="text-[10px] text-muted mb-3 leading-snug">
+        Tgt → FILpass → STUpass → TRDlist → Entry → Exit の 6 phase 絞込フロー。数値は
+        <span className="text-cardfg"> 絞込透明性のための参考値</span>で、
+        通過率は評価軸ではありません (厳しい gate ほど TRDlist/Entry は少数になる設計)。
+      </p>
+      {!payload ? (
+        <div className="text-sm text-muted">
+          No pipeline data yet. Run{' '}
+          <code className="text-cardfg">scripts/daily_polygon_monitor.py</code>.
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {SYSTEMS.filter((s) => payload.systems[s]).map((s) => (
+            <SystemPipelineAccordion key={s} sys={payload.systems[s]} />
+          ))}
+        </div>
+      )}
+      {payload?.from_legacy ? (
+        <p className="mt-2 text-[10px] text-warn">
+          ※ 旧 coverage schema から fallback 表示中 (Tgt → FILpass のみ)。
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+// ---------------- Today's Signals (unchanged) ----------------
 
 function SignalRow({ s }: { s: Signal }) {
   const buy = s.side === 'BUY';
@@ -112,14 +177,7 @@ function SignalRow({ s }: { s: Signal }) {
   );
 }
 
-function SystemAccordion({
-  sys,
-  data,
-}: {
-  sys: string;
-  data: SystemSignals;
-}) {
-  const ratioPct = (data.gate_survival_ratio * 100).toFixed(1);
+function SystemAccordion({ sys, data }: { sys: string; data: SystemSignals }) {
   const hasSignals = data.signals.length > 0;
   return (
     <details
@@ -133,13 +191,8 @@ function SystemAccordion({
             {data.n_signals_output} signal{data.n_signals_output === 1 ? '' : 's'}
           </span>
         </span>
-        <span
-          className={`text-[11px] tabular-nums ${survivalClass(
-            data.gate_survival_ratio,
-          )}`}
-        >
-          survival {ratioPct}%
-          <span className="text-muted"> ({data.n_signals_output}/{data.n_candidates_input})</span>
+        <span className="text-[11px] tabular-nums text-muted">
+          {data.n_signals_output}/{data.n_candidates_input} candidates
         </span>
       </summary>
       {hasSignals ? (
@@ -185,7 +238,7 @@ function SignalsSection({ payload }: { payload: SignalsPayload | null }) {
   }
 
   const { portfolio } = payload;
-  const orderedSystems = sortSystemsForDisplay(payload.systems);
+  const orderedSystems = SYSTEMS.filter((s) => payload.systems[s]);
 
   return (
     <section className="bg-card rounded-xl p-4 shadow-lg">
@@ -240,91 +293,38 @@ function SignalsSection({ payload }: { payload: SignalsPayload | null }) {
 }
 
 export default function Home() {
-  const payload = loadCoverage();
-  const history = payload.history;
-  const latest: CoverageDay | undefined = history[history.length - 1];
+  const pipeline: PipelinePayload | null = loadPipeline();
   const signals: SignalsPayload | null = loadSignals();
   const narrative: Narrative | null = loadNarrative();
+
+  const universe = pipeline ? universeOf(pipeline.systems['sys1']) : null;
 
   return (
     <main className="max-w-5xl mx-auto p-4 sm:p-6">
       <header className="mb-4">
         <h1 className="text-sm tracking-wider text-muted uppercase">
-          QUANT_TRADING · POLYGON COVERAGE
+          QUANT_TRADING · SIGNAL PIPELINE
         </h1>
         <div className="text-3xl font-semibold mt-1">
-          {latest
-            ? `${(latest.n_candidates_total || 0).toLocaleString()} tickers`
-            : 'no data'}
+          {universe != null ? `${universe.toLocaleString()} tickers` : 'no data'}
         </div>
         <div className="text-xs text-muted">
-          {latest ? `latest: ${latest.date}` : ''}
+          {pipeline?.date ? `latest: ${pipeline.date}` : ''}
         </div>
       </header>
 
       <NarrativeCard narrative={narrative} />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-start">
-      <section className="bg-card rounded-xl p-4 shadow-lg">
-        <h2 className="text-xs uppercase tracking-wider text-muted mb-2">
-          Gate survival rate (last day)
-        </h2>
-        <table className="w-full text-sm tabular-nums">
-          <thead>
-            <tr className="text-muted text-xs">
-              <th className="text-left font-normal py-1">system</th>
-              <th className="text-right font-normal py-1">ratio</th>
-              <th className="text-right font-normal py-1">status</th>
-              <th className="text-right font-normal py-1">7d trend</th>
-            </tr>
-          </thead>
-          <tbody>
-            {SYSTEMS.map((sys) => {
-              const cell: SystemStat | undefined =
-                latest?.survival_by_system?.[sys];
-              const trend = history.map(
-                (d) => d.survival_by_system?.[sys]?.ratio ?? 0,
-              );
-              return (
-                <tr key={sys} className="border-t border-white/5">
-                  <td className="py-1.5">{sys}</td>
-                  <td className={`py-1.5 text-right ${statusClass(cell?.status || 'ok')}`}>
-                    {cell ? (cell.ratio * 100).toFixed(1) + '%' : '—'}
-                  </td>
-                  <td className="py-1.5 text-right">
-                    {cell ? (
-                      <span
-                        className={`inline-block px-2 py-0.5 rounded text-[10px] uppercase ${
-                          cell.status === 'warn'
-                            ? 'bg-warn/20 text-warn'
-                            : cell.status === 'fail'
-                            ? 'bg-fail/20 text-fail'
-                            : 'bg-ok/20 text-ok'
-                        }`}
-                      >
-                        {cell.status}
-                      </span>
-                    ) : (
-                      <span className="text-muted">—</span>
-                    )}
-                  </td>
-                  <td className="py-1.5 text-right">
-                    <Sparkline values={trend} />
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </section>
-
-      <SignalsSection payload={signals} />
+        <PipelineSection payload={pipeline} />
+        <SignalsSection payload={signals} />
       </div>
 
       <footer className="mt-4 text-[10px] text-muted">
-        coverage: results_csv/polygon_daily_coverage_YYYYMMDD.json (last 7 days).
-        signals: results_csv/today_signals_YYYYMMDD.json (latest). Build-time
-        static export via Next.js.
+        pipeline: results_csv/pipeline_YYYYMMDD.json (新 schema, 旧
+        polygon_daily_coverage_*.json に fallback). signals:
+        results_csv/today_signals_YYYYMMDD.json (latest). Build-time static
+        export via Next.js.
       </footer>
     </main>
   );

@@ -50,9 +50,12 @@ if (-not (Test-Path $DataDir)) {
     New-Item -ItemType Directory -Path $DataDir -Force | Out-Null
 }
 
-# 当日生成される 3 種の JSON を data/ に日付付きのままコピー。
+# 当日生成される JSON を data/ に日付付きのままコピー。
+# pipeline_*.json = 新 schema (signal_pipeline/v1, 絞込フロー)。
+# polygon_daily_coverage_*.json = 旧 schema (移行期は両方 push し dashboard で fallback)。
 $patterns = @(
     "today_signals_$DateCompact.json",
+    "pipeline_$DateCompact.json",
     "polygon_daily_coverage_$DateCompact.json",
     "narrative_$DateCompact.json"
 )
@@ -76,7 +79,7 @@ if ($copied -eq 0) {
 }
 
 # 世代整理: 各 prefix について日付付きファイルを最新 KeepDays 件だけ残す。
-$prefixes = @("today_signals_", "polygon_daily_coverage_", "narrative_")
+$prefixes = @("today_signals_", "pipeline_", "polygon_daily_coverage_", "narrative_")
 foreach ($prefix in $prefixes) {
     $files = Get-ChildItem -Path $DataDir -Filter "$prefix*.json" -File |
         Sort-Object Name -Descending
