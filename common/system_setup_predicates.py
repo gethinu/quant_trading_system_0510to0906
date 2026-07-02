@@ -432,8 +432,15 @@ def validate_predicate_equivalence(
         return
 
     # ランダムサンプル (行数多い場合)
+    # audit-remediation 2026-07-02 (P2 determinism): グローバル random 状態を
+    # 汚さず、かつ検証結果を再現可能にするため seed 固定のローカル RNG を使用する。
+    # (環境変数 VALIDATE_SETUP_PREDICATE_SEED で上書き可)
     if len(rows) > sample_max:
-        random.shuffle(rows)
+        try:
+            _seed = int(os.environ.get("VALIDATE_SETUP_PREDICATE_SEED", "20260702"))
+        except (TypeError, ValueError):
+            _seed = 20260702
+        random.Random(_seed).shuffle(rows)
         rows = rows[:sample_max]
 
     mismatches: list[str] = []
