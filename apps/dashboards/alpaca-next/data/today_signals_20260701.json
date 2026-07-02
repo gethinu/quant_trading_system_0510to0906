@@ -1,9 +1,52 @@
 {
   "version": "1.0",
   "date": "2026-07-01",
-  "generated_at": "2026-07-02T13:58:58+09:00",
+  "generated_at": "2026-07-02T15:28:34+09:00",
   "provider": "polygon",
-  "systems": {},
+  "systems": {
+    "sys1": {
+      "signals": [],
+      "n_candidates_input": 0,
+      "n_signals_output": 0,
+      "gate_survival_ratio": 0.0
+    },
+    "sys2": {
+      "signals": [],
+      "n_candidates_input": 0,
+      "n_signals_output": 0,
+      "gate_survival_ratio": 0.0
+    },
+    "sys3": {
+      "signals": [],
+      "n_candidates_input": 0,
+      "n_signals_output": 0,
+      "gate_survival_ratio": 0.0
+    },
+    "sys4": {
+      "signals": [],
+      "n_candidates_input": 0,
+      "n_signals_output": 0,
+      "gate_survival_ratio": 0.0
+    },
+    "sys5": {
+      "signals": [],
+      "n_candidates_input": 0,
+      "n_signals_output": 0,
+      "gate_survival_ratio": 0.0
+    },
+    "sys6": {
+      "signals": [],
+      "n_candidates_input": 0,
+      "n_signals_output": 0,
+      "gate_survival_ratio": 0.0
+    },
+    "sys7": {
+      "signals": [],
+      "n_candidates_input": 0,
+      "n_signals_output": 0,
+      "gate_survival_ratio": 0.0
+    }
+  },
   "portfolio": {
     "total_signals": 0,
     "total_notional_usd": 0.0,
@@ -11,7 +54,8 @@
   },
   "meta": {
     "cli_version": "0.1.0",
-    "run_id": "20260702_135752_d1249c",
-    "elapsed_seconds": 65.9
+    "run_id": "20260702_151959_1fd557",
+    "elapsed_seconds": 515.2,
+    "publish_status": "ok"
   }
 }
