@@ -12,6 +12,29 @@ export const dynamic = 'force-static';
 
 const SYSTEMS = ['sys1', 'sys2', 'sys3', 'sys4', 'sys5', 'sys6', 'sys7'];
 
+// gate 生存率がこれ未満なら WARN 扱い (common/publishers/base.py と揃える)
+const WARN_SURVIVAL_THRESHOLD = 0.05;
+
+/**
+ * card sort: WARN (低 survival) を先頭へ、その後 PICKS 多い順。
+ * mobile 単列でも重要な system が上に来るようにする。
+ */
+function sortSystemsForDisplay(
+  systems: Record<string, SystemSignals>,
+): string[] {
+  return SYSTEMS.filter((s) => systems[s]).sort((a, b) => {
+    const A = systems[a];
+    const B = systems[b];
+    const aWarn = A.gate_survival_ratio < WARN_SURVIVAL_THRESHOLD ? 1 : 0;
+    const bWarn = B.gate_survival_ratio < WARN_SURVIVAL_THRESHOLD ? 1 : 0;
+    if (aWarn !== bWarn) return bWarn - aWarn; // WARN 優先
+    if (B.n_signals_output !== A.n_signals_output) {
+      return B.n_signals_output - A.n_signals_output; // PICKS 多い順
+    }
+    return SYSTEMS.indexOf(a) - SYSTEMS.indexOf(b); // 安定化 (sys 番号)
+  });
+}
+
 function statusClass(s: string): string {
   if (s === 'warn') return 'text-warn';
   if (s === 'fail') return 'text-fail';
@@ -146,7 +169,7 @@ function SystemAccordion({
 function SignalsSection({ payload }: { payload: SignalsPayload | null }) {
   if (!payload) {
     return (
-      <section className="bg-card rounded-xl p-4 shadow-lg mt-4">
+      <section className="bg-card rounded-xl p-4 shadow-lg">
         <h2 className="text-xs uppercase tracking-wider text-muted mb-2">
           Today&apos;s Signals
         </h2>
@@ -159,10 +182,10 @@ function SignalsSection({ payload }: { payload: SignalsPayload | null }) {
   }
 
   const { portfolio } = payload;
-  const orderedSystems = SYSTEMS.filter((s) => payload.systems[s]);
+  const orderedSystems = sortSystemsForDisplay(payload.systems);
 
   return (
-    <section className="bg-card rounded-xl p-4 shadow-lg mt-4">
+    <section className="bg-card rounded-xl p-4 shadow-lg">
       <div className="flex items-baseline justify-between mb-2">
         <h2 className="text-xs uppercase tracking-wider text-muted">
           Today&apos;s Signals
@@ -220,7 +243,7 @@ export default function Home() {
   const signals: SignalsPayload | null = loadSignals();
 
   return (
-    <main className="max-w-md mx-auto p-4 sm:p-6">
+    <main className="max-w-5xl mx-auto p-4 sm:p-6">
       <header className="mb-4">
         <h1 className="text-sm tracking-wider text-muted uppercase">
           QUANT_TRADING · POLYGON COVERAGE
@@ -235,6 +258,7 @@ export default function Home() {
         </div>
       </header>
 
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-start">
       <section className="bg-card rounded-xl p-4 shadow-lg">
         <h2 className="text-xs uppercase tracking-wider text-muted mb-2">
           Gate survival rate (last day)
@@ -289,6 +313,7 @@ export default function Home() {
       </section>
 
       <SignalsSection payload={signals} />
+      </div>
 
       <footer className="mt-4 text-[10px] text-muted">
         coverage: results_csv/polygon_daily_coverage_YYYYMMDD.json (last 7 days).
