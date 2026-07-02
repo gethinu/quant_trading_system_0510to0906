@@ -273,17 +273,17 @@ SYSTEM_TRADE_RULES = {
         max_holding_days=3,  # 3日後には成り行きで手仕舞う
         allow_re_entry=True,
     ),
-    "system7": SystemTradeRules(
-        system_name="system7",
-        side="short",
-        entry_type=OrderType.MARKET,  # SPY固定、詳細は要確認
-        entry_reference="open",
-        stop_atr_period=20,
-        stop_atr_multiplier=5.0,
-        use_trailing_stop=False,
-        profit_target_type="none",
-        allow_re_entry=True,
-    ),
+    # NOTE (audit-remediation 2026-07-02, finding P0/Part4):
+    #   System7 (SPY カタストロフィーヘッジ) は SYSTEM_TRADE_RULES を **使用しない**。
+    #   実運用の stop/exit は strategy 側 (strategies/system7_strategy.py) の
+    #   カスタム run_backtest で完結する: stop = entry + 3×ATR50
+    #   (STOP_ATR_MULTIPLE_DEFAULT, strategies/constants.py:19), exit = 70日高値更新→翌寄り。
+    #   以前ここに存在した stub (stop_atr_period=20, stop_atr_multiplier=5.0,
+    #   コメント「詳細は要確認」) は仕様 (50日3ATR) とも実路とも不一致な未使用
+    #   プレースホルダで、将来 System7 に配線された瞬間に stop が 20日5ATR に化ける
+    #   時限バグだったため削除した。SYSTEM_TRADE_RULES.get("system7") は None を返し、
+    #   create_trade_entry / run_auto_rule 系は graceful に skip する (誤った 20日5ATR
+    #   での enhancement を行うより安全)。
 }
 
 
