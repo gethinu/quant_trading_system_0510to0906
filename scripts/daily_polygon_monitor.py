@@ -338,16 +338,18 @@ def _measurable_counts_for_system(
     """grouped-daily から実測できる phase 名 -> 通過銘柄数 の dict を返す。
 
     key は SYSTEM_PIPELINE_PHASES の phase ``name`` に一致させる:
-    ``universe`` / ``price_filter`` / ``dv20_filter`` / ``dv50_filter``。
+    ``Tgt`` (ユニバース) と ``FILpass`` (Phase2 事前フィルター通過 = price + DV)。
+    STUpass 以降は指標依存で monitor では計測できない。
     """
     import math
 
     cfg = SYSTEM_GATES.get(sysname, {})
 
-    # sys7: SPY 固定。universe = SPY があれば 1。
+    # sys7: SPY 固定。Tgt/FILpass = SPY があれば 1。
     if cfg.get("spy_only"):
         symbols = {str(s).upper() for s in grouped_df.index}
-        return {"universe": 1 if "SPY" in symbols else 0}
+        n = 1 if "SPY" in symbols else 0
+        return {"Tgt": n, "FILpass": n}
 
     close = grouped_df["Close"].astype("float64")
     low = grouped_df["Low"].astype("float64") if "Low" in grouped_df.columns else close
@@ -359,12 +361,8 @@ def _measurable_counts_for_system(
     dv_col = cfg.get("dv_col")
     dv_min = cfg.get("dv_min")
 
-    # phase name は DV 列に応じて dv20/dv50 を出し分ける (constant と揃える)
-    dv_phase = "dv50_filter" if dv_col == "DollarVolume50" else "dv20_filter"
-
     universe = 0
-    after_price = 0
-    after_dv = 0
+    filpass = 0
     for i, sym in enumerate(symbols):
         px = float(price_series.iloc[i])
         if math.isnan(px):
@@ -372,20 +370,14 @@ def _measurable_counts_for_system(
         universe += 1
         if min_price is not None and px < min_price:
             continue
-        after_price += 1
         if dv_col is not None:
             rec = dv_cache.get(sym) or {}
             dv = float(rec.get(dv_col, float("nan")))
             if math.isnan(dv) or dv <= float(dv_min):
                 continue
-        after_dv += 1
+        filpass += 1
 
-    counts: dict[str, int] = {"universe": universe}
-    if min_price is not None:
-        counts["price_filter"] = after_price
-    if dv_col is not None:
-        counts[dv_phase] = after_dv
-    return counts
+    return {"Tgt": universe, "FILpass": filpass}
 
 
 def build_pipeline_report(
@@ -408,17 +400,23 @@ def build_pipeline_report(
 
     empty = grouped_df is None or getattr(grouped_df, "empty", True)
 
-    # 今日の final signals (あれば) を読み込み final phase を補完
-    final_counts: dict[str, int] = {}
+    # 今日の today_signals (あれば) から TRDlist / Entry phase を補完:
+    #   TRDlist ≈ n_candidates_input (ランキング抽出後の候補数)
+    #   Entry   ≈ n_signals_output   (allocation 後の最終エントリ数)
+    trdlist_counts: dict[str, int] = {}
+    entry_counts: dict[str, int] = {}
     if signals_dir is not None:
         sig_path = signals_dir / f"today_signals_{target_date.replace('-', '')}.json"
         if sig_path.exists():
             try:
                 sig = json.loads(sig_path.read_text(encoding="utf-8"))
                 for sysname, entry in (sig.get("systems") or {}).items():
-                    n = entry.get("n_signals_output")
-                    if isinstance(n, (int, float)):
-                        final_counts[sysname] = int(n)
+                    ci = entry.get("n_candidates_input")
+                    so = entry.get("n_signals_output")
+                    if isinstance(ci, (int, float)):
+                        trdlist_counts[sysname] = int(ci)
+                    if isinstance(so, (int, float)):
+                        entry_counts[sysname] = int(so)
             except Exception as exc:  # pragma: no cover
                 logger.warning("today_signals 読込失敗 (%s): %s", sig_path, exc)
 
@@ -427,18 +425,27 @@ def build_pipeline_report(
             return None
         return round(numer / denom, 6)
 
+    # phase name -> 当日 today_signals からの補完値 (monitor では未計測な phase 用)
+    def _signal_fill(sysname: str, name: str) -> int | None:
+        if name == "TRDlist":
+            return trdlist_counts.get(sysname)
+        if name == "Entry":
+            return entry_counts.get(sysname)
+        return None
+
     systems_out: dict[str, Any] = {}
     for sysname, phase_defs in SYSTEM_PIPELINE_PHASES.items():
         measured = {} if empty else _measurable_counts_for_system(sysname, grouped_df, dv_cache)
-        universe_count = measured.get("universe", 0)
+        universe_count = measured.get("Tgt", 0)
 
         phases_out: list[dict[str, Any]] = []
         prev_count: int | None = None
         for pdef in phase_defs:
             name = str(pdef["name"])
             count: int | None = measured.get(name)
-            if count is None and name == "final" and sysname in final_counts:
-                count = final_counts[sysname]
+            measured_flag = count is not None
+            if count is None:
+                count = _signal_fill(sysname, name)
 
             phases_out.append(
                 {
@@ -446,7 +453,8 @@ def build_pipeline_report(
                     "label": pdef.get("label", name),
                     "condition": pdef.get("condition", ""),
                     "count": count,
-                    "measured": count is not None,
+                    # measured=True は grouped-daily monitor の実測のみ (補完値は False)
+                    "measured": measured_flag,
                     "ratio_of_prev": _ratio(count, prev_count),
                     "ratio_of_universe": _ratio(count, universe_count),
                 }
@@ -457,7 +465,7 @@ def build_pipeline_report(
         systems_out[sysname] = {
             "system_id": sysname,
             "phases": phases_out,
-            "final_signals": final_counts.get(sysname),
+            "final_signals": entry_counts.get(sysname),
         }
 
     return {
@@ -466,10 +474,11 @@ def build_pipeline_report(
         "schema": "signal_pipeline/v1",
         "systems": systems_out,
         "notes": [
-            "phases は絞込透明性のための参考数値 (evaluation ではない)。",
-            "count=null の phase (setup/ranking 等) は full today-pipeline 実行が"
-            "必要で grouped-daily monitor では未計測。",
-            "ratio_of_prev = count / 直前計測 phase; ratio_of_universe = count / universe。",
+            "phases (Tgt/FILpass/STUpass/TRDlist/Entry/Exit) は絞込透明性のための"
+            "参考数値 (evaluation ではない)。",
+            "monitor が実測するのは Tgt / FILpass のみ。STUpass/Exit は未計測 (null)、"
+            "TRDlist/Entry は当日 today_signals があれば補完。",
+            "ratio_of_prev = count / 直前計測 phase; ratio_of_universe = count / Tgt。",
         ],
     }
 

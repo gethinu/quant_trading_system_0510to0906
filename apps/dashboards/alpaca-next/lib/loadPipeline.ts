@@ -44,16 +44,17 @@ function legacyToPipeline(day: CoverageDay): PipelinePayload {
     const gateCount = s.count ?? null;
     const phases: SystemPipelinePhase[] = [
       {
-        name: 'universe',
-        label: 'Universe',
+        name: 'Tgt',
+        label: 'Tgt',
+        condition: 'ユニバース対象銘柄数',
         count: universe,
         measured: true,
         ratio_of_prev: null,
         ratio_of_universe: universe ? 1 : null,
       },
       {
-        name: 'gate',
-        label: 'Coverage gate',
+        name: 'FILpass',
+        label: 'FILpass',
         condition: 'price + DollarVolume (legacy coverage gate)',
         count: gateCount,
         measured: gateCount != null,
@@ -71,7 +72,7 @@ function legacyToPipeline(day: CoverageDay): PipelinePayload {
     schema: 'legacy_coverage',
     systems,
     notes: [
-      '旧 coverage schema からの fallback 表示 (universe → gate のみ復元可)。',
+      '旧 coverage schema からの fallback 表示 (Tgt → FILpass のみ復元可)。',
       'phases は絞込透明性のための参考数値 (evaluation ではない)。',
     ],
     from_legacy: true,

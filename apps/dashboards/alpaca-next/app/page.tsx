@@ -39,12 +39,12 @@ function fmtCount(v: number | null): string {
 
 function universeOf(sys: SystemPipeline | undefined): number | null {
   if (!sys) return null;
-  return sys.phases.find((p) => p.name === 'universe')?.count ?? null;
+  return sys.phases.find((p) => p.name === 'Tgt')?.count ?? null;
 }
 
 function finalOf(sys: SystemPipeline): number | null {
   if (sys.final_signals != null) return sys.final_signals;
-  return sys.phases.find((p) => p.name === 'final')?.count ?? null;
+  return sys.phases.find((p) => p.name === 'Entry')?.count ?? null;
 }
 
 /** 各 phase を 1 行で。bar は「直前 phase に対する残存率」(絞込の勢い) を表す。 */
@@ -54,7 +54,7 @@ function PhaseRow({ phase }: { phase: SystemPipelinePhase }) {
   const barPct =
     phase.ratio_of_prev != null
       ? Math.max(2, Math.min(100, phase.ratio_of_prev * 100))
-      : phase.name === 'universe'
+      : phase.name === 'Tgt'
       ? 100
       : 0;
   return (
@@ -126,9 +126,9 @@ function PipelineSection({ payload }: { payload: PipelinePayload | null }) {
         ) : null}
       </div>
       <p className="text-[10px] text-muted mb-3 leading-snug">
-        universe → setup → filter → … → final の絞込フロー。数値は
+        Tgt → FILpass → STUpass → TRDlist → Entry → Exit の 6 phase 絞込フロー。数値は
         <span className="text-cardfg"> 絞込透明性のための参考値</span>で、
-        通過率は評価軸ではありません (厳しい gate ほど final は少数になる設計)。
+        通過率は評価軸ではありません (厳しい gate ほど TRDlist/Entry は少数になる設計)。
       </p>
       {!payload ? (
         <div className="text-sm text-muted">
@@ -144,7 +144,7 @@ function PipelineSection({ payload }: { payload: PipelinePayload | null }) {
       )}
       {payload?.from_legacy ? (
         <p className="mt-2 text-[10px] text-warn">
-          ※ 旧 coverage schema から fallback 表示中 (universe → gate のみ)。
+          ※ 旧 coverage schema から fallback 表示中 (Tgt → FILpass のみ)。
         </p>
       ) : null}
     </section>

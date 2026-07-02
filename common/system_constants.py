@@ -178,74 +178,73 @@ SYSTEM_CONFIGS = {
 }
 
 # === Signal pipeline phases (絞込フロー / narrowing flow) ===
-# 各 system の signal 生成が universe → setup/filter → ranking → final signals へ
-# 絞り込まれる段階を宣言的に列挙する「参考メタデータ」。
+# 各 system の signal 生成が Tgt → FILpass → STUpass → TRDlist → Entry → Exit へ
+# 絞り込まれる 6 段階を宣言的に列挙する「参考メタデータ」。
 #
-# 目的: dashboard で「単一 survival rate」ではなく phase 別の絞込透明性
-#       (universe に対して各段でどれだけ残るか) を見せるための表示メタ。
+# phase 名は既存 UI メトリクス行 (Streamlit `apps/app_today_signals.py`) と揃えた
+# ユーザ慣用の abbrev を尊重する。定義は docs/ui_metrics_mapping.md 参照:
+#   - Tgt     : ユニバース対象銘柄数 (全 system 共通)
+#   - FILpass : Phase2 事前フィルター通過数 (common/today_signals.py::_compute_filter_pass)
+#   - STUpass : setup 条件成立数 (common/today_signals.py::_compute_setup_pass)
+#   - TRDlist : ランキング抽出後の候補数 (strategy.generate_candidates 出力)
+#   - Entry   : allocation 後の最終エントリ数 (core/final_allocation.AllocationSummary)
+#   - Exit    : 本日手仕舞い数 (analyze_exit_candidates)
 #
 # 重要:
 #   - これは **評価軸ではなく参考数値** のためのラベル定義。通過率が低いこと自体は
-#     要件でも異常でもない (厳しい gate ほど final は少数になる設計)。
-#   - 各 phase の ``name`` は monitor / dashboard で JSON key として使う安定 ID。
-#   - ``measurable_from_grouped_daily=True`` の phase のみ daily_polygon_monitor.py が
-#     grouped-daily (全 US ユニバース) から実測できる。setup/ranking など指標依存の
-#     phase は full today-pipeline 実行が必要で、monitor では count=None (未計測) になる。
+#     要件でも異常でもない (厳しい gate ほど TRDlist/Entry は少数になる設計)。
+#   - 各 phase の ``name`` は monitor / dashboard の JSON key として使う安定 ID。
+#   - ``measurable_from_grouped_daily=True`` の phase (Tgt / FILpass) のみ
+#     daily_polygon_monitor.py が grouped-daily (全 US ユニバース) から実測できる。
+#     STUpass 以降は指標/allocation 依存で full today-pipeline 実行が必要なため、
+#     monitor では count=None (未計測)。TRDlist/Entry は当日 today_signals があれば補完。
 #   - pass 条件は core/system{1..7}.py の実装に対応 (2026-07 時点)。DV 閾値は
 #     daily_polygon_monitor.SYSTEM_GATES (= 実際に集計に使う値) に揃える。
+
+# system 別に異なるのは FILpass / STUpass の条件と TRDlist ランキング基準のみ。
+_PIPELINE_FILPASS_COND: dict[str, str] = {
+    "sys1": "Close >= 5 かつ DollarVolume20 > 50M",
+    "sys2": "Close >= 5 かつ DollarVolume20 > 25M かつ ATR_Ratio > 0.03",
+    "sys3": "Close >= 5 かつ DollarVolume20 > 25M かつ ATR_Ratio >= 0.05",
+    "sys4": "DollarVolume50 > 100M かつ HV50 in [10,40]",
+    "sys5": "Close >= 5 かつ ATR_Pct > 0.025",
+    "sys6": "Low >= 5 かつ DollarVolume50 > 10M",
+    "sys7": "SPY 固定 (共通フィルター無し)",
+}
+_PIPELINE_STUPASS_COND: dict[str, str] = {
+    "sys1": "SMA25 > SMA50 かつ ROC200 > 0",
+    "sys2": "RSI3 > 90 かつ twodayup",
+    "sys3": "drop3d >= 0.125",
+    "sys4": "Close > SMA200",
+    "sys5": "ADX7 > 55 かつ Close > SMA100+ATR10 かつ RSI3 < 50",
+    "sys6": "return_6d > 0.20 かつ UpTwoDays",
+    "sys7": "Low <= Min_50 (52週安値)",
+}
+_PIPELINE_TRDLIST_COND: dict[str, str] = {
+    "sys1": "ROC200 降順 上位候補",
+    "sys2": "ADX7 降順 上位候補",
+    "sys3": "drop3d 降順 上位候補",
+    "sys4": "RSI4 昇順 上位候補 (最も oversold)",
+    "sys5": "ADX7 降順 上位候補",
+    "sys6": "return_6d 降順 上位候補",
+    "sys7": "ATR50 (position sizing) 上位候補",
+}
+
+
+def _build_pipeline_phases(sysname: str) -> list[dict[str, object]]:
+    return [
+        {"name": "Tgt", "label": "Tgt", "condition": "ユニバース対象銘柄数", "measurable_from_grouped_daily": True},
+        {"name": "FILpass", "label": "FILpass", "condition": _PIPELINE_FILPASS_COND[sysname], "measurable_from_grouped_daily": True},
+        {"name": "STUpass", "label": "STUpass", "condition": _PIPELINE_STUPASS_COND[sysname], "measurable_from_grouped_daily": False},
+        {"name": "TRDlist", "label": "TRDlist", "condition": _PIPELINE_TRDLIST_COND[sysname], "measurable_from_grouped_daily": False},
+        {"name": "Entry", "label": "Entry", "condition": "allocation 後エントリ発火", "measurable_from_grouped_daily": False},
+        {"name": "Exit", "label": "Exit", "condition": "本日手仕舞い発火", "measurable_from_grouped_daily": False},
+    ]
+
+
 SYSTEM_PIPELINE_PHASES: dict[str, list[dict[str, object]]] = {
-    "sys1": [
-        {"name": "universe", "label": "Universe", "condition": "当日価格のある全 US 銘柄", "measurable_from_grouped_daily": True},
-        {"name": "price_filter", "label": "Price ≥ $5", "condition": "Close >= 5", "measurable_from_grouped_daily": True},
-        {"name": "dv20_filter", "label": "DollarVolume20 > $50M", "condition": "DollarVolume20 > 50M", "measurable_from_grouped_daily": True},
-        {"name": "setup", "label": "Trend setup", "condition": "SMA25 > SMA50 かつ ROC200 > 0", "measurable_from_grouped_daily": False},
-        {"name": "ranking", "label": "Rank by ROC200", "condition": "ROC200 降順 top-N", "measurable_from_grouped_daily": False},
-        {"name": "final", "label": "Final signals", "condition": "採用シグナル", "measurable_from_grouped_daily": False},
-    ],
-    "sys2": [
-        {"name": "universe", "label": "Universe", "condition": "当日価格のある全 US 銘柄", "measurable_from_grouped_daily": True},
-        {"name": "price_filter", "label": "Price ≥ $5", "condition": "Close >= 5", "measurable_from_grouped_daily": True},
-        {"name": "dv20_filter", "label": "DollarVolume20 > $25M", "condition": "DollarVolume20 > 25M", "measurable_from_grouped_daily": True},
-        {"name": "setup", "label": "RSI spike setup", "condition": "ATR_Ratio > 0.03 かつ RSI3 > 90 かつ twodayup", "measurable_from_grouped_daily": False},
-        {"name": "ranking", "label": "Rank by ADX7", "condition": "ADX7 降順 top-N", "measurable_from_grouped_daily": False},
-        {"name": "final", "label": "Final signals", "condition": "採用シグナル", "measurable_from_grouped_daily": False},
-    ],
-    "sys3": [
-        {"name": "universe", "label": "Universe", "condition": "当日価格のある全 US 銘柄", "measurable_from_grouped_daily": True},
-        {"name": "price_filter", "label": "Price ≥ $5", "condition": "Close >= 5", "measurable_from_grouped_daily": True},
-        {"name": "dv20_filter", "label": "DollarVolume20 > $25M", "condition": "DollarVolume20 > 25M", "measurable_from_grouped_daily": True},
-        {"name": "setup", "label": "3-day drop setup", "condition": "ATR_Ratio >= 0.05 かつ drop3d >= 0.125", "measurable_from_grouped_daily": False},
-        {"name": "ranking", "label": "Rank by drop3d", "condition": "drop3d 降順 top-N", "measurable_from_grouped_daily": False},
-        {"name": "final", "label": "Final signals", "condition": "採用シグナル", "measurable_from_grouped_daily": False},
-    ],
-    "sys4": [
-        {"name": "universe", "label": "Universe", "condition": "当日価格のある全 US 銘柄", "measurable_from_grouped_daily": True},
-        {"name": "dv50_filter", "label": "DollarVolume50 > $100M", "condition": "DollarVolume50 > 100M", "measurable_from_grouped_daily": True},
-        {"name": "setup", "label": "Low-vol trend setup", "condition": "HV50 in [10,40] かつ Close > SMA200", "measurable_from_grouped_daily": False},
-        {"name": "ranking", "label": "Rank by RSI4", "condition": "RSI4 昇順 top-N (最も oversold)", "measurable_from_grouped_daily": False},
-        {"name": "final", "label": "Final signals", "condition": "採用シグナル", "measurable_from_grouped_daily": False},
-    ],
-    "sys5": [
-        {"name": "universe", "label": "Universe", "condition": "当日価格のある全 US 銘柄", "measurable_from_grouped_daily": True},
-        {"name": "price_filter", "label": "Price ≥ $5", "condition": "Close >= 5", "measurable_from_grouped_daily": True},
-        {"name": "setup", "label": "High-ADX reversion setup", "condition": "ADX7 > 55 かつ ATR_Pct > 0.025 かつ Close > SMA100+ATR10 かつ RSI3 < 50", "measurable_from_grouped_daily": False},
-        {"name": "ranking", "label": "Rank by ADX7", "condition": "ADX7 降順 top-N", "measurable_from_grouped_daily": False},
-        {"name": "final", "label": "Final signals", "condition": "採用シグナル", "measurable_from_grouped_daily": False},
-    ],
-    "sys6": [
-        {"name": "universe", "label": "Universe", "condition": "当日価格のある全 US 銘柄", "measurable_from_grouped_daily": True},
-        {"name": "price_filter", "label": "Low ≥ $5", "condition": "Low >= 5", "measurable_from_grouped_daily": True},
-        {"name": "dv50_filter", "label": "DollarVolume50 > $10M", "condition": "DollarVolume50 > 10M", "measurable_from_grouped_daily": True},
-        {"name": "setup", "label": "Momentum burst setup", "condition": "return_6d > 0.20 かつ UpTwoDays", "measurable_from_grouped_daily": False},
-        {"name": "ranking", "label": "Rank by return_6d", "condition": "return_6d 降順 top-N", "measurable_from_grouped_daily": False},
-        {"name": "final", "label": "Final signals", "condition": "採用シグナル", "measurable_from_grouped_daily": False},
-    ],
-    "sys7": [
-        {"name": "universe", "label": "Universe (SPY)", "condition": "SPY 固定", "measurable_from_grouped_daily": True},
-        {"name": "setup", "label": "52w low setup", "condition": "Low <= Min_50", "measurable_from_grouped_daily": False},
-        {"name": "ranking", "label": "Score by ATR50", "condition": "ATR50 (position sizing)", "measurable_from_grouped_daily": False},
-        {"name": "final", "label": "Hedge signal", "condition": "採用ヘッジシグナル", "measurable_from_grouped_daily": False},
-    ],
+    sysname: _build_pipeline_phases(sysname)
+    for sysname in ("sys1", "sys2", "sys3", "sys4", "sys5", "sys6", "sys7")
 }
 
 
