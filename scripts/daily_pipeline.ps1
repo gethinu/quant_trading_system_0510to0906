@@ -1,22 +1,18 @@
-﻿<#
+<#
 .SYNOPSIS
-    当日シグナル日次パイプライン (cache -> signals -> coverage -> publish) を
+    当日シグナル日次パイプライン (cache -> signals -> coverage -> publish -> paper_orders) を
     1 スクリプトで通す Windows Task Scheduler 用 orchestrator。
 
 .DESCRIPTION
-    Phase 1 事業化: 「signal 生成 -> Vercel 反映用 JSON -> ntfy/email 配信」を無人化する。
-    既存 Task 'QuantTrading_PolygonDailyMonitor' の呼び先を本スクリプトに差し替えるだけで
-    4 段パイプラインに拡張される。各 step は idempotent (cache/JSON 上書き) で再実行安全。
-
     段:
-      1. [cache]    scripts/cache_daily_polygon.py  --start/--end {date}   (Polygon fetch)
-      2. [signals]  apps/app_today_signals.py --headless --output-json ...  (シグナル生成)
-      3. [coverage] scripts/daily_polygon_monitor.py --date {date}          (gate 生存率)
-      4. [narrator] scripts/generate_narrative.py --signals {json} --output ... (AI 解説, optional)
-      5. [publish]  scripts/publish_signals.py --input {json}          (ntfy + email 配信)
-
-    step 失敗は log に残し、パイプラインは可能な範囲で継続する (signals が出れば coverage/publish は進む)。
-    いずれかが失敗したら最後に ntfy (NTFY_TOPIC) へ WARN を送る。
+      1. [cache]       scripts/cache_daily_polygon.py  --start/--end {date}
+      2. [signals]     apps/app_today_signals.py --headless --output-json ...
+      3. [coverage]    scripts/daily_polygon_monitor.py --date {date}
+      4. [narrator]    scripts/generate_narrative.py --signals {json} --output ...
+      5. [publish]     scripts/publish_signals.py --input {json}
+      5b.[paper_orders] scripts/paper_trading_dryrun.py --signals-json ... (default)
+                         もしくは paper_trading_submit.py --confirm --yes (AutoSubmitPaper 時)
+      6. [vercel]      scripts/publish_data_to_vercel.ps1
 
 .PARAMETER Date
     対象日 (YYYY-MM-DD)。未指定なら今日 (ローカル)。
@@ -28,27 +24,36 @@
     step1 (Polygon fetch) をスキップ。cache が別 task で更新済のとき用。
 
 .PARAMETER SkipNarrator
-    narrator step (AI 解説生成) をスキップ。ANTHROPIC_API_KEY 未設定でも
-    narrator は fail-safe で空スキップするため通常は不要。
+    narrator step (AI 解説生成) をスキップ。
 
 .PARAMETER SkipPublish
     publish step (ntfy/email 配信) をスキップ。
 
 .PARAMETER DryRunPublish
-    step4 を送信せず payload 検証のみ (--dry-run)。
+    publish を送信せず payload 検証のみ (--dry-run)。
 
 .PARAMETER SkipLatestCheck
-    signals step で rolling cache の最新営業日チェックを skip (cache 未更新環境の adhoc 用)。
+    signals step で rolling cache の最新営業日チェックを skip。
+
+.PARAMETER SkipPaperOrders
+    paper_orders step (Alpaca Paper 発注 intent 生成) をスキップ。
+
+.PARAMETER AutoSubmitPaper
+    paper_orders step で **実際に Paper 口座へ発注**する。無指定は dry-run のみ (JSON 出力)。
+    Task Scheduler の Action に含めない限り絶対に発注しない。
+    **live 口座 (実マネー) は本 pipeline では扱わない。**
+
+.PARAMETER Tier
+    paper_orders の tier。small=$1k / medium=$10k / large=$100k。
+    未指定なら env ALPACA_TIER、無ければ "small"。
 
 .EXAMPLE
     .\scripts\daily_pipeline.ps1
     .\scripts\daily_pipeline.ps1 -Date 2026-07-01 -SkipCache
-    .\scripts\daily_pipeline.ps1 -DryRunPublish -Symbols AAPL,SPY -SkipLatestCheck
+    # paper 実発注 (user が明示 opt-in):
+    .\scripts\daily_pipeline.ps1 -Date 2026-07-01 -SkipCache -AutoSubmitPaper -Tier small
 
 .NOTES
-    Task Scheduler 1-liner (既存 task の Action を書き換え):
-      Program:   powershell.exe
-      Arguments: -NoProfile -ExecutionPolicy Bypass -File "C:\Repos\quant_trading_system_0510to0906\scripts\daily_pipeline.ps1"
     Exit codes: 0=全 OK, 2=一部 step 失敗 (WARN 送信済), 1=致命的エラー
 #>
 
@@ -59,12 +64,41 @@ param(
     [switch]$SkipNarrator = $false,
     [switch]$SkipPublish = $false,
     [switch]$DryRunPublish = $false,
-    [switch]$SkipLatestCheck = $false
+    [switch]$SkipLatestCheck = $false,
+    [switch]$SkipPaperOrders = $false,
+    [switch]$AutoSubmitPaper = $false,
+    [string]$Tier = ""
 )
 
-$ErrorActionPreference = "Continue"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent $ScriptDir
+
+# --- .env auto-load ------------------------------------------------------
+$EnvFile = Join-Path $ProjectRoot ".env"
+if (Test-Path $EnvFile) {
+    Get-Content $EnvFile | ForEach-Object {
+        $line = $_
+        if ($line -match '^\s*#') { return }
+        if ($line -match '^\s*([^#=\s]+)\s*=\s*(.*)$') {
+            $k = $matches[1].Trim()
+            $v = $matches[2].Trim()
+            if ($v.Length -ge 2) {
+                if (($v.StartsWith('"') -and $v.EndsWith('"')) -or
+                    ($v.StartsWith("'") -and $v.EndsWith("'"))) {
+                    $v = $v.Substring(1, $v.Length - 2)
+                }
+            }
+            if (-not (Test-Path "Env:$k")) {
+                try {
+                    Set-Item -Path "Env:$k" -Value $v -ErrorAction Stop
+                }
+                catch {}
+            }
+        }
+    }
+}
+
+$ErrorActionPreference = "Continue"
 $LogDir = Join-Path $ProjectRoot "logs"
 
 if (-not $Date) { $Date = Get-Date -Format "yyyy-MM-dd" }
@@ -72,6 +106,12 @@ $DateCompact = $Date -replace "-", ""
 $LogFile = Join-Path $LogDir "daily_pipeline_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
 $SignalsJson = Join-Path $ProjectRoot "results_csv\today_signals_$DateCompact.json"
 $NarrativeJson = Join-Path $ProjectRoot "results_csv\narrative_$DateCompact.json"
+$PaperOrdersJson = Join-Path $ProjectRoot "results_csv\paper_orders_$DateCompact.json"
+
+# Tier 解決: CLI 引数 > env ALPACA_TIER > "small"
+if (-not $Tier) {
+    if ($env:ALPACA_TIER) { $Tier = $env:ALPACA_TIER } else { $Tier = "small" }
+}
 
 if (-not (Test-Path $LogDir)) {
     New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
@@ -85,7 +125,6 @@ function Write-Log {
     Add-Content -Path $LogFile -Value $Line -Encoding UTF8
 }
 
-# step 実行ヘルパ: python script を叩き exit code を返す。step 名でログ整形。
 function Invoke-Step {
     param(
         [string]$Name,
@@ -100,7 +139,6 @@ function Invoke-Step {
     return $code
 }
 
-# 失敗時 ntfy WARN (best-effort、NTFY_TOPIC 未設定なら黙ってスキップ)
 function Send-Warn {
     param([string]$Text)
     $topic = $env:NTFY_TOPIC
@@ -128,7 +166,6 @@ try {
     Write-Log "SignalsJson: $SignalsJson"
     Write-Log "========================================="
 
-    # venv activate (存在すれば)
     $VenvPath = Join-Path $ProjectRoot "venv\Scripts\Activate.ps1"
     if (Test-Path $VenvPath) {
         Write-Log "venv activate: $VenvPath"
@@ -140,7 +177,7 @@ try {
 
     Set-Location $ProjectRoot
 
-    # --- Step 1: cache (Polygon Grouped Daily fetch) ---------------------
+    # --- Step 1: cache ---------------------------------------------------
     if ($SkipCache) {
         Write-Log "[cache] SkipCache 指定によりスキップ"
     }
@@ -153,7 +190,7 @@ try {
         if ($c -ne 0) { $Failures += "cache(exit=$c)" }
     }
 
-    # --- Step 2: signals (headless JSON 生成) ----------------------------
+    # --- Step 2: signals -------------------------------------------------
     $sigArgs = @(
         (Join-Path $ProjectRoot "apps\app_today_signals.py"),
         "--headless",
@@ -165,20 +202,17 @@ try {
     $s = Invoke-Step -Name "signals" -PyArgs $sigArgs
     if ($s -ne 0) { $Failures += "signals(exit=$s)" }
 
-    # --- Step 3: coverage (gate 生存率モニタ、既存) ----------------------
+    # --- Step 3: coverage ------------------------------------------------
     $covArgs = @(
         (Join-Path $ProjectRoot "scripts\daily_polygon_monitor.py"),
         "--date", $Date,
         "--output-dir", (Join-Path $ProjectRoot "results_csv")
     )
     $v = Invoke-Step -Name "coverage" -PyArgs $covArgs
-    # coverage は exit=2 が「閾値割れ WARN」で失敗ではない
     if ($v -eq 1) { $Failures += "coverage(exit=1)" }
     elseif ($v -eq 2) { Write-Log "[coverage] WARN: gate 閾値割れ検知 (JSON status=warn)" }
 
-    # --- Step 4: narrator (AI 解説生成、optional / fail-safe) -----------
-    # narrator は失敗しても pipeline を止めない (publish は narrative 無しで流す)。
-    # ANTHROPIC_API_KEY 未設定なら generate_narrative.py が空スキップ (exit 0)。
+    # --- Step 4: narrator (optional / fail-safe) ------------------------
     if ($SkipNarrator) {
         Write-Log "[narrator] SkipNarrator 指定によりスキップ"
     }
@@ -192,13 +226,10 @@ try {
             "--output", $NarrativeJson
         )
         $n = Invoke-Step -Name "narrator" -PyArgs $narrArgs
-        # narrator は best-effort。exit!=0 は WARN 止まり (Failures に入れない)。
         if ($n -ne 0) { Write-Log "[narrator] WARN: 生成失敗 (exit=$n)、narrative 無しで継続" }
     }
 
-    # --- Step 5: publish (ntfy primary + email backup) -----------------
-    # publish_signals.py は signals と同じ dir の narrative_YYYYMMDD.json を
-    # 自動探索して X-Title / email に載せる (無ければ既存 body)。
+    # --- Step 5: publish (ntfy primary + email backup) ------------------
     if ($SkipPublish) {
         Write-Log "[publish] SkipPublish 指定によりスキップ"
     }
@@ -216,9 +247,42 @@ try {
         if ($p -eq 1 -or $p -eq 2) { $Failures += "publish(exit=$p)" }
     }
 
+    # --- Step 5b: paper_orders (Alpaca Paper 発注 intent 生成 / 実発注) --
+    # default = dry-run (JSON 出力のみ、実発注なし)。-AutoSubmitPaper で初めて
+    # paper 口座へ送信される。live 口座 (実マネー) は本 pipeline では扱わない。
+    if ($SkipPaperOrders) {
+        Write-Log "[paper_orders] SkipPaperOrders 指定によりスキップ"
+    }
+    elseif (-not (Test-Path $SignalsJson)) {
+        Write-Log "[paper_orders] signals JSON が無いためスキップ: $SignalsJson"
+    }
+    else {
+        if ($AutoSubmitPaper) {
+            Write-Log "[paper_orders] AutoSubmitPaper=ON  tier=$Tier  → paper 口座へ発注します"
+            $poArgs = @(
+                (Join-Path $ProjectRoot "scripts\paper_trading_submit.py"),
+                "--signals-json", $SignalsJson,
+                "--tier", $Tier,
+                "--output-json", $PaperOrdersJson,
+                "--confirm", "--yes"
+            )
+            $po = Invoke-Step -Name "paper_orders_submit" -PyArgs $poArgs
+            if ($po -eq 1 -or $po -eq 2) { $Failures += "paper_orders(exit=$po)" }
+        }
+        else {
+            Write-Log "[paper_orders] dry-run (submit skipped: autosubmit not enabled)  tier=$Tier"
+            $poArgs = @(
+                (Join-Path $ProjectRoot "scripts\paper_trading_dryrun.py"),
+                "--signals-json", $SignalsJson,
+                "--tier", $Tier,
+                "--output-json", $PaperOrdersJson
+            )
+            $po = Invoke-Step -Name "paper_orders_dryrun" -PyArgs $poArgs
+            if ($po -ne 0) { $Failures += "paper_orders_dryrun(exit=$po)" }
+        }
+    }
+
     # --- Step 6: publish data to Vercel (git commit + push) ------------
-    # results_csv は gitignored のため、当日 JSON を data/ にコミットしないと
-    # Vercel build に届かず dashboard が mock のままになる。ここで push する。
     if (-not (Test-Path $SignalsJson)) {
         Write-Log "[vercel] signals JSON が無いため data push をスキップ"
     }
@@ -229,7 +293,6 @@ try {
             ForEach-Object { Write-Log $_ }
         $vc = $LASTEXITCODE
         Write-Log "----- [vercel] 終了 (exit=$vc) -----"
-        # exit=2 は「push 対象 JSON 無し」で失敗扱いにしない。1 のみ失敗。
         if ($vc -eq 1) { $Failures += "vercel_publish(exit=1)" }
     }
 

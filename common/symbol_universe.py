@@ -300,6 +300,82 @@ def build_symbol_universe_from_settings(
     )
 
 
+# ---------------------------------------------------------------------------
+# Lightweight symbol pattern filter (NO network) - 2026-07-02 hygiene
+# ---------------------------------------------------------------------------
+# daily_polygon_monitor.py / cache_daily_polygon.py が Polygon Grouped Daily
+# の raw universe (~12,445 銘柄) を素通しで処理していた事象への対処。
+# build_symbol_universe (EODHD 経由) と `_symbols.json` manifest が
+# unavailable な local 実行環境でも動くよう、ticker 文字列の pattern だけで
+# 「非普通株」を弾く軽量フィルターを提供する。
+#
+# 除外パターン (NASDAQ Trader / Polygon 表記に基づく):
+#   - Preferred stocks: ticker 内に `$` 記号を含む (例: `AAB$P`)
+#   - Warrants:  `.W` / `.WS` / `.WI` 末尾
+#   - Units:     `.U` / `.UN` 末尾 (SPAC 上場直後)
+#   - Rights:    `.R` / `.RT` 末尾
+#   - Notes:     `.N` / `.NT` 末尾
+#
+# 保持: 通常銘柄、および `BRK.A`/`BRK.B` などの class share。
+#
+# 期待効果 (2026-07-02 log 実測): 12,445 → ~6,981 銘柄 (~44% 短縮)、
+# trading universe と一致 (build_rolling が使う `_symbols.json` と揃う)。
+
+_NON_COMMON_SUFFIXES = (
+    ".W", ".WS", ".WI",
+    ".U", ".UN",
+    ".R", ".RT",
+    ".N", ".NT",
+)
+
+
+def is_common_stock_symbol(symbol: object) -> bool:
+    """Return True if ``symbol`` looks like a US common stock ticker.
+
+    Pure string/pattern check — no network. Used to filter Polygon Grouped
+    Daily universe down to the trading universe when the EODHD-based
+    ``build_symbol_universe`` isn't available (offline / local runs).
+
+    Returns False for empty / non-string / suspicious tickers. This is
+    intentionally conservative: an ambiguous ticker is dropped rather than
+    letting warrant / preferred noise leak into the trading universe.
+    """
+    if symbol is None:
+        return False
+    s = str(symbol).strip().upper()
+    if not s:
+        return False
+    # Preferred / rights hybrids often carry `$` (NASDAQ Trader convention).
+    if "$" in s:
+        return False
+    for suffix in _NON_COMMON_SUFFIXES:
+        if s.endswith(suffix):
+            return False
+    # Reject symbols with only special chars (no ASCII letter).
+    if not any("A" <= ch <= "Z" for ch in s):
+        return False
+    return True
+
+
+def filter_common_stocks(symbols: Iterable[object]) -> list[str]:
+    """Apply :func:`is_common_stock_symbol` across an iterable.
+
+    Preserves input order and de-duplicates (upper-cased). Non-string /
+    empty entries are silently dropped.
+    """
+    seen: set[str] = set()
+    out: list[str] = []
+    for sym in symbols:
+        if not is_common_stock_symbol(sym):
+            continue
+        s = str(sym).strip().upper()
+        if s in seen:
+            continue
+        seen.add(s)
+        out.append(s)
+    return out
+
+
 __all__ = [
     "DEFAULT_EODHD_EXCHANGES",
     "DEFAULT_NASDAQ_URLS",
@@ -307,5 +383,7 @@ __all__ = [
     "build_symbol_universe_from_settings",
     "fetch_eodhd_exchange_metadata",
     "fetch_nasdaq_trader_symbols",
+    "filter_common_stocks",
+    "is_common_stock_symbol",
     "resolve_eodhd_config",
 ]

@@ -82,6 +82,27 @@ class TestDailyPipelineCliContract:
         """SkipCache 変数が定義されている (backfill 中の pipeline 再実行など)."""
         assert "SkipCache" in ps1_text
 
+    def test_env_file_auto_loaded_before_error_action(self, ps1_text: str):
+        """★ 2026-07-02 hygiene: .env auto-load block が $ErrorActionPreference より前に存在.
+
+        Task Scheduler tick では ANTHROPIC_API_KEY / NTFY_TOPIC が親プロセス
+        から継承されない環境が多い. .env parse を pipeline 冒頭に置くことで
+        narrator skip / publish 失敗 の再発を防ぐ.
+        """
+        # .env parse block の存在
+        assert "$EnvFile" in ps1_text, ".env auto-load block が消失している"
+        assert "Test-Path $EnvFile" in ps1_text
+        # 既存 env は上書きしない (guard)
+        assert 'Test-Path "Env:$k"' in ps1_text, "既存 env 優先ガードが必要 (env 覆いを防ぐ)"
+        # order: .env auto-load が $ErrorActionPreference より前に位置する
+        idx_env = ps1_text.find("$EnvFile = Join-Path $ProjectRoot")
+        idx_eap = ps1_text.find('$ErrorActionPreference = "Continue"')
+        assert idx_env > 0 and idx_eap > 0, "block が欠落"
+        assert idx_env < idx_eap, (
+            ".env auto-load は $ErrorActionPreference より前で走る必要がある "
+            "(そうしないと step 直前で env が揃わない)"
+        )
+
 
 class TestPipelineScriptExistence:
     """ps1 の各 step が呼ぶ script が実在すること."""

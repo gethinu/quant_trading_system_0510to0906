@@ -5008,6 +5008,35 @@ def compute_today_signals(  # noqa: C901  # type: ignore[reportGeneralTypeIssues
         except Exception:
             pass
 
+    # --- 2026-07-02 hygiene: sys3/sys5 STUpass 補正ログ ---
+    # 事前 print (line ~4638 の "🧩 セットアップ結果") では s3_setup / s5_setup が
+    # None のため 0 と表示されていた。candidate loop 完走後は core diagnostics か
+    # ら setup_predicate_count が stage_metrics に登録済のため、ここで snapshot を
+    # 引き直し「確定値」を再度 log に出す。他 system (1/2/4/6/7) は事前確定して
+    # いるため差分表示のみでよい。
+    try:
+        def _get_setup(name: str) -> int | None:
+            snap = _get_stage_snapshot(name)
+            if snap is None:
+                return None
+            v = getattr(snap, "setup_count", None)
+            try:
+                return None if v is None else int(v)
+            except Exception:
+                return None
+
+        s3_conf = _get_setup("system3")
+        s5_conf = _get_setup("system5")
+        conf_line = (
+            "🧩 セットアップ結果 (確定): "
+            f"system3={s3_conf if s3_conf is not None else 'n/a'}件, "
+            f"system5={s5_conf if s5_conf is not None else 'n/a'}件 "
+            "(sys3/5 は candidate 生成後に diagnostics.setup_predicate_count で確定)"
+        )
+        _log(conf_line)
+    except Exception:
+        pass
+
     # 進捗通知
     if progress_callback:
         try:
