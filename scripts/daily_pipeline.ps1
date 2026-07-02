@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     当日シグナル日次パイプライン (cache -> signals -> coverage -> publish) を
     1 スクリプトで通す Windows Task Scheduler 用 orchestrator。
@@ -214,6 +214,23 @@ try {
         if ($DryRunPublish) { $pubArgs += @("--dry-run") }
         $p = Invoke-Step -Name "publish" -PyArgs $pubArgs
         if ($p -eq 1 -or $p -eq 2) { $Failures += "publish(exit=$p)" }
+    }
+
+    # --- Step 6: publish data to Vercel (git commit + push) ------------
+    # results_csv は gitignored のため、当日 JSON を data/ にコミットしないと
+    # Vercel build に届かず dashboard が mock のままになる。ここで push する。
+    if (-not (Test-Path $SignalsJson)) {
+        Write-Log "[vercel] signals JSON が無いため data push をスキップ"
+    }
+    else {
+        Write-Log "----- [vercel] 開始 -----"
+        $vercelScript = Join-Path $ProjectRoot "scripts\publish_data_to_vercel.ps1"
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $vercelScript -Date $Date 2>&1 |
+            ForEach-Object { Write-Log $_ }
+        $vc = $LASTEXITCODE
+        Write-Log "----- [vercel] 終了 (exit=$vc) -----"
+        # exit=2 は「push 対象 JSON 無し」で失敗扱いにしない。1 のみ失敗。
+        if ($vc -eq 1) { $Failures += "vercel_publish(exit=1)" }
     }
 
     # --- 集計 -----------------------------------------------------------

@@ -6,6 +6,9 @@ const REPO_ROOT = path.resolve(process.cwd(), '..', '..', '..');
 
 function tryDirs(): string[] {
   const cands = [
+    // committed snapshot published by scripts/publish_data_to_vercel.ps1 —
+    // the only source that exists in the Vercel build (results_csv is gitignored).
+    path.join(process.cwd(), 'data'),
     path.join(REPO_ROOT, 'results_csv'),
     path.join(process.cwd(), 'mock'),
   ];

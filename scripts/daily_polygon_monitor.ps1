@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Polygon.io Grouped Daily で sys1-7 gate 生存率を日次モニタリングする
     Windows Task Scheduler 用ラッパー。
@@ -76,8 +76,14 @@ try {
     $Args += @("--output-dir", (Join-Path $ProjectRoot "results_csv"))
 
     Write-Log "python $($Args -join ' ')"
+    # python の logging は stderr に出力される。$ErrorActionPreference=Stop の下で
+    # 2>&1 すると最初の stderr 行が NativeCommandError として terminating error 化し、
+    # catch に落ちてしまう。native call の間だけ Continue に落として回避する。
+    $PrevEAP = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
     $Output = & python @Args 2>&1
     $ExitCode = $LASTEXITCODE
+    $ErrorActionPreference = $PrevEAP
     $Output | ForEach-Object { Write-Log $_ }
 
     Write-Log "python exit code: $ExitCode"
