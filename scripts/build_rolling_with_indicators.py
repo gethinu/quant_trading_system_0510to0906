@@ -46,6 +46,102 @@ LOGGER = logging.getLogger(__name__)
 
 SUPPORTED_SUFFIXES = {".csv", ".parquet", ".feather"}
 
+# 全指標カラム名 (case-insensitive lookup)。full_backup CSV には placeholder として
+# 空 (NaN) の列が最初から存在するケースがあり、``add_indicators`` は「列があれば
+# 事前計算済」と判断して recompute を skip する。stale-NaN な placeholder で全指標が
+# NaN のままになる (2026-07-02 rolling 全 NaN bug の主犯) のを防ぐため、
+# ``_prepare_rolling_frame`` は ``add_indicators`` 呼出前にこれらのうち全 NaN の列を
+# drop する。これで add_indicators が確実に recompute する。
+_INDICATOR_COLS_FOR_RECOMPUTE = (
+    "atr10", "atr20", "atr40", "atr50",
+    "sma25", "sma50", "sma100", "sma150", "sma200",
+    "roc200", "rsi3", "rsi4", "adx7",
+    "dollarvolume20", "dollarvolume50", "avgvolume50",
+    "atr_ratio", "atr_pct",
+    "return_3d", "return_6d", "return_pct",
+    "uptwodays", "twodayup",
+    "drop3d", "hv50", "min_50", "max_70",
+)
+
+
+def _drop_all_nan_indicator_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Drop indicator columns that are entirely NaN so ``add_indicators`` recomputes them.
+
+    ``add_indicators`` skips recomputation when the column already exists,
+    treating it as pre-computed. Placeholder columns from ``full_backup`` CSV
+    are all-NaN, which causes rolling cache to inherit NaN indicators.
+    This helper removes those empty placeholders so add_indicators fires.
+    """
+    if df is None or df.empty:
+        return df
+    to_drop: list[str] = []
+    for col in list(df.columns):
+        key = str(col).lower()
+        if key not in _INDICATOR_COLS_FOR_RECOMPUTE:
+            continue
+        try:
+            series = df[col]
+            if isinstance(series, pd.DataFrame):
+                # duplicate column edge case: take the last
+                series = series.iloc[:, -1]
+            # boolean placeholder (uptwodays/twodayup) は数値化して all-NaN 判定
+            if pd.api.types.is_bool_dtype(series):
+                # 全 False は placeholder 相当と見做し drop (add_indicators が再計算)
+                if not series.any():
+                    to_drop.append(col)
+                continue
+            if series.isna().all():
+                to_drop.append(col)
+        except Exception:  # pragma: no cover - defensive
+            continue
+    if to_drop:
+        try:
+            df = df.drop(columns=to_drop)
+        except Exception:  # pragma: no cover - defensive
+            pass
+    return df
+
+
+def _read_symbol_source(
+    cache_manager: "CacheManager", symbol: str
+) -> tuple[pd.DataFrame | None, str]:
+    """Read the best available source for building rolling cache.
+
+    Preference order:
+        1. base cache (``data_cache/base/<SYM>.feather``) — already has
+           ``compute_base_indicators`` applied, so indicators are correct.
+           This is the authoritative source going forward.
+        2. full_backup (``cm.read(symbol, "full")``) — fallback when base
+           is missing (fresh install / cache-corruption recovery). Requires
+           ``_prepare_rolling_frame`` to recompute indicators.
+
+    Returns
+    -------
+    tuple[pd.DataFrame | None, str]
+        (dataframe, source_label) where source_label is ``"base"`` or ``"full"``.
+        Returns ``(None, "none")`` if neither source has usable data.
+    """
+    # Try base first.
+    try:
+        base_dir = cache_manager.full_dir.parent / "base"
+        base_path = cache_manager.file_manager.detect_path(base_dir, symbol)
+        if base_path.exists():
+            df = cache_manager.file_manager.read_with_fallback(
+                base_path, symbol, "base"
+            )
+            if df is not None and not getattr(df, "empty", True):
+                return df, "base"
+    except Exception:  # pragma: no cover - defensive; fall through to full
+        pass
+    # Fallback to full_backup.
+    try:
+        df = cache_manager.read(symbol, "full")
+    except Exception:
+        return None, "none"
+    if df is None or getattr(df, "empty", True):
+        return None, "none"
+    return df, "full"
+
 
 @dataclass
 class ExtractionStats:
@@ -128,8 +224,29 @@ def _round_numeric_columns(df: pd.DataFrame, decimals: int | None) -> pd.DataFra
     return rounded
 
 
-def _prepare_rolling_frame(df: pd.DataFrame, target_days: int) -> pd.DataFrame | None:
-    """Normalize full-history dataframe and compute indicators for rolling cache."""
+def _prepare_rolling_frame(
+    df: pd.DataFrame,
+    target_days: int,
+    *,
+    source: str = "full",
+) -> pd.DataFrame | None:
+    """Normalize full-history dataframe and compute indicators for rolling cache.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Source dataframe (full_backup OHLCV or base with pre-computed indicators).
+    target_days : int
+        Row cap after processing. ``0`` disables tail-truncation and preserves
+        all input rows — used when ``source == "base"`` so that
+        ``rolling.rows == base.rows`` (fulfils the "rolling should mirror base"
+        contract asserted by ``tests/test_build_rolling_writes_full_history.py``).
+    source : str, default ``"full"``
+        Which cache profile the frame came from. Controls two things:
+          * ``"base"``: skip tail-truncation entirely (target_days ignored),
+            since base already carries the intended window with valid indicators.
+          * ``"full"``: apply target_days tail cap after add_indicators.
+    """
 
     if df is None or getattr(df, "empty", True):
         return None
@@ -236,6 +353,13 @@ def _prepare_rolling_frame(df: pd.DataFrame, target_days: int) -> pd.DataFrame |
     else:
         calc_for_ind = calc
 
+    # ★ CRITICAL FIX (2026-07-02 rolling all-NaN bug):
+    # full_backup CSV には placeholder として空 (all-NaN) の指標列が存在する。
+    # ``add_indicators`` は「列があれば pre-computed」と判断し recompute を skip するため、
+    # NaN が伝播して rolling の指標が全 NaN になっていた。
+    # add_indicators 呼出前に stale-NaN な placeholder 列を drop し、確実に recompute させる。
+    calc_for_ind = _drop_all_nan_indicator_columns(calc_for_ind)
+
     enriched = add_indicators(calc_for_ind)
 
     # Clean duplicate columns (can be skipped for performance if data is already clean)
@@ -247,7 +371,10 @@ def _prepare_rolling_frame(df: pd.DataFrame, target_days: int) -> pd.DataFrame |
         enriched["date"] = pd.to_datetime(date_col, errors="coerce")
     enriched = enriched.drop(columns=["Date"], errors="ignore")
     enriched = enriched.dropna(subset=["date"]).sort_values("date")
-    if target_days > 0:
+    # ★ base 由来のフレームは既に必要期間 (=base) 分揃っているので tail 切り詰めしない。
+    # full 由来のときのみ target_days で切り詰める (indicator recompute 用の
+    # lookback margin を除去して要求ウィンドウに揃える)。
+    if source != "base" and target_days > 0:
         enriched = enriched.tail(int(target_days))
     enriched = enriched.reset_index(drop=True)
 
@@ -326,12 +453,14 @@ def _process_symbol_worker(args: tuple) -> tuple[str, bool, str | None]:
         settings = get_settings(create_dirs=True)
         cm = CacheManager(settings)
         try:
-            full_df = cm.read(symbol, "full")
+            source_df, source_label = _read_symbol_source(cm, symbol)
         except Exception as exc:
             return (symbol, False, f"read_error:{exc}")
-        if full_df is None or getattr(full_df, "empty", True):
+        if source_df is None or getattr(source_df, "empty", True):
             return (symbol, False, "no_data")
-        enriched = _prepare_rolling_frame(full_df, target_days)
+        enriched = _prepare_rolling_frame(
+            source_df, target_days, source=source_label
+        )
         if enriched is None or getattr(enriched, "empty", True):
             return (symbol, False, "no_data")
         if round_decimals is not None:
@@ -561,20 +690,26 @@ def extract_rolling_from_full(
         for idx, symbol in enumerate(symbol_list, start=1):
             stats.processed_symbols += 1
             try:
-                full_df = cache_manager.read(symbol, "full")
+                source_df, source_label = _read_symbol_source(cache_manager, symbol)
             except Exception as exc:
                 message = f"{type(exc).__name__}: {exc}"
                 stats.errors[symbol] = message
-                _log_message(f"⚠️ {symbol}: full 読み込みに失敗 ({message})", log)
+                _log_message(
+                    f"⚠️ {symbol}: base/full 読み込みに失敗 ({message})", log
+                )
                 continue
 
-            if full_df is None or getattr(full_df, "empty", True):
+            if source_df is None or getattr(source_df, "empty", True):
                 stats.skipped_no_data += 1
-                _log_message(f"⏭️ {symbol}: full データ無しのためスキップ", log)
+                _log_message(
+                    f"⏭️ {symbol}: base/full どちらもデータ無しのためスキップ", log
+                )
                 continue
 
             try:
-                enriched = _prepare_rolling_frame(full_df, target_days)
+                enriched = _prepare_rolling_frame(
+                    source_df, target_days, source=source_label
+                )
             except Exception as exc:  # pragma: no cover - logging only
                 message = f"{type(exc).__name__}: {exc}"
                 stats.errors[symbol] = message
