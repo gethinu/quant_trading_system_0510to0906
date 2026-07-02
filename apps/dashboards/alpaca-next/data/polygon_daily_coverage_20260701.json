@@ -1,0 +1,117 @@
+{
+  "date": "2026-07-01",
+  "provider": "polygon_grouped_daily",
+  "n_candidates_total": 12445,
+  "survival_by_system": {
+    "sys1": {
+      "n_pass": 0,
+      "n_total": 12445,
+      "ratio": 0.0,
+      "warn_threshold": 0.05,
+      "status": "warn"
+    },
+    "sys2": {
+      "n_pass": 0,
+      "n_total": 12445,
+      "ratio": 0.0,
+      "warn_threshold": 0.06,
+      "status": "warn"
+    },
+    "sys3": {
+      "n_pass": 0,
+      "n_total": 12445,
+      "ratio": 0.0,
+      "warn_threshold": 0.06,
+      "status": "warn"
+    },
+    "sys4": {
+      "n_pass": 0,
+      "n_total": 12445,
+      "ratio": 0.0,
+      "warn_threshold": 0.04,
+      "status": "warn"
+    },
+    "sys5": {
+      "n_pass": 10468,
+      "n_total": 12445,
+      "ratio": 0.8411,
+      "warn_threshold": 0.15,
+      "status": "ok"
+    },
+    "sys6": {
+      "n_pass": 0,
+      "n_total": 12445,
+      "ratio": 0.0,
+      "warn_threshold": 0.1,
+      "status": "warn"
+    },
+    "sys7": {
+      "n_pass": 1,
+      "n_total": 1,
+      "ratio": 1.0,
+      "warn_threshold": 1.0,
+      "status": "ok"
+    }
+  },
+  "rejected_top10": [
+    {
+      "symbol": "MU",
+      "reason": "no_dv20_cache"
+    },
+    {
+      "symbol": "SPY",
+      "reason": "no_dv20_cache"
+    },
+    {
+      "symbol": "QQQ",
+      "reason": "no_dv20_cache"
+    },
+    {
+      "symbol": "NVDA",
+      "reason": "no_dv20_cache"
+    },
+    {
+      "symbol": "META",
+      "reason": "no_dv20_cache"
+    },
+    {
+      "symbol": "SNDK",
+      "reason": "no_dv20_cache"
+    },
+    {
+      "symbol": "MSFT",
+      "reason": "no_dv20_cache"
+    },
+    {
+      "symbol": "SPCX",
+      "reason": "no_dv20_cache"
+    },
+    {
+      "symbol": "TSLA",
+      "reason": "no_dv20_cache"
+    },
+    {
+      "symbol": "AMD",
+      "reason": "no_dv20_cache"
+    }
+  ],
+  "delta_vs_previous": {
+    "sys1": -0.1659,
+    "sys2": -0.2193,
+    "sys3": -0.2193,
+    "sys4": -0.1114,
+    "sys5": 0.001,
+    "sys6": -0.2884,
+    "sys7": 0.0
+  },
+  "consecutive_drops": {
+    "sys1": 1,
+    "sys2": 1,
+    "sys3": 1,
+    "sys4": 1,
+    "sys5": 0,
+    "sys6": 1,
+    "sys7": 0
+  },
+  "notes": []
+}
