@@ -1,0 +1,395 @@
+{
+  "date": "2026-07-01",
+  "provider": "polygon_grouped_daily",
+  "schema": "signal_pipeline/v1",
+  "systems": {
+    "sys1": {
+      "system_id": "sys1",
+      "phases": [
+        {
+          "name": "universe",
+          "label": "Universe",
+          "condition": "当日価格のある全 US 銘柄",
+          "count": 11220,
+          "measured": true,
+          "ratio_of_prev": null,
+          "ratio_of_universe": 1.0
+        },
+        {
+          "name": "price_filter",
+          "label": "Price ≥ $5",
+          "condition": "Close >= 5",
+          "count": 11096,
+          "measured": true,
+          "ratio_of_prev": 0.988948,
+          "ratio_of_universe": 0.988948
+        },
+        {
+          "name": "dv20_filter",
+          "label": "DollarVolume20 > $50M",
+          "condition": "DollarVolume20 > 50M",
+          "count": 990,
+          "measured": true,
+          "ratio_of_prev": 0.089221,
+          "ratio_of_universe": 0.088235
+        },
+        {
+          "name": "setup",
+          "label": "Trend setup",
+          "condition": "SMA25 > SMA50 かつ ROC200 > 0",
+          "count": 142,
+          "measured": true,
+          "ratio_of_prev": 0.143434,
+          "ratio_of_universe": 0.012656
+        },
+        {
+          "name": "ranking",
+          "label": "Rank by ROC200",
+          "condition": "ROC200 降順 top-N",
+          "count": 142,
+          "measured": true,
+          "ratio_of_prev": 1.0,
+          "ratio_of_universe": 0.012656
+        },
+        {
+          "name": "final",
+          "label": "Final signals",
+          "condition": "採用シグナル",
+          "count": 10,
+          "measured": true,
+          "ratio_of_prev": 0.070423,
+          "ratio_of_universe": 0.000891
+        }
+      ],
+      "final_signals": 10
+    },
+    "sys2": {
+      "system_id": "sys2",
+      "phases": [
+        {
+          "name": "universe",
+          "label": "Universe",
+          "condition": "当日価格のある全 US 銘柄",
+          "count": 11220,
+          "measured": true,
+          "ratio_of_prev": null,
+          "ratio_of_universe": 1.0
+        },
+        {
+          "name": "price_filter",
+          "label": "Price ≥ $5",
+          "condition": "Close >= 5",
+          "count": 11096,
+          "measured": true,
+          "ratio_of_prev": 0.988948,
+          "ratio_of_universe": 0.988948
+        },
+        {
+          "name": "dv20_filter",
+          "label": "DollarVolume20 > $25M",
+          "condition": "DollarVolume20 > 25M",
+          "count": 1820,
+          "measured": true,
+          "ratio_of_prev": 0.164023,
+          "ratio_of_universe": 0.16221
+        },
+        {
+          "name": "setup",
+          "label": "RSI spike setup",
+          "condition": "ATR_Ratio > 0.03 かつ RSI3 > 90 かつ twodayup",
+          "count": 63,
+          "measured": true,
+          "ratio_of_prev": 0.034615,
+          "ratio_of_universe": 0.005615
+        },
+        {
+          "name": "ranking",
+          "label": "Rank by ADX7",
+          "condition": "ADX7 降順 top-N",
+          "count": 63,
+          "measured": true,
+          "ratio_of_prev": 1.0,
+          "ratio_of_universe": 0.005615
+        },
+        {
+          "name": "final",
+          "label": "Final signals",
+          "condition": "採用シグナル",
+          "count": 8,
+          "measured": true,
+          "ratio_of_prev": 0.126984,
+          "ratio_of_universe": 0.000713
+        }
+      ],
+      "final_signals": 8
+    },
+    "sys3": {
+      "system_id": "sys3",
+      "phases": [
+        {
+          "name": "universe",
+          "label": "Universe",
+          "condition": "当日価格のある全 US 銘柄",
+          "count": 11220,
+          "measured": true,
+          "ratio_of_prev": null,
+          "ratio_of_universe": 1.0
+        },
+        {
+          "name": "price_filter",
+          "label": "Price ≥ $5",
+          "condition": "Close >= 5",
+          "count": 11096,
+          "measured": true,
+          "ratio_of_prev": 0.988948,
+          "ratio_of_universe": 0.988948
+        },
+        {
+          "name": "dv20_filter",
+          "label": "DollarVolume20 > $25M",
+          "condition": "DollarVolume20 > 25M",
+          "count": 1820,
+          "measured": true,
+          "ratio_of_prev": 0.164023,
+          "ratio_of_universe": 0.16221
+        },
+        {
+          "name": "setup",
+          "label": "3-day drop setup",
+          "condition": "ATR_Ratio >= 0.05 かつ drop3d >= 0.125",
+          "count": 48,
+          "measured": true,
+          "ratio_of_prev": 0.026374,
+          "ratio_of_universe": 0.004278
+        },
+        {
+          "name": "ranking",
+          "label": "Rank by drop3d",
+          "condition": "drop3d 降順 top-N",
+          "count": 48,
+          "measured": true,
+          "ratio_of_prev": 1.0,
+          "ratio_of_universe": 0.004278
+        },
+        {
+          "name": "final",
+          "label": "Final signals",
+          "condition": "採用シグナル",
+          "count": 10,
+          "measured": true,
+          "ratio_of_prev": 0.208333,
+          "ratio_of_universe": 0.000891
+        }
+      ],
+      "final_signals": 10
+    },
+    "sys4": {
+      "system_id": "sys4",
+      "phases": [
+        {
+          "name": "universe",
+          "label": "Universe",
+          "condition": "当日価格のある全 US 銘柄",
+          "count": 11220,
+          "measured": true,
+          "ratio_of_prev": null,
+          "ratio_of_universe": 1.0
+        },
+        {
+          "name": "dv50_filter",
+          "label": "DollarVolume50 > $100M",
+          "condition": "DollarVolume50 > 100M",
+          "count": 513,
+          "measured": true,
+          "ratio_of_prev": 0.045722,
+          "ratio_of_universe": 0.045722
+        },
+        {
+          "name": "setup",
+          "label": "Low-vol trend setup",
+          "condition": "HV50 in [10,40] かつ Close > SMA200",
+          "count": 221,
+          "measured": true,
+          "ratio_of_prev": 0.430799,
+          "ratio_of_universe": 0.019697
+        },
+        {
+          "name": "ranking",
+          "label": "Rank by RSI4",
+          "condition": "RSI4 昇順 top-N (最も oversold)",
+          "count": 221,
+          "measured": true,
+          "ratio_of_prev": 1.0,
+          "ratio_of_universe": 0.019697
+        },
+        {
+          "name": "final",
+          "label": "Final signals",
+          "condition": "採用シグナル",
+          "count": 10,
+          "measured": true,
+          "ratio_of_prev": 0.045249,
+          "ratio_of_universe": 0.000891
+        }
+      ],
+      "final_signals": 10
+    },
+    "sys5": {
+      "system_id": "sys5",
+      "phases": [
+        {
+          "name": "universe",
+          "label": "Universe",
+          "condition": "当日価格のある全 US 銘柄",
+          "count": 11220,
+          "measured": true,
+          "ratio_of_prev": null,
+          "ratio_of_universe": 1.0
+        },
+        {
+          "name": "price_filter",
+          "label": "Price ≥ $5",
+          "condition": "Close >= 5",
+          "count": 11096,
+          "measured": true,
+          "ratio_of_prev": 0.988948,
+          "ratio_of_universe": 0.988948
+        },
+        {
+          "name": "setup",
+          "label": "High-ADX reversion setup",
+          "condition": "ADX7 > 55 かつ ATR_Pct > 0.025 かつ Close > SMA100+ATR10 かつ RSI3 < 50",
+          "count": 37,
+          "measured": true,
+          "ratio_of_prev": 0.003335,
+          "ratio_of_universe": 0.003298
+        },
+        {
+          "name": "ranking",
+          "label": "Rank by ADX7",
+          "condition": "ADX7 降順 top-N",
+          "count": 37,
+          "measured": true,
+          "ratio_of_prev": 1.0,
+          "ratio_of_universe": 0.003298
+        },
+        {
+          "name": "final",
+          "label": "Final signals",
+          "condition": "採用シグナル",
+          "count": 5,
+          "measured": true,
+          "ratio_of_prev": 0.135135,
+          "ratio_of_universe": 0.000446
+        }
+      ],
+      "final_signals": 5
+    },
+    "sys6": {
+      "system_id": "sys6",
+      "phases": [
+        {
+          "name": "universe",
+          "label": "Universe",
+          "condition": "当日価格のある全 US 銘柄",
+          "count": 11220,
+          "measured": true,
+          "ratio_of_prev": null,
+          "ratio_of_universe": 1.0
+        },
+        {
+          "name": "price_filter",
+          "label": "Low ≥ $5",
+          "condition": "Low >= 5",
+          "count": 11089,
+          "measured": true,
+          "ratio_of_prev": 0.988324,
+          "ratio_of_universe": 0.988324
+        },
+        {
+          "name": "dv50_filter",
+          "label": "DollarVolume50 > $10M",
+          "condition": "DollarVolume50 > 10M",
+          "count": 2140,
+          "measured": true,
+          "ratio_of_prev": 0.192984,
+          "ratio_of_universe": 0.190731
+        },
+        {
+          "name": "setup",
+          "label": "Momentum burst setup",
+          "condition": "return_6d > 0.20 かつ UpTwoDays",
+          "count": 29,
+          "measured": true,
+          "ratio_of_prev": 0.013551,
+          "ratio_of_universe": 0.002585
+        },
+        {
+          "name": "ranking",
+          "label": "Rank by return_6d",
+          "condition": "return_6d 降順 top-N",
+          "count": 29,
+          "measured": true,
+          "ratio_of_prev": 1.0,
+          "ratio_of_universe": 0.002585
+        },
+        {
+          "name": "final",
+          "label": "Final signals",
+          "condition": "採用シグナル",
+          "count": 8,
+          "measured": true,
+          "ratio_of_prev": 0.275862,
+          "ratio_of_universe": 0.000713
+        }
+      ],
+      "final_signals": 8
+    },
+    "sys7": {
+      "system_id": "sys7",
+      "phases": [
+        {
+          "name": "universe",
+          "label": "Universe (SPY)",
+          "condition": "SPY 固定",
+          "count": 1,
+          "measured": true,
+          "ratio_of_prev": null,
+          "ratio_of_universe": 1.0
+        },
+        {
+          "name": "setup",
+          "label": "52w low setup",
+          "condition": "Low <= Min_50",
+          "count": 1,
+          "measured": true,
+          "ratio_of_prev": 1.0,
+          "ratio_of_universe": 1.0
+        },
+        {
+          "name": "ranking",
+          "label": "Score by ATR50",
+          "condition": "ATR50 (position sizing)",
+          "count": 1,
+          "measured": true,
+          "ratio_of_prev": 1.0,
+          "ratio_of_universe": 1.0
+        },
+        {
+          "name": "final",
+          "label": "Hedge signal",
+          "condition": "採用ヘッジシグナル",
+          "count": 1,
+          "measured": true,
+          "ratio_of_prev": 1.0,
+          "ratio_of_universe": 1.0
+        }
+      ],
+      "final_signals": 1
+    }
+  },
+  "notes": [
+    "phases は絞込透明性のための参考数値 (evaluation ではない)。",
+    "ratio_of_prev = count / 直前 phase; ratio_of_universe = count / universe。"
+  ]
+}
