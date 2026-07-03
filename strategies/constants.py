@@ -21,38 +21,12 @@ STOP_ATR_MULTIPLE_SYSTEM1 = 5.0  # System 1 specific ATR multiplier
 STOP_ATR_MULTIPLE_SYSTEM3 = 2.5  # System 3 specific ATR multiplier
 STOP_ATR_MULTIPLE_SYSTEM4 = 1.5  # System 4 specific ATR multiplier
 
-# System-specific configuration mapping
-SYSTEM_SPECIFIC_CONFIG = {
-    "system1": {
-        "stop_atr_multiple": STOP_ATR_MULTIPLE_SYSTEM1,
-        "max_hold_days": MAX_HOLD_DAYS_DEFAULT,
-        "fallback_enabled": True,
-    },
-    "system2": {
-        "stop_atr_multiple": STOP_ATR_MULTIPLE_DEFAULT,
-        "entry_min_gap_pct": ENTRY_MIN_GAP_PCT_DEFAULT,
-        "profit_take_pct": PROFIT_TAKE_PCT_DEFAULT_4,
-        "max_hold_days": MAX_HOLD_DAYS_DEFAULT,
-    },
-    "system3": {
-        "stop_atr_multiple": STOP_ATR_MULTIPLE_SYSTEM3,
-        "profit_take_pct": PROFIT_TAKE_PCT_DEFAULT_4,
-        "max_hold_days": MAX_HOLD_DAYS_DEFAULT,
-    },
-    "system4": {
-        "stop_atr_multiple": STOP_ATR_MULTIPLE_SYSTEM4,
-        "max_hold_days": MAX_HOLD_DAYS_DEFAULT,
-    },
-    "system5": {
-        "stop_atr_multiple": STOP_ATR_MULTIPLE_DEFAULT,
-        "fallback_exit_days": FALLBACK_EXIT_DAYS_DEFAULT,
-    },
-    "system6": {
-        "stop_atr_multiple": STOP_ATR_MULTIPLE_DEFAULT,
-        "profit_take_pct": PROFIT_TAKE_PCT_DEFAULT_5,
-    },
-    "system7": {
-        "stop_atr_multiple": STOP_ATR_MULTIPLE_DEFAULT,
-        "max_hold_days": MAX_HOLD_DAYS_DEFAULT,
-    },
-}
+# NOTE (D5 2026-07-02):
+#   The former `SYSTEM_SPECIFIC_CONFIG` dict was removed (fully dead code,
+#   zero references across repo).  Config surface is unified to YAML
+#   (`config/config.yaml::strategies.<systemN>`) and
+#   `common/trade_management.py::SYSTEM_TRADE_RULES`.  Individual constants
+#   above (`MAX_HOLD_DAYS_DEFAULT` / `STOP_ATR_MULTIPLE_*` /
+#   `PROFIT_TAKE_PCT_*` / `ENTRY_MIN_GAP_PCT_DEFAULT` /
+#   `FALLBACK_EXIT_DAYS_DEFAULT`) are kept because S2/S3/S6 still import
+#   them.  Details: docs/D5_SYSTEM_SPECIFIC_CONFIG_bug_20260702.md

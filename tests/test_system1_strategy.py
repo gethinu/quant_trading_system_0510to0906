@@ -192,19 +192,23 @@ class TestSystem1Strategy:
         assert result is None
 
     def test_compute_exit_stop_hit(self):
-        """Test compute_exit when stop is hit"""
+        """Test compute_exit when Close falls below initial stop (Close-based).
+
+        D5 (2026-07-02) 更新: 旧実装は Low <= stop で判定していたが、
+        S4 と同型の trailing-only 化により Close-based stop check に変更。
+        """
         dates = pd.date_range("2023-01-01", periods=5, freq="D")
         df = pd.DataFrame(
             {
-                "Open": [100.0, 101.0, 102.0, 103.0, 104.0],
-                "High": [101.0, 102.0, 103.0, 104.0, 105.0],
-                "Low": [99.0, 100.0, 89.0, 102.0, 103.0],  # Day 2 hits stop
-                "Close": [100.5, 101.5, 102.5, 103.5, 104.5],
+                "Open": [100.0, 101.0, 90.0, 88.0, 87.0],
+                "High": [101.0, 102.0, 91.0, 89.0, 88.0],
+                "Low": [99.0, 100.0, 85.0, 82.0, 80.0],
+                "Close": [100.5, 101.5, 89.0, 88.0, 87.0],  # Day 2 Close < stop
             },
             index=dates,
         )
 
-        self.strategy.config = {"max_hold_days": 3}
+        self.strategy.config = {}
         entry_idx = 1
         entry_price = 101.0
         stop_price = 90.0
@@ -213,12 +217,16 @@ class TestSystem1Strategy:
             df, entry_idx, entry_price, stop_price
         )
 
-        # Should exit at stop price on day 2 (index 2)
-        assert exit_price == 90.0
+        # Day 2 Close=89.0 は stop=90 を下回るので同日 Close で決済
+        assert exit_price == pytest.approx(89.0)
         assert exit_date == dates[2]
 
-    def test_compute_exit_max_hold_days(self):
-        """Test compute_exit when max hold days reached"""
+    def test_compute_exit_hold_until_end_no_time_exit(self):
+        """Test compute_exit does NOT force-exit by time (S1 spec: 時間制限無し).
+
+        D5 (2026-07-02) 更新: 旧実装は max_hold_days=3 で強制決済して
+        いたが、S1 spec (25% trailing、時間制限無し) に整合させた。
+        """
         dates = pd.date_range("2023-01-01", periods=5, freq="D")
         df = pd.DataFrame(
             {
@@ -230,6 +238,7 @@ class TestSystem1Strategy:
             index=dates,
         )
 
+        # config に max_hold_days を差し込んでも新実装は無視する
         self.strategy.config = {"max_hold_days": 2}
         entry_idx = 1
         entry_price = 101.0
@@ -239,9 +248,9 @@ class TestSystem1Strategy:
             df, entry_idx, entry_price, stop_price
         )
 
-        # Should exit at close price after max_hold_days (index 3)
-        assert exit_price == 103.5
-        assert exit_date == dates[3]
+        # trailing/stop 両方 trigger しないので末尾 Close まで hold
+        assert exit_price == pytest.approx(104.5)
+        assert exit_date == dates[-1]
 
     def test_get_total_days(self):
         """Test get_total_days method"""

@@ -192,38 +192,40 @@ class System1Strategy(AlpacaOrderMixin, StrategyBase):
         self,
         df: pd.DataFrame,
         entry_idx: int,
-        _entry_price: float,
+        entry_price: float,
         stop_price: float,
     ) -> tuple[float, pd.Timestamp]:
         """
-        Day-based exit for System1 (long):
-        - Stop hit: if Low <= stop -> exit same day at stop_price
-        - Otherwise, max-hold days then exit on close
+        Trailing-only exit for System1 (long).
+
+        Spec (docs/systems/システム1.txt, common/trade_management.py::
+        SYSTEM_TRADE_RULES[\"system1\"]): 5ATR20 初期 stop + 25% trailing。
+        時間による強制決済は無し。
+
+        D5 (2026-07-02) fix: 旧実装は `MAX_HOLD_DAYS_DEFAULT=3` fallback を
+        経由し、long trend momentum を 3 日で強制決済する bug を抱えていた。
+        本メソッドを S4 (`System4Strategy.compute_exit`) と同型の trailing-
+        only 構造に書換え、`SYSTEM_SPECIFIC_CONFIG` (dead code) と
+        `MAX_HOLD_DAYS_DEFAULT` への依存を撤去。
 
         Args:
             df: 価格データ
             entry_idx: エントリーインデックス
-            _entry_price: エントリー価格（未使用、インターフェース互換性のため）
-            stop_price: ストップ価格
+            entry_price: エントリー価格 (trailing の起点)
+            stop_price: 初期ストップ価格
 
         Returns:
             (exit_price, exit_date): 決済価格と日付のタプル
         """
-        try:
-            from .constants import MAX_HOLD_DAYS_DEFAULT
-        except Exception:
-            MAX_HOLD_DAYS_DEFAULT = 3
-        max_hold_days = int(self.config.get("max_hold_days", MAX_HOLD_DAYS_DEFAULT))
-        n = len(df)
-        for offset in range(max_hold_days):
-            idx = entry_idx + offset
-            if idx >= n:
-                break
-            row = df.iloc[idx]
-            try:
-                if float(row["Low"]) <= float(stop_price):
-                    return float(stop_price), pd.Timestamp(str(df.index[idx]))
-            except Exception:
-                pass
-        exit_idx = min(entry_idx + max_hold_days, n - 1)
-        return float(df.iloc[exit_idx]["Close"]), pd.Timestamp(str(df.index[exit_idx]))
+        trail_pct = float(self.config.get("trailing_pct", 0.25))
+        highest = entry_price
+        for idx2 in range(entry_idx + 1, len(df)):
+            close = float(df.iloc[idx2]["Close"])
+            if close > highest:
+                highest = close
+            if close <= highest * (1 - trail_pct):
+                return close, pd.Timestamp(str(df.index[idx2]))
+            if close <= stop_price:
+                return close, pd.Timestamp(str(df.index[idx2]))
+        last_close = float(df.iloc[-1]["Close"])
+        return last_close, pd.Timestamp(str(df.index[-1]))
