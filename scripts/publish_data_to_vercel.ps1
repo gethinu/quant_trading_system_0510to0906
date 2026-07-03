@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     daily_pipeline が生成した当日 JSON を Vercel が読める場所 (git 管理下の
     apps/dashboards/alpaca-next/data/) にコピーして commit + push する。
