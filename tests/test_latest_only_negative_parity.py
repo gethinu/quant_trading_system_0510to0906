@@ -10,7 +10,7 @@ def _make_df_no_setup_latest():
     """System1 の filter は満たすが、setup 条件は満たさない DataFrame を返す。
 
     filter: (Close >= 5.0) & (dollarvolume20 > 25_000_000)
-    setup: filter & (Close > sma200) & (roc200 > 0)
+    setup (docs 準拠, D1 audit 2026-07-02 以降): filter & (sma25 > sma50) & (roc200 > 0)
     """
     dates = pd.date_range(end=pd.Timestamp("2024-12-31"), periods=5, freq="D")
     df = pd.DataFrame(
@@ -21,18 +21,18 @@ def _make_df_no_setup_latest():
             "Close": [10, 11, 12, 13, 14],  # >= 5.0 (filter OK)
             "Volume": [5_000_000] * 5,
             "dollarvolume20": [30_000_000] * 5,  # > 25_000_000 (filter OK)
-            "sma200": [20, 21, 22, 23, 24],  # Close < sma200 (setup NG)
+            "sma200": [20, 21, 22, 23, 24],  # legacy: 参考値 (setup 判定には未使用)
             "roc200": [-0.1, -0.2, -0.3, -0.4, -0.5],  # roc200 < 0 (setup NG)
             "sma25": [9, 10, 11, 12, 13],
-            "sma50": [9, 10, 11, 12, 13],
+            "sma50": [9, 10, 11, 12, 13],  # sma25 == sma50 (setup NG)
             "atr20": [0.2] * 5,
         },
         index=dates,
     )
     # filter 列を明示的に追加
     df["filter"] = (df["Close"] >= 5.0) & (df["dollarvolume20"] > 25_000_000)
-    # setup 列は、filter & (Close > sma200) & (roc200 > 0) で計算
-    df["setup"] = df["filter"] & (df["Close"] > df["sma200"]) & (df["roc200"] > 0)
+    # setup 列は docs 準拠: filter & (sma25 > sma50) & (roc200 > 0)
+    df["setup"] = df["filter"] & (df["sma25"] > df["sma50"]) & (df["roc200"] > 0)
     return df
 
 

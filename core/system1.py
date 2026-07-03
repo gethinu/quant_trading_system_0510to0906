@@ -4,7 +4,7 @@
 #
 # 前提条件：
 #   - 当日データのため前日終値は除外
-#   - ロング戦略（Close > SMA200、ROC200 > 0 が前提）
+#   - ロング戦略（SMA25 > SMA50、ROC200 > 0 が前提）
 #   - 指標は precomputed のみ使用（indicator_access.py 経由）
 #   - フロー: setup() → rank() → signals() の順序実行
 #
@@ -23,8 +23,8 @@
 """System1 core logic (Long ROC200 momentum).
 
 ROC200-based momentum strategy:
-- Indicators: ROC200, SMA200, DollarVolume20 (precomputed only)
-- Setup conditions: Close>5, DollarVolume20>50M, Close>SMA200, ROC200>0
+- Indicators: SMA25, SMA50, ROC200, DollarVolume20 (precomputed only)
+- Setup conditions: Close>=5, DollarVolume20>50M, SMA25>SMA50, ROC200>0
 - Candidate generation: ROC200 descending ranking by date, extract top_n
 - Optimization: Removed all indicator calculations, using precomputed indicators only
 """
@@ -95,12 +95,19 @@ def _apply_filter_conditions(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _apply_setup_conditions(df: pd.DataFrame) -> pd.DataFrame:
-    """Apply System1 setup: filter & Close>SMA200 & ROC200>MIN_ROC200.
+    """Apply System1 setup: filter & SMA25>SMA50 & ROC200>MIN_ROC200.
+
+    Docs 準拠 (docs/systems/システム1.txt: 25日SMA > 50日SMA)。
+    Row 経路 (`system1_row_passes_setup`) と predicate 経路
+    (`common/system_setup_predicates.system1_setup_predicate`) と同一条件を出す。
+
+    2026-07-02 D1 audit: 以前は Close>SMA200 で他 2 経路と齟齬していた。
+    3 経路統一のため SMA25>SMA50 に修正。
 
     Preserves existing 'setup' column if present for test compatibility.
 
     Args:
-        df: DataFrame with filter, Close, sma200, roc200 columns
+        df: DataFrame with filter, sma25, sma50, roc200 columns
 
     Returns:
         DataFrame with 'setup' boolean column added/updated
@@ -117,24 +124,24 @@ def _apply_setup_conditions(df: pd.DataFrame) -> pd.DataFrame:
     except Exception:
         _filter = pd.Series(False, index=x.index)
 
-    # Coerce numeric columns
+    # Coerce SMA25 / SMA50 (docs setup 条件: 25日SMA > 50日SMA)
     try:
-        _val_close = x.get("Close")
-        if _val_close is None:
-            _close = pd.Series(0.0, index=x.index)
+        _val_sma25 = x.get("sma25")
+        if _val_sma25 is None:
+            _sma25 = pd.Series(0.0, index=x.index)
         else:
-            _close = pd.to_numeric(_val_close, errors="coerce").fillna(0.0)
+            _sma25 = pd.to_numeric(_val_sma25, errors="coerce").fillna(0.0)
     except Exception:
-        _close = pd.Series(0.0, index=x.index)
+        _sma25 = pd.Series(0.0, index=x.index)
 
     try:
-        _val_sma = x.get("sma200")
-        if _val_sma is None:
-            _sma = pd.Series(0.0, index=x.index)
+        _val_sma50 = x.get("sma50")
+        if _val_sma50 is None:
+            _sma50 = pd.Series(0.0, index=x.index)
         else:
-            _sma = pd.to_numeric(_val_sma, errors="coerce").fillna(0.0)
+            _sma50 = pd.to_numeric(_val_sma50, errors="coerce").fillna(0.0)
     except Exception:
-        _sma = pd.Series(0.0, index=x.index)
+        _sma50 = pd.Series(0.0, index=x.index)
 
     try:
         _val_roc = x.get("roc200")
@@ -145,7 +152,7 @@ def _apply_setup_conditions(df: pd.DataFrame) -> pd.DataFrame:
     except Exception:
         _roc = pd.Series(0.0, index=x.index)
 
-    x["setup"] = _filter & (_close > _sma) & (_roc > MIN_ROC200)
+    x["setup"] = _filter & (_sma25 > _sma50) & (_roc > MIN_ROC200)
     return x
 
 

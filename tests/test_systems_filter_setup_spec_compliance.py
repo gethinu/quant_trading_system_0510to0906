@@ -35,9 +35,9 @@ import core.system6 as s6
 
 
 # ============================================================================
-# System 1: Long trend high momentum
+# System 1: Long trend high momentum (docs-compliant post D1 audit 2026-07-02)
 #   Filter: Close >= 5.0, DollarVolume20 > 50M
-#   Setup:  filter & Close > SMA200 & ROC200 > 0
+#   Setup:  filter & SMA25 > SMA50 & ROC200 > 0
 # ============================================================================
 
 
@@ -45,7 +45,8 @@ def _s1_row(**over) -> pd.DataFrame:
     row = {
         "Close": 100.0,
         "dollarvolume20": 60_000_000,
-        "sma200": 90.0,
+        "sma25": 105.0,   # SMA25 > SMA50 by default (docs setup 条件)
+        "sma50": 100.0,
         "roc200": 0.05,
     }
     row.update(over)
@@ -81,15 +82,16 @@ class TestSystem1Filter:
 
 class TestSystem1Setup:
     @pytest.mark.parametrize(
-        ("close", "sma200", "expected"),
+        ("sma25", "sma50", "expected"),
         [
-            (100.0, 99.99, True),
-            (100.0, 100.0, False),   # Close > SMA200 (strict)
+            (100.01, 100.0, True),
+            (100.0, 100.0, False),   # SMA25 > SMA50 (strict)
             (99.99, 100.0, False),
         ],
     )
-    def test_close_above_sma200(self, close, sma200, expected):
-        df = _s1_row(Close=close, sma200=sma200)
+    def test_sma25_above_sma50(self, sma25, sma50, expected):
+        """D1 audit 2026-07-02: batch 経路が docs 準拠 SMA25>SMA50 に統一されたことを assert."""
+        df = _s1_row(sma25=sma25, sma50=sma50)
         df = s1._apply_filter_conditions(df)
         result = s1._apply_setup_conditions(df)
         assert bool(result["setup"].iloc[0]) is expected
@@ -320,9 +322,12 @@ class TestSystem4Setup:
 
 
 # ============================================================================
-# System 5: Long mean reversion high ADX (docs-compliant after audit-remediation)
-#   Filter: Close >= 5, ADX7 > 55, atr_pct > 0.025
-#   Setup:  filter & Close > SMA100+ATR10 & RSI3 < 50
+# System 5: Long mean reversion high ADX
+#   audit-remediation 2026-07-03 (D3 Case A: docs 完全準拠に是正):
+#     Filter (spec): Close >= 5, ADX7 > 55, atr_pct > 0.04,
+#                    AvgVolume50 > 500k, DollarVolume50 > 2.5M
+#     Setup  (spec): filter & Close > SMA100+ATR10 & RSI3 < 50
+#   旧: Close>=5 & ADX7>55 & atr_pct>0.025 のみ (流動性 filter 完全欠如、ATR 緩め)
 # ============================================================================
 
 
@@ -330,10 +335,13 @@ def _s5_row(**over) -> pd.DataFrame:
     row = {
         "Close": 100.0,
         "adx7": 60.0,
-        "atr_pct": 0.05,
+        "atr_pct": 0.05,        # Case A: spec 4% を超える値をデフォルトに
         "sma100": 90.0,
         "atr10": 5.0,   # sma100+atr10 = 95, Close 100 > 95
         "rsi3": 30.0,
+        # Case A: 流動性 filter を通過するデフォルト値
+        "avgvolume50": 1_000_000,   # > 500k spec
+        "dollarvolume50": 5_000_000,  # > 2.5M spec
     }
     row.update(over)
     return pd.DataFrame([row])
@@ -357,9 +365,11 @@ class TestSystem5Filter:
     @pytest.mark.parametrize(
         ("atr_pct", "expected"),
         [
-            (0.025, False),   # 実装: > 2.5% (strict)
-            (0.0251, True),
-            (0.024, False),
+            # Case A (spec): > 4% (strict)。旧 2.5% assertion は 4% に是正。
+            (0.04, False),
+            (0.0401, True),
+            (0.039, False),
+            (0.05, True),
         ],
     )
     def test_atr_pct_boundary(self, atr_pct, expected):
@@ -379,6 +389,36 @@ class TestSystem5Filter:
         row.loc[0, "sma100"] = 1000
         result = s5._apply_filter_conditions(row)
         assert bool(result["filter"].iloc[0]) is expected
+
+    @pytest.mark.parametrize(
+        ("avgvolume50", "expected"),
+        [
+            # Case A (spec, docs/systems/システム5.txt:7): > 500k (strict)
+            (500_000, False),
+            (500_001, True),
+            (499_999, False),
+            (1_000_000, True),
+        ],
+    )
+    def test_avgvolume50_boundary(self, avgvolume50, expected):
+        assert bool(
+            s5._apply_filter_conditions(_s5_row(avgvolume50=avgvolume50))["filter"].iloc[0]
+        ) is expected
+
+    @pytest.mark.parametrize(
+        ("dollarvolume50", "expected"),
+        [
+            # Case A (spec, docs/systems/システム5.txt:8): > 2.5M (strict)
+            (2_500_000, False),
+            (2_500_001, True),
+            (2_499_999, False),
+            (10_000_000, True),
+        ],
+    )
+    def test_dollarvolume50_boundary(self, dollarvolume50, expected):
+        assert bool(
+            s5._apply_filter_conditions(_s5_row(dollarvolume50=dollarvolume50))["filter"].iloc[0]
+        ) is expected
 
 
 class TestSystem5Setup:
