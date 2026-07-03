@@ -124,3 +124,7 @@ pip-wheel-metadata/
 
 # Notebook checkpoints
 .ipynb_checkpoints/
+
+memory/
+apps/dashboards/alpaca-next/tsconfig.tsbuildinfo
+
