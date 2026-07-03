@@ -13,6 +13,9 @@ NYSE （ニューヨーク証券取引所）、ナスダック、アメリカン
 
 ランキング
 4日RSIが小さい順に銘柄を選ぶ。
+	•	 RSI4 が 30 以上の銘柄はランキング候補から除外する（over-sold 環境の担保）。
+	•	 閾値 30 は mean-reversion / low-vol pullback 戦略における業界標準の gate。
+	•	 実装参照: core/system4.py::MAX_RSI4_THRESHOLD (= 30.0)。
 
 仕掛け
 寄り付きで成り行きで仕掛ける。スリッページにかかわらず仕掛ける。
@@ -32,3 +35,16 @@ NYSE （ニューヨーク証券取引所）、ナスダック、アメリカン
 ポジションサイジング
 リスクは資金全体の2%、サイズは最大で資
 金全体の 10%。
+
+---
+【変更履歴】
+2026-07-02 impl-alignment update:
+	•	 ランキング section に「RSI4 >= 30 の銘柄は候補から除外」条件を追記。
+	•	 実装 (core/system4.py::MAX_RSI4_THRESHOLD = 30.0) との乖離を解消。
+	•	 由来: mean-reversion / low-vol pullback における over-sold gate の業界標準に準拠した operational refinement。
+	•	 backtest 影響: 無し（docs 側のみの更新、code 挙動変更なし）。
+
+2026-07-03 D3 alignment audit:
+	•	 System4 のフィルター (DV50>100M, HV50 in [10, 40]) は既に impl と docs で完全整合済み。
+	     この dispatch では追加変更なし (verify only)。
+	•	 参考: docs/D3_CASE_A_IMPL_20260703.md の全 system alignment matrix。

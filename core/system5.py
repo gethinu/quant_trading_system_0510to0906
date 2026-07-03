@@ -2,16 +2,17 @@
 # 🧠 Context Note
 # このファイルは System5（ロング ミーン・リバージョン 高 ADX）のロジック専門
 #
-# 前提条件（audit-remediation 2026-07-02 で spec 準拠に是正）：
+# 前提条件（audit-remediation 2026-07-03 D3 Case A で docs 完全準拠に是正）：
 #   - 高 ADX 環境（ADX7 > 55）でのミーン・リバージョン狙い
-#   - ATR_Pct による変動性フィルター（> 2.5%）
+#   - 流動性 filter: AvgVolume50 > 500k 株, DollarVolume50 > 2.5M USD
+#   - ATR_Pct による変動性フィルター（> 4%, spec 準拠、旧 2.5% から是正）
 #   - Close > SMA100 + ATR10（100SMA+ATR バンドの上）
 #   - RSI3 < 50 で一時的な押し目（リバージョン環境）確認
 #   - 指標は precomputed のみ使用（ADX7 でランキング）
 #   - フロー: setup() → rank() → signals() の順序実行
 #
 # ロジック単位：
-#   filter()      → Close>=5, ADX7>55, ATR_Pct>2.5%
+#   filter()      → Close>=5, ADX7>55, ATR_Pct>4%, AvgVol50>500k, DV50>2.5M
 #   setup()       → filter & Close>SMA100+ATR10 & RSI3<50
 #   rank()        → ADX7 の降順ランキング（強いトレンド環境優先）
 #   signals()     → スコア付きシグナル抽出
@@ -19,14 +20,20 @@
 # Copilot へ：
 #   → ADX 閾値（55, spec 準拠）の変更は慎重に。他システムとの競合検証必須
 #   → RSI3 条件（< 50）の役割は「リバージョン環境確認」。ロジック変更禁止
-#   → ATR_Pct > 2.5% は変動性フィルター。下限変更は制御テストで確認
+#   → ATR_Pct > 4% は変動性フィルター (spec)。下限変更は制御テストで確認
+#   → 流動性 filter (AvgVol50/DV50) は subscriber 実運用のスリッページ抑制。緩和禁止
 # ============================================================================
 
 """System5 core logic (Long mean-reversion with high ADX).
 
 High ADX mean-reversion strategy:
-- Indicators: adx7, atr10, dollarvolume20, atr_pct, sma100, rsi3 (precomputed only)
-- Filter conditions: Close>=5, ADX7>55, ATR_Pct>2.5%
+- Indicators: adx7, atr10, dollarvolume20, atr_pct, sma100, rsi3,
+              avgvolume50, dollarvolume50 (precomputed only)
+- Filter conditions: Close>=5, ADX7>55, ATR_Pct>4%,
+                     AvgVolume50>500k, DollarVolume50>2.5M
+    (audit-remediation 2026-07-03 D3 Case A: docs/systems/システム5.txt 準拠。
+     旧: Close>=5 & ADX7>55 & ATR_Pct>2.5% のみで流動性 filter 完全欠如。
+     Case A では spec の AvgVol50/DV50 を追加し ATR を 2.5%→4% に是正。)
 - Setup conditions: filter & Close>SMA100+ATR10 & RSI3<50
     (audit-remediation 2026-07-02: spec 準拠に是正。旧実装は setup==filter で
      100SMA+ATR バンド / RSI3<50 が未 enforce、ADX 閾値も 35 と緩かった)
@@ -69,7 +76,20 @@ MIN_ADX_FULL_SCAN = 55.0  # ADX7 threshold for full-scan filtering (spec: >55)
 MAX_RSI3 = 50.0  # spec: 3日RSI < 50 (一時的な押し目確認)
 
 # Volatility filters
-DEFAULT_ATR_PCT_THRESHOLD = 0.025  # 2.5% minimum ATR percentage
+# audit-remediation 2026-07-03 (D3 Case A: docs 完全準拠に是正):
+#   docs/systems/システム5.txt:9 「ATRが4%を上回る」→ 0.04。
+#   旧 0.025 は 2026-07-02 audit で意図的に緩めていたが、Case A ユーザ判断
+#   (ペンス・ドープ methodology 原著者の意思通り docs 準拠) で spec に revert。
+DEFAULT_ATR_PCT_THRESHOLD = 0.04  # 4% minimum ATR percentage (spec)
+
+# Liquidity filters (audit-remediation 2026-07-03 D3 Case A: spec 準拠に追加)
+#   docs/systems/システム5.txt:7-8 の 2 条件:
+#     - 過去50日の平均出来高 > 500,000 株
+#     - 過去50日の平均売買代金 > 2,500,000 $
+#   旧実装ではこれらが filter に存在せず、common/today_signals.py の診断
+#   カウンタとして数えるだけで実 gate になっていなかった (D3 audit で判明)。
+MIN_AVG_VOLUME_50 = 500_000  # spec: AvgVolume50 > 500k 株
+MIN_DOLLAR_VOLUME_50 = 2_500_000  # spec: DollarVolume50 > 2.5M $
 
 # Ranking parameters
 DEFAULT_TOP_N = 20  # Default number of top candidates to extract
@@ -89,8 +109,17 @@ def format_atr_pct_threshold_label(threshold: float | None = None) -> str:
 def _apply_filter_conditions(df: pd.DataFrame) -> pd.DataFrame:
     """Apply System5 filter conditions, preserving existing 'filter' column if present.
 
+    audit-remediation 2026-07-03 (D3 Case A: docs 完全準拠に是正):
+        spec (docs/systems/システム5.txt:6-9) の 3 条件を全て enforce する:
+          - 過去50日の平均出来高 > 500,000 株      (avgvolume50 > MIN_AVG_VOLUME_50)
+          - 過去50日の平均売買代金 > 2,500,000 $   (dollarvolume50 > MIN_DOLLAR_VOLUME_50)
+          - ATR > 4%                              (atr_pct > DEFAULT_ATR_PCT_THRESHOLD)
+        加えて Close>=5 (penny stock 除外, operational safety) と ADX7>55
+        (spec では setup 条件だが filter に前倒し) を維持する。
+
     Args:
-        df: DataFrame with required indicators (Close, adx7, atr_pct)
+        df: DataFrame with required indicators (Close, adx7, atr_pct,
+            avgvolume50, dollarvolume50)
 
     Returns:
         DataFrame with 'filter' column added/updated
@@ -100,9 +129,25 @@ def _apply_filter_conditions(df: pd.DataFrame) -> pd.DataFrame:
     close = pd.to_numeric(result["Close"], errors="coerce")
     adx7 = pd.to_numeric(result["adx7"], errors="coerce")
     atr_pct = pd.to_numeric(result["atr_pct"], errors="coerce")
+    # audit-remediation 2026-07-03 (D3 Case A): 流動性 filter 追加。欠損列は
+    # NaN Series にフォールバックし fillna(False) で自動的に False 判定にする。
+    avgvol50 = (
+        pd.to_numeric(result["avgvolume50"], errors="coerce")
+        if "avgvolume50" in result.columns
+        else pd.Series(float("nan"), index=result.index)
+    )
+    dv50 = (
+        pd.to_numeric(result["dollarvolume50"], errors="coerce")
+        if "dollarvolume50" in result.columns
+        else pd.Series(float("nan"), index=result.index)
+    )
 
     computed_filter = (
-        (close >= MIN_PRICE) & (adx7 > MIN_ADX) & (atr_pct > DEFAULT_ATR_PCT_THRESHOLD)
+        (close >= MIN_PRICE)
+        & (adx7 > MIN_ADX)
+        & (atr_pct > DEFAULT_ATR_PCT_THRESHOLD)
+        & (avgvol50 > MIN_AVG_VOLUME_50)
+        & (dv50 > MIN_DOLLAR_VOLUME_50)
     ).fillna(False)
 
     if "filter" in result.columns:

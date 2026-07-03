@@ -26,3 +26,10 @@ SPY が直近 70 日間の高値を付けるまで売りポジションを保有
 
 ポジションサイジング
 この例では、これは唯一のシステムなので資金全体の 100%を使う（組み合わせシステムでは資金全体の100%は使わない）。
+
+---
+【変更履歴】
+2026-07-03 D3 alignment audit:
+	•	 System7 は SPY 固定・フィルター無しの catastrophe hedge。docs と impl は元から完全整合済み。
+	     この dispatch では追加変更なし (verify only)。
+	•	 参考: docs/D3_CASE_A_IMPL_20260703.md の全 system alignment matrix。

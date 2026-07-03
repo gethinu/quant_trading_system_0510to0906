@@ -51,9 +51,18 @@ SYSTEM4_HV_PERIOD = 50
 SYSTEM4_SMA_PERIOD = 200
 
 # === System5 (Long mean-reversion with high ADX) 定数 ===
-SYSTEM5_MIN_PRICE = 5.0
-SYSTEM5_MIN_DOLLAR_VOLUME = 25_000_000  # 25M
-SYSTEM5_ATR_PCT_THRESHOLD = 0.025  # 2.5%
+# audit-remediation 2026-07-03 (D3 Case A: docs 完全準拠に是正):
+#   docs/systems/システム5.txt:6-9 の spec は
+#     - 過去50日の平均出来高 > 500,000 株
+#     - 過去50日の平均売買代金 > 2,500,000 $
+#     - ATR > 4%
+#   旧値: SYSTEM5_MIN_DOLLAR_VOLUME=25_000_000 は spec の桁違い かつ 未使用 (dead)、
+#         SYSTEM5_ATR_PCT_THRESHOLD=0.025 は spec の 4% を下回る緩め設定。
+#   Case A では spec 値に是正 + 実 gate として core/system5.py の filter に接続。
+SYSTEM5_MIN_PRICE = 5.0  # docs 未記載だが penny stock 除外の operational safety として維持
+SYSTEM5_MIN_AVG_VOLUME_50 = 500_000  # spec: 過去50日の平均出来高 > 500k 株
+SYSTEM5_MIN_DOLLAR_VOLUME = 2_500_000  # spec: 過去50日の平均売買代金 > 2.5M $ (旧 25M dead から是正)
+SYSTEM5_ATR_PCT_THRESHOLD = 0.04  # spec: ATR > 4% (旧 2.5% から是正)
 SYSTEM5_ADX_THRESHOLD = 55  # ADX7 > 55
 SYSTEM5_ADX_PERIOD = 7
 
@@ -119,6 +128,11 @@ SYSTEM5_REQUIRED_INDICATORS = [
     # (Close>SMA100+ATR10, RSI3<50) を enforce するため追加。
     "sma100",
     "rsi3",
+    # audit-remediation 2026-07-03 (D3 Case A: 流動性 filter 追加):
+    # spec (docs/systems/システム5.txt:6-9) の 過去50日平均出来高>500k /
+    # 過去50日平均売買代金>2.5M を実 gate として enforce するため追加。
+    "avgvolume50",
+    "dollarvolume50",
 ]
 
 SYSTEM6_REQUIRED_INDICATORS = [
@@ -169,7 +183,10 @@ SYSTEM_CONFIGS = {
         "min_rows": MIN_ROWS_SYSTEM5,
         "required_indicators": SYSTEM5_REQUIRED_INDICATORS,
         "min_price": SYSTEM5_MIN_PRICE,
+        # audit-remediation 2026-07-03 (D3 Case A): 流動性 filter を新設。
+        # SYSTEM5_MIN_DOLLAR_VOLUME は spec 準拠の 2.5M (DV50) を意味する。
         "min_dollar_volume": SYSTEM5_MIN_DOLLAR_VOLUME,
+        "min_avg_volume_50": SYSTEM5_MIN_AVG_VOLUME_50,
         "atr_pct_threshold": SYSTEM5_ATR_PCT_THRESHOLD,
         "adx_threshold": SYSTEM5_ADX_THRESHOLD,
     },
@@ -217,7 +234,7 @@ _PIPELINE_FILPASS_COND: dict[str, str] = {
     "sys2": "Close >= 5 かつ DollarVolume20 > 25M かつ ATR_Ratio > 0.03",
     "sys3": "Close >= 5 かつ DollarVolume20 > 25M かつ ATR_Ratio >= 0.05",
     "sys4": "DollarVolume50 > 100M かつ HV50 in [10,40]",
-    "sys5": "Close >= 5 かつ ATR_Pct > 0.025",
+    "sys5": "Close >= 5 かつ ADX7 > 55 かつ ATR_Pct > 0.04 かつ AvgVolume50 > 500k かつ DollarVolume50 > 2.5M",
     "sys6": "Low >= 5 かつ DollarVolume50 > 10M",
     "sys7": "SPY 固定 (共通フィルター無し)",
 }

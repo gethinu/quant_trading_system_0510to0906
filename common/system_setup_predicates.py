@@ -41,7 +41,15 @@ from common.indicator_access import get_indicator
 from common.indicator_access import to_float as indicator_to_float
 
 # System5 の ATR% 閾値: core/system5.DEFAULT_ATR_PCT_THRESHOLD と揃える (循環依存回避のため再定義)
-DEFAULT_ATR_PCT_THRESHOLD: float = 0.025
+# audit-remediation 2026-07-03 (D3 Case A): spec (docs/systems/システム5.txt:9)
+# 「ATR が 4% を上回る」に合わせて 0.025 → 0.04 に是正。
+DEFAULT_ATR_PCT_THRESHOLD: float = 0.04
+
+# System5 の流動性 filter 閾値 (audit-remediation 2026-07-03 D3 Case A):
+# spec (docs/systems/システム5.txt:7-8) 準拠。core/system5.MIN_AVG_VOLUME_50 /
+# MIN_DOLLAR_VOLUME_50 と揃える (循環依存回避のため再定義)。
+MIN_AVG_VOLUME_50_SYSTEM5: float = 500_000.0
+MIN_DOLLAR_VOLUME_50_SYSTEM5: float = 2_500_000.0
 
 
 # --- 汎用ユーティリティ ----------------------------------------------------
@@ -274,11 +282,24 @@ MAX_RSI3_SYSTEM5: float = 50.0
 def system5_setup_predicate(
     row: pd.Series, *, atr_pct_threshold: float | None = None
 ) -> bool:
+    """System5 setup predicate (spec-compliant, D3 Case A applied 2026-07-03).
+
+    Conditions (docs/systems/システム5.txt):
+      filter (Case A で拡張):
+        - Close >= 5 (penny stock 除外, operational safety)
+        - adx7 > 55         (spec は setup 条件だが filter に前倒し)
+        - atr_pct > 4%      (spec, Case A で 2.5%→4% 是正)
+        - avgvolume50 > 500,000   (spec, Case A で新設)
+        - dollarvolume50 > 2.5M   (spec, Case A で新設)
+      setup:
+        - close > sma100 + atr10  (spec)
+        - rsi3 < 50               (spec)
+    """
     try:
         close = _to_float(row.get("Close"))
         adx7 = _to_float(row.get("adx7"))
         atr_pct = _to_float(row.get("atr_pct"))
-        # case-insensitive access for SMA100 / ATR10 / RSI3
+        # case-insensitive access for SMA100 / ATR10 / RSI3 / AvgVol50 / DV50
         from typing import Mapping as _Mapping
         from typing import cast as _cast
 
@@ -286,17 +307,24 @@ def system5_setup_predicate(
         sma100 = indicator_to_float(get_indicator(row_map, "sma100"))
         atr10 = indicator_to_float(get_indicator(row_map, "atr10"))
         rsi3 = indicator_to_float(get_indicator(row_map, "rsi3"))
+        # audit-remediation 2026-07-03 (D3 Case A): 流動性 filter を predicate 側にも同期
+        avgvol50 = indicator_to_float(get_indicator(row_map, "avgvolume50"))
+        dv50 = indicator_to_float(get_indicator(row_map, "dollarvolume50"))
         threshold = (
             atr_pct_threshold
             if atr_pct_threshold is not None
             else DEFAULT_ATR_PCT_THRESHOLD
         )
-        if not _all_not_nan([close, adx7, atr_pct, sma100, atr10, rsi3]):
+        if not _all_not_nan(
+            [close, adx7, atr_pct, sma100, atr10, rsi3, avgvol50, dv50]
+        ):
             return False
         return (
             (close >= 5.0)
             and (adx7 > MIN_ADX_SYSTEM5)
             and (atr_pct > threshold)
+            and (avgvol50 > MIN_AVG_VOLUME_50_SYSTEM5)
+            and (dv50 > MIN_DOLLAR_VOLUME_50_SYSTEM5)
             and (close > (sma100 + atr10))
             and (rsi3 < MAX_RSI3_SYSTEM5)
         )
@@ -370,6 +398,8 @@ __all__ = [
     "get_system_setup_predicate",
     "SETUP_PREDICATES",
     "DEFAULT_ATR_PCT_THRESHOLD",
+    "MIN_AVG_VOLUME_50_SYSTEM5",
+    "MIN_DOLLAR_VOLUME_50_SYSTEM5",
 ]
 
 
