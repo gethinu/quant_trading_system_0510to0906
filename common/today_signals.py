@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 import inspect
+import logging
 import math
 import os
 from pathlib import Path
@@ -11,6 +12,8 @@ from typing import Any, Mapping, cast
 
 import numpy as np
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 from common.indicator_access import get_indicator, to_float
 
@@ -977,7 +980,15 @@ def _compute_setup_pass(
                 )
             except Exception:
                 spy_df = None
-            spy_gate_bool = _make_spy_gate(spy_df, column="sma100")
+            # NOTE(F2 P0#1 audit fix, 2026-07-03): SPY frame columns are uppercase
+            # ("SMA100" per utils_spy.get_spy_with_indicators). Passing the lowercase
+            # "sma100" made Series.get return None → spy_gate stayed None → the
+            # `setup_pass = final_pass_count if spy_gate != 0 else 0` gate silently
+            # opened (None != 0 is True) → System1 emitted long buy signals for a
+            # full year even on days when SPY was below SMA100. Passing the correct
+            # case here is the primary defense; _make_spy_gate now also resolves
+            # column case-insensitively as a belt-and-suspenders safeguard.
+            spy_gate_bool = _make_spy_gate(spy_df, column="SMA100")
             if spy_gate_bool is True:
                 spy_gate = 1
             elif spy_gate_bool is False:
@@ -1131,6 +1142,12 @@ def _compute_setup_pass(
                 except Exception:
                     pass
         elif name == "system5":
+            # audit-remediation 2026-07-03 (D3 Case A):
+            #   下記の 3 段カウンタ (s5_av / s5_dv / s5_atr) は診断ログ用の集計。
+            #   Case A 実装以降、実 gate は core/system5.py::_apply_filter_conditions
+            #   に格上げ済み (avgvolume50>500k & dollarvolume50>2.5M を filter 列に反映)。
+            #   予測: Case A 実 gate 化により top-20 候補 236→44 / unique 銘柄 73→16
+            #   (5y sample proxy sim ベース、D3 audit report 参照)。
             threshold_label = format_atr_pct_threshold_label()
             s5_total = len(rows_list)
             s5_av = 0
@@ -2130,18 +2147,55 @@ def _normalize_daily_index(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _make_spy_gate(spy_df: pd.DataFrame | None, column: str = "SMA200") -> bool | None:
+    """Return True iff SPY close > `column` on the last row.
+
+    Column resolution is case-insensitive: the SPY frame produced by
+    :func:`common.utils_spy.get_spy_with_indicators` uses uppercase
+    (``SMA100`` / ``SMA200``) while callers historically passed both cases.
+    A silent lookup miss previously caused the System1 SPY>SMA100 gate to
+    fail open (None != 0 → treated as "passed") — see F2 refactor audit
+    P0#1. If the requested column cannot be resolved we now emit a WARN
+    log so a broken cache surfaces instead of silently disabling the gate.
+    """
     if spy_df is None or getattr(spy_df, "empty", True):
         return None
     try:
         last_row = spy_df.iloc[-1]
     except Exception:
         return None
+
+    # Case-insensitive resolution against the actual row index. We check the
+    # exact name first (fast path) and only build a lowercase map on miss.
+    resolved_col: str | None = None
+    try:
+        index_labels = list(last_row.index)
+    except Exception:
+        index_labels = []
+    if column in index_labels:
+        resolved_col = column
+    else:
+        target = column.lower()
+        for cand in index_labels:
+            try:
+                if str(cand).lower() == target:
+                    resolved_col = str(cand)
+                    break
+            except Exception:
+                continue
+    if resolved_col is None:
+        logger.warning(
+            "SPY gate column %r not found in SPY frame (available=%s); gate=None",
+            column,
+            [str(c) for c in index_labels[:12]],
+        )
+        return None
+
     try:
         close_val = pd.to_numeric(
             pd.Series([last_row.get("Close")]), errors="coerce"
         ).iloc[0]
         sma_val = pd.to_numeric(
-            pd.Series([last_row.get(column)]), errors="coerce"
+            pd.Series([last_row.get(resolved_col)]), errors="coerce"
         ).iloc[0]
     except Exception:
         return None
@@ -3014,6 +3068,7 @@ compute_today_signals = run_all_systems_today
 
 
 __all__ = [
+    # F2 P0#1/#2/#3 audit fixes (2026-07-03) applied above; see docs/REFACTOR_AUDIT_20260702_fable5.md
     "get_today_signals_for_strategy",
     "LONG_SYSTEMS",
     "SHORT_SYSTEMS",

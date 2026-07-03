@@ -27,6 +27,22 @@ _MAX_RETRIES = 4
 _BODY_LIMIT = 3800
 
 
+def _mask_topic(topic: str | None) -> str:
+    """Return an unguessable-shape but useful-in-logs marker for the ntfy topic.
+
+    NOTE(F2 P0#3 audit fix, 2026-07-03): the topic acts as the secret access
+    token for the ntfy channel — anyone who has it can subscribe to (or
+    spoof-push into) the operator's push feed. Previously the full topic
+    flowed into ``PublishResult.target`` and the dry-run detail, which are
+    persisted in logs and (via ``meta.publish_status``) in the exported
+    signals JSON that subscribers can download. We now expose only a short
+    prefix + length so operators can still distinguish channels.
+    """
+    if not topic:
+        return "unset"
+    return f"{topic[:3]}…({len(topic)})"
+
+
 def _default_url() -> str:
     return os.getenv("NTFY_URL") or "https://ntfy.sh"
 
@@ -114,7 +130,7 @@ class NtfyPublisher(Publisher):
                 publisher=self.name,
                 ok=True,
                 detail=_dump_dry_run(self.endpoint, headers, body),
-                target=self.topic or "dry-run",
+                target=_mask_topic(self.topic) if self.topic else "dry-run",
             )
 
         if not self.is_configured():
@@ -141,7 +157,7 @@ class NtfyPublisher(Publisher):
                         ok=True,
                         status_code=resp.status_code,
                         detail="sent",
-                        target=self.topic,
+                        target=_mask_topic(self.topic),
                     )
                 if resp.status_code == 429 or resp.status_code >= 500:
                     backoff = min(2 ** (attempt - 1), 8)
@@ -164,13 +180,30 @@ class NtfyPublisher(Publisher):
             ok=False,
             status_code=last_status,
             detail=last_detail or "failed",
-            target=self.topic,
+            target=_mask_topic(self.topic),
         )
 
 
 def _dump_dry_run(endpoint: str, headers: dict[str, str], body: str) -> str:
     import json
 
+    # Mask the topic segment inside the endpoint URL too — otherwise dry-run
+    # detail (persisted in PublishResult.detail) leaks the same secret we
+    # just masked out of `target`. See F2 P0#3 audit fix.
+    from urllib.parse import urlsplit, urlunsplit
+
+    try:
+        parts = urlsplit(endpoint)
+        if parts.path:
+            segments = parts.path.strip("/").split("/")
+            if segments:
+                segments[-1] = _mask_topic(segments[-1])
+            masked_path = "/" + "/".join(segments)
+            endpoint = urlunsplit(parts._replace(path=masked_path))
+    except Exception:
+        # Never fail dry-run rendering on an unparseable URL; better to
+        # ship the raw endpoint than crash the publisher.
+        pass
     return json.dumps(
         {"endpoint": endpoint, "headers": headers, "body": body}, ensure_ascii=False
     )
