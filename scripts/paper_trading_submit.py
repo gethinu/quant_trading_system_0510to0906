@@ -54,14 +54,48 @@ def _confirm(prompt: str) -> bool:
     return ans in ("y", "yes")
 
 
+def _count_input_signals(json_data: dict) -> int:
+    """input JSON の systems[*].signals 総数を数える。
+
+    F2 P0#5 の判定用: input に signals があるのに orders=0 なら「schema
+    drift / min_notional 過小 / tier key 誤り」等の anomaly。input が元々
+    空 (真の flat book) と区別するために使う。
+    """
+    total = 0
+    systems = (json_data or {}).get("systems") or {}
+    if not isinstance(systems, dict):
+        return 0
+    for sys_block in systems.values():
+        if not isinstance(sys_block, dict):
+            continue
+        sigs = sys_block.get("signals") or []
+        if isinstance(sigs, list):
+            total += len(sigs)
+    return total
+
+
 def _submit_from_json(args: argparse.Namespace) -> int:
-    """--signals-json 経路: JSON → paper_orders JSON + Paper 口座送信 (--confirm 時)。"""
+    """--signals-json 経路: JSON → paper_orders JSON + Paper 口座送信 (--confirm 時).
+
+    NOTE (F2 P0#5 audit fix, 2026-07-03):
+        以前は ``signals_json_to_orders`` が [] を返しても exit 0 で silent
+        success 扱いだった。input JSON に signals が並んでいても schema drift
+        (weight 欠落、min_notional 過小、tier キー不整合等) で全弾かれるケース
+        が実際に発生し、daily_pipeline は「注文が送信された」と誤認していた。
+        修正後は input_signal_count を保存し、input>0 かつ orders=0 の場合は
+        anomaly 扱いで:
+            * loud warning を print
+            * output JSON の meta.status に "no_orders_generated" マーカーを追記
+            * exit code 3 (subscribers が silent success と区別可能)
+    """
     src = Path(args.signals_json)
     if not src.exists():
         print(f"[error] signals JSON not found: {src}")
         return 2
     with src.open(encoding="utf-8") as fh:
         json_data = json.load(fh)
+
+    input_signal_count = _count_input_signals(json_data)
 
     if not args.confirm:
         print("[--confirm なし] dry-run モードで実行します (実発注なし)。")
@@ -94,7 +128,32 @@ def _submit_from_json(args: argparse.Namespace) -> int:
 
     ok = sum(1 for o in orders if o.order_id)
     fail = sum(1 for o in orders if o.error)
-    print(f"\n完了: 生成={len(orders)} 送信={ok} 失敗={fail} (--confirm={args.confirm})")
+    print(
+        f"\n完了: 入力 signals={input_signal_count} "
+        f"生成={len(orders)} 送信={ok} 失敗={fail} "
+        f"(--confirm={args.confirm})"
+    )
+
+    # F2 P0#5: 「input signals > 0 なのに生成 orders = 0」は subscriber が
+    # silent success と誤解できないよう可視化する。真の flat book
+    # (input=0 → orders=0) との区別を必ず出力側に残す。
+    if input_signal_count == 0:
+        status_marker = "no_input_signals"  # 真の flat book: 静かに exit 0
+    elif len(orders) == 0:
+        status_marker = "no_orders_generated"  # anomaly
+    elif fail > 0 and ok == 0:
+        status_marker = "all_submit_failed"
+    elif fail > 0:
+        status_marker = "partial_failed"
+    else:
+        status_marker = "ok"
+
+    if status_marker == "no_orders_generated":
+        print(
+            "[WARN] input signals があるのに 1 件も order が生成されませんでした "
+            f"(input={input_signal_count})。schema drift / min_notional 過小 / "
+            "tier キー不整合を確認してください。"
+        )
 
     if args.output_json:
         out_path = Path(args.output_json)
@@ -111,10 +170,19 @@ def _submit_from_json(args: argparse.Namespace) -> int:
                 "count": len(orders),
                 "submitted": ok,
                 "failed": fail,
+                "input_signals": input_signal_count,
+                "status": status_marker,
             },
         )
         print(f"[write] paper_orders JSON: {out_path}")
 
+    # exit code policy:
+    #   0 = ok / no_input_signals (真の flat book)
+    #   1 = partial_failed / all_submit_failed
+    #   3 = no_orders_generated (anomaly: subscribers が silent success と
+    #       区別できるよう区別 code。1 だと submit_error と紛れる)
+    if status_marker == "no_orders_generated":
+        return 3
     return 0 if fail == 0 else 1
 
 
@@ -167,7 +235,10 @@ def main(argv: list[str] | None = None) -> int:
     signals = load_signals(args)
     if signals is None or signals.empty:
         print("シグナルなし。発注対象はありません。")
+        # 真の flat book (input=0) は silent success で OK。
         return 0
+
+    input_signal_count = int(len(signals))
 
     if not args.confirm:
         print("[--confirm なし] dry-run モードで実行します (実発注なし)。")
@@ -175,6 +246,13 @@ def main(argv: list[str] | None = None) -> int:
         for o in orders:
             print(" ", o.to_row())
         print(f"\n合計 {len(orders)} 注文 (dry-run)。実発注は --confirm を付けてください。")
+        # dry-run 時も input>0 & orders=0 は anomaly を可視化する。
+        if input_signal_count > 0 and len(orders) == 0:
+            print(
+                "[WARN] input signals があるのに order が 0 件。"
+                "schema drift / side 不明 / shares<=0 を確認してください。"
+            )
+            return 3
         return 0
 
     try:
@@ -187,8 +265,13 @@ def main(argv: list[str] | None = None) -> int:
 
     planned = signals_to_orders(signals, account_equity=args.equity, dry_run=True)
     if not planned:
-        print("発注対象なし。")
-        return 0
+        # F2 P0#5: input>0 なのに planned=0 は silent success させない。
+        print(
+            "[WARN] 発注対象なし。input signals があるのに 1 件も plan されませんでした "
+            f"(input={input_signal_count})。schema drift / side 不明 / shares<=0 を"
+            "確認してください。"
+        )
+        return 3
 
     submitted, skipped, failed = 0, 0, 0
     for po in planned:

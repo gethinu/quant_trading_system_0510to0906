@@ -5,8 +5,60 @@ from concurrent.futures import ThreadPoolExecutor
 import os
 import time
 from typing import Any
+import uuid
 
 from dotenv import load_dotenv
+
+
+# F2 P0#8 audit fix (2026-07-03):
+# ``submit_order_with_retry`` は以前、client_order_id 未指定でも retry を
+# 何度でも走らせていた。timeout の retry は特に危険で、Alpaca 側が accept
+# 済みの後で client 側 timeout → retry すると、client_order_id が異なる
+# request として重複約定する。修正後は:
+#   (a) retries > 0 かつ client_order_id 未指定なら自動生成 (uuid) して
+#       Alpaca 側で idempotent dedup (422 duplicate) が効くようにする
+#   (b) 明らかに非 transient なエラーは retry せず即 raise (資金不足、
+#       422 duplicate、無効 symbol は retry しても改善しない)
+_TRANSIENT_ERROR_PATTERNS = (
+    "timeout",
+    "timed out",
+    "connection",
+    "temporarily",
+    "rate limit",
+    "429",
+    "500",
+    "502",
+    "503",
+    "504",
+    "5xx",
+    "unavailable",
+    "reset by peer",
+)
+_NON_TRANSIENT_ERROR_PATTERNS = (
+    "insufficient",
+    "buying power",
+    "duplicate",
+    "422",
+    "not tradable",
+    "not found",
+    "invalid",
+    "market is closed",
+)
+
+
+def _is_transient_error(exc: Exception) -> bool:
+    """error message から transient / non-transient を判定 (best-effort)。
+
+    Alpaca SDK は例外階層が薄く、HTTP status も統一されていないため、
+    message parse に頼らざるを得ない。判別不能なら True (=retry する)
+    に倒して既存挙動を維持しつつ、明確な non-transient だけ即座に諦める。
+    """
+    msg = str(exc).lower()
+    if any(p in msg for p in _NON_TRANSIENT_ERROR_PATTERNS):
+        return False
+    if any(p in msg for p in _TRANSIENT_ERROR_PATTERNS):
+        return True
+    return True  # 不明時は retry する (backward-compat)
 
 try:  # pragma: no cover - SDK 未導入環境でも壊れないように
     from alpaca.trading.client import TradingClient
@@ -245,10 +297,34 @@ def submit_order_with_retry(
     log_callback=None,
 ):
     """submit_order をリトライ付きで実行。
+
     - retries: 失敗時の再試行回数
     - backoff_seconds: 失敗毎に待機する秒数（指数ではなく線形）
     - rate_limit_seconds: 成功/失敗に関わらず各試行後に待機
+
+    F2 P0#8 audit fix (2026-07-03):
+        (a) retries > 0 で ``client_order_id`` 未指定なら自動生成し、
+            Alpaca 側の 422 duplicate で idempotent dedup できるようにする。
+            これで「timeout の直後に Alpaca が accept して、client が retry
+            して二重約定する」古典的な duplicate fill を防ぐ。
+        (b) 非 transient と判定できるエラー (資金不足、422 duplicate、
+            無効 symbol、市場休場) は retry せず即 raise。retry しても状況
+            改善しないうえ、log が汚れる。
     """
+    # F2 P0#8-(a): retries を使う場合、client_order_id が無ければ自動生成する。
+    # Alpaca は同一 client_order_id での再送を 422 duplicate として却下するので、
+    # timeout 後の retry で「二重約定」が起きないよう idempotent key を張る。
+    if retries > 0 and not client_order_id:
+        client_order_id = f"retry-{symbol.lower()}-{uuid.uuid4().hex[:16]}"
+        if log_callback:
+            try:
+                log_callback(
+                    f"auto-generated client_order_id for idempotent retry: "
+                    f"{client_order_id}"
+                )
+            except Exception:
+                pass
+
     last_exc: Exception | None = None
     for i in range(retries + 1):
         try:
@@ -272,17 +348,24 @@ def submit_order_with_retry(
             return order
         except Exception as e:  # pragma: no cover - ネットワーク/SDK例外
             last_exc = e
+            # F2 P0#8-(b): non-transient なら retry しない (資金不足/duplicate/
+            # 無効 symbol/市場休場)。log にも "no retry" を明示。
+            transient = _is_transient_error(e)
             if log_callback:
                 try:
                     msg = " ".join(
                         [
                             f"submit retry {i + 1}/{retries}: {symbol}",
                             f"qty={qty} error={e}",
+                            "(no retry: non-transient)" if not transient else "",
                         ]
-                    )
+                    ).rstrip()
                     log_callback(msg)
                 except Exception:
                     pass
+            if not transient:
+                # non-transient は即座に諦めて raise
+                break
             if i < retries:
                 time.sleep(max(0.0, backoff_seconds))
             if rate_limit_seconds > 0:

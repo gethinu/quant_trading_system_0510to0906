@@ -74,6 +74,20 @@ class OrderSubmitError(RuntimeError):
     pass
 
 
+class PositionsFetchError(RuntimeError):
+    """Alpaca open-positions 取得に失敗したことを明示するエラー。
+
+    F2 P0#7 audit fix (2026-07-03):
+        以前は ``_fetch_open_positions`` が例外を silent に呑んで ``{}`` を
+        返していた。呼び出し側 (``signals_to_orders`` の非 dry_run 経路) は
+        「今 flat」と「fetch 失敗」を区別できず、既に long で持っている銘柄に
+        重ねて buy を出す duplicate exposure を発生させ得る。
+        修正後は fetch fail を silent {} ではなく本例外で raise し、caller は
+        (a) 例外を propagate して発注を中止するか、(b) 明示的に fallback を
+        書くかの二択を強いる。silent duplicate は起きない。
+    """
+
+
 @dataclass(slots=True)
 class PreparedOrder:
     symbol: str
@@ -399,12 +413,26 @@ def signals_to_orders(
 
 
 def _fetch_open_positions(client: Any) -> dict[str, float]:
+    """Alpaca open positions を ``{symbol: signed_qty}`` として返す。
+
+    F2 P0#7 audit fix (2026-07-03):
+        取得エラー時に silent ``{}`` を返さない。``PositionsFetchError`` を
+        raise して caller (``signals_to_orders`` 非 dry_run 経路) が
+        「fetch 失敗」を明示的に扱えるようにする。
+
+        なぜ raise か: caller は fetch 結果を dedup に使う。
+        ``open_positions.get(sym, 0.0)`` は「fetch=空」も「本当に flat」も
+        ``0.0`` として区別できない。silent {} だと既に持ってる銘柄に buy を
+        重ねて duplicate exposure が起き得る。
+    """
     out: dict[str, float] = {}
     try:
         positions = client.get_all_positions()
-    except Exception as exc:  # pragma: no cover
-        logger.warning("open positions 取得失敗: %s", exc)
-        return out
+    except Exception as exc:
+        logger.error("open positions 取得失敗、safe abort: %s", exc)
+        raise PositionsFetchError(
+            f"Alpaca open positions fetch failed: {exc}"
+        ) from exc
     for p in positions:
         try:
             sym = str(getattr(p, "symbol", "")).upper()
@@ -1195,8 +1223,10 @@ __all__ = [
     "PreparedExit",
     "PositionSnapshot",
     "ExitReasonCode",
+    "InvalidSideError",
     "LiveAccountGuardError",
     "OrderSubmitError",
+    "PositionsFetchError",
     "TIER_NOTIONAL_USD",
     "assert_paper_env",
     "resolve_tier_notional",

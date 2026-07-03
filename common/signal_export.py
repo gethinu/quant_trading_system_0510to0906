@@ -198,8 +198,19 @@ def build_signals_json(
     elapsed_seconds: float | None = None,
     cli_version: str = CLI_VERSION,
     generated_at: datetime | None = None,
+    status: str = "ok",
+    abort_reason: str | None = None,
 ) -> dict[str, Any]:
-    """``(final_df, per_system)`` を version 1.0 の JSON dict に変換する。"""
+    """``(final_df, per_system)`` を version 1.0 の JSON dict に変換する。
+
+    NOTE (F2 P0#6 audit fix, 2026-07-03):
+        以前は compute 中の SystemExit 時に ``final_df=None, per_system={}`` で
+        空 payload を書き、``meta`` に abort マーカーが無かった。subscribers は
+        「今日は 0 signals」と「pipeline aborted」を区別できず、silent 事故に
+        なっていた。修正後は ``status`` / ``abort_reason`` を meta に埋め込み、
+        publisher / dashboard / test 側で明示的に判別できる。既存 subscribers は
+        ``meta.status`` が未設定なら "ok" 扱いで backward-compat。
+    """
     now = generated_at or _try_tokyo_now()
     run_id = run_id or generate_run_id(now)
     per_system = per_system or {}
@@ -316,6 +327,11 @@ def build_signals_json(
             "elapsed_seconds": round(float(elapsed_seconds), 1)
             if elapsed_seconds is not None
             else None,
+            # F2 P0#6: subscribers が abort と flat book を区別できるよう明示。
+            # 既定 "ok" は真の flat book / 正常了、"aborted" は pipeline 側の
+            # 停止 (stale cache 等)。abort_reason は運用側 log 収集用。
+            "status": status,
+            "abort_reason": abort_reason,
         },
     }
     return payload
@@ -393,6 +409,8 @@ def run_headless(argv: list[str]) -> int:
     )
 
     t0 = time.time()
+    status: str = "ok"
+    abort_reason: str | None = None
     try:
         from scripts.run_all_systems_today import compute_today_signals
 
@@ -407,12 +425,20 @@ def run_headless(argv: list[str]) -> int:
         )
     except SystemExit as exc:
         # compute 側は「全銘柄 stale で除外」時に SystemExit(1) を raise する。
-        # headless では空 payload を書き出し、後段 (配信) が空を検知できるようにする。
+        # F2 P0#6: 以前はここで silent に final_df=None, per_system={} を返し、
+        # exit 0 で空 payload を書いていた。subscribers は「今日は 0 signals」
+        # と「pipeline aborted」を区別できず silent 事故になる。
+        # 修正後は meta.status="aborted" と abort_reason を payload に埋め、
+        # exit code も 3 に上げて daily_pipeline / dashboard 側で検知可能に。
+        code = getattr(exc, "code", exc)
         logger.warning(
-            "compute aborted (SystemExit=%s): rolling cache が未更新の可能性。空 payload を出力します。",
-            getattr(exc, "code", exc),
+            "compute aborted (SystemExit=%s): rolling cache が未更新の可能性。"
+            "meta.status='aborted' の空 payload を出力します。",
+            code,
         )
         final_df, per_system = None, {}
+        status = "aborted"
+        abort_reason = f"compute_today_signals_systemexit:{code}"
     except Exception as exc:  # noqa: BLE001
         logger.exception("compute_today_signals failed: %s", exc)
         return 1
@@ -424,17 +450,24 @@ def run_headless(argv: list[str]) -> int:
         date_str=date_str,
         run_id=run_id,
         elapsed_seconds=elapsed,
+        status=status,
+        abort_reason=abort_reason,
     )
 
     out_path = Path(args.output_json) if args.output_json else default_output_path(date_str)
     write_signals_json(payload, out_path)
 
     logger.info(
-        "wrote %s (total_signals=%d, notional=$%.0f, elapsed=%.1fs)",
+        "wrote %s (total_signals=%d, notional=$%.0f, elapsed=%.1fs, status=%s)",
         out_path,
         payload["portfolio"]["total_signals"],
         payload["portfolio"]["total_notional_usd"],
         elapsed,
+        status,
     )
     print(str(out_path))
+    # F2 P0#6: subscribers に abort を伝えるため、abort 時は non-zero exit
+    # (daily_pipeline.ps1 側は 1/2 を FAIL 扱いなので、3 に分ける)。
+    if status == "aborted":
+        return 3
     return 0
