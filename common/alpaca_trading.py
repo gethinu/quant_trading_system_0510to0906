@@ -26,14 +26,28 @@ from common import broker_alpaca as ba
 
 logger = logging.getLogger(__name__)
 
+# NOTE (docs-alignment 2026-07-03):
+# System 別のデフォルト注文タイプは docs/systems/システム{N}.txt の「仕掛け」節を
+# single source of truth とする:
+#   S1 = 翌日寄付成行 (MARKET)
+#   S2 = 翌日 前日終値+4% 以上の指値売 (LIMIT)
+#   S3 = 前日終値-7% 指値買 (LIMIT)
+#   S4 = 寄付成行 (MARKET)
+#   S5 = 前日終値-3% 指値買 (LIMIT)
+#   S6 = 前日終値+5% 指値売 (LIMIT)
+#   S7 = 翌日寄付成行 (MARKET)  ← SPY 固定 catastrophe hedge
+# 従来 (2026-07-03 手前) の map は S3/S5/S7 で docs と乖離していた:
+#   S3=market (docs=limit), S5=market (docs=limit), S7=limit (docs=market)。
+# limit_price が row に無い場合の runtime fallback (`ot = "market"`) は現状維持
+# なので、この修正で S3/S5 の指値なし fallback は市場価格発注に落ちる (誤発注防止)。
 _DEFAULT_SYSTEM_ORDER_TYPE = {
     "system1": "market",
-    "system3": "market",
-    "system4": "market",
-    "system5": "market",
     "system2": "limit",
+    "system3": "limit",
+    "system4": "market",
+    "system5": "limit",
     "system6": "limit",
-    "system7": "limit",
+    "system7": "market",
 }
 
 _LOG_DIR = Path(os.getenv("ALPACA_ORDER_LOG_DIR", "logs"))

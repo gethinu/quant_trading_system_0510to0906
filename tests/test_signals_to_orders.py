@@ -20,7 +20,12 @@ def signals() -> pd.DataFrame:
             {"symbol": "AAPL", "system": "system1", "side": "long", "shares": 10, "entry_price": 195.0, "entry_date": "2026-06-30"},
             # system2 = limit, short -> sell (limit_price=entry_price)
             {"symbol": "TSLA", "system": "system2", "side": "short", "shares": 8, "entry_price": 250.0, "entry_date": "2026-06-30"},
-            # system7 = limit (SPY hedge), short -> sell
+            # system3 = limit (前日終値-7% 指値買), long -> buy (docs-alignment 2026-07-03)
+            {"symbol": "AMD", "system": "system3", "side": "long", "shares": 5, "entry_price": 140.0, "entry_date": "2026-06-30"},
+            # system5 = limit (前日終値-3% 指値買), long -> buy (docs-alignment 2026-07-03)
+            {"symbol": "NVDA", "system": "system5", "side": "long", "shares": 4, "entry_price": 120.0, "entry_date": "2026-06-30"},
+            # system7 = MARKET (SPY hedge, 翌日寄付成行 per docs/systems/システム7.txt),
+            # short -> sell. docs-alignment 2026-07-03 に是正 (旧: limit)。
             {"symbol": "SPY", "system": "system7", "side": "short", "shares": 3, "entry_price": 545.0, "entry_date": "2026-06-30"},
             # shares<=0 -> フィルタされる
             {"symbol": "ZERO", "system": "system1", "side": "long", "shares": 0, "entry_price": 10.0, "entry_date": "2026-06-30"},
@@ -33,17 +38,28 @@ def test_side_and_order_type_mapping(signals):
     by_sym = {o.symbol: o for o in orders}
 
     assert "ZERO" not in by_sym  # shares<=0 は除外
-    assert len(orders) == 3
+    assert len(orders) == 5
 
     assert by_sym["AAPL"].side == "buy"
-    assert by_sym["AAPL"].order_type == "market"  # system1
+    assert by_sym["AAPL"].order_type == "market"  # system1 = docs 明記 market open
 
     assert by_sym["TSLA"].side == "sell"
-    assert by_sym["TSLA"].order_type == "limit"  # system2
+    assert by_sym["TSLA"].order_type == "limit"  # system2 = docs 明記 limit +4%
     assert by_sym["TSLA"].limit_price == 250.0
 
+    # docs-alignment 2026-07-03: S3/S5 は docs で limit 指定なのに旧 map で market
+    # になっていた乖離を是正 (docs/systems/システム3.txt, システム5.txt)。
+    assert by_sym["AMD"].side == "buy"
+    assert by_sym["AMD"].order_type == "limit"  # system3 = docs 明記 limit -7%
+    assert by_sym["AMD"].limit_price == 140.0
+
+    assert by_sym["NVDA"].side == "buy"
+    assert by_sym["NVDA"].order_type == "limit"  # system5 = docs 明記 limit -3%
+    assert by_sym["NVDA"].limit_price == 120.0
+
+    # docs-alignment 2026-07-03: S7 は docs 明記 market open。旧 map の limit は誤り。
     assert by_sym["SPY"].side == "sell"  # sys7 hedge short
-    assert by_sym["SPY"].order_type == "limit"  # system7
+    assert by_sym["SPY"].order_type == "market"  # system7 = docs 明記 翌日寄付成行
 
 
 def test_qty_matches_shares_column(signals):
@@ -52,6 +68,8 @@ def test_qty_matches_shares_column(signals):
     by_sym = {o.symbol: o for o in orders}
     assert by_sym["AAPL"].qty == 10
     assert by_sym["TSLA"].qty == 8
+    assert by_sym["AMD"].qty == 5
+    assert by_sym["NVDA"].qty == 4
     assert by_sym["SPY"].qty == 3
 
 
