@@ -1,0 +1,348 @@
+{
+  "content_sha256": "a85294b99757600c66412d8aca75ee909509d3ac9538640920d99692ee5eac17",
+  "fixture_date": "2026-07-01",
+  "per_system": {
+    "system1": {
+      "full_scan": {
+        "candidates": [
+          {
+            "rank_value": 10.0,
+            "symbol": "AAA"
+          },
+          {
+            "rank_value": 8.0,
+            "symbol": "BBB"
+          },
+          {
+            "rank_value": 5.0,
+            "symbol": "CCC"
+          }
+        ],
+        "diagnostics_info": {
+          "mismatch_flag": 0,
+          "predicate_only_pass_count": 0,
+          "ranked_top_n_count": 3,
+          "ranking_source": "full_scan",
+          "setup_predicate_count": 4
+        }
+      },
+      "latest_only": {
+        "candidates": [
+          {
+            "rank_value": 10.0,
+            "symbol": "AAA"
+          },
+          {
+            "rank_value": 8.0,
+            "symbol": "BBB"
+          },
+          {
+            "rank_value": 5.0,
+            "symbol": "CCC"
+          }
+        ],
+        "diagnostics_info": {
+          "mismatch_flag": 0,
+          "predicate_only_pass_count": 0,
+          "ranked_top_n_count": 3,
+          "ranking_source": "latest_only",
+          "setup_predicate_count": 5
+        }
+      },
+      "rank_col": "roc200",
+      "rank_direction": "desc",
+      "top_n": 3,
+      "universe_size": 5
+    },
+    "system2": {
+      "full_scan": {
+        "candidates": [
+          {
+            "rank_value": 40.0,
+            "symbol": "AAA"
+          },
+          {
+            "rank_value": 30.0,
+            "symbol": "BBB"
+          },
+          {
+            "rank_value": 25.0,
+            "symbol": "CCC"
+          }
+        ],
+        "diagnostics_info": {
+          "mismatch_flag": 0,
+          "predicate_only_pass_count": 0,
+          "ranked_top_n_count": 12,
+          "ranking_source": "full_scan",
+          "setup_predicate_count": 12
+        }
+      },
+      "latest_only": {
+        "candidates": [
+          {
+            "rank_value": 40,
+            "symbol": "AAA"
+          },
+          {
+            "rank_value": 30,
+            "symbol": "BBB"
+          },
+          {
+            "rank_value": 25,
+            "symbol": "CCC"
+          }
+        ],
+        "diagnostics_info": {
+          "mismatch_flag": 0,
+          "predicate_only_pass_count": 0,
+          "ranked_top_n_count": 3,
+          "ranking_source": "latest_only",
+          "setup_predicate_count": 5
+        }
+      },
+      "rank_col": "adx7",
+      "rank_direction": "desc",
+      "top_n": 3,
+      "universe_size": 5
+    },
+    "system3": {
+      "full_scan": {
+        "candidates": [
+          {
+            "rank_value": 0.5,
+            "symbol": "AAA"
+          },
+          {
+            "rank_value": 0.4,
+            "symbol": "BBB"
+          },
+          {
+            "rank_value": 0.3,
+            "symbol": "CCC"
+          }
+        ],
+        "diagnostics_info": {
+          "mismatch_flag": 0,
+          "predicate_only_pass_count": 0,
+          "ranked_top_n_count": 12,
+          "ranking_source": "full_scan",
+          "setup_predicate_count": 12
+        }
+      },
+      "latest_only": {
+        "candidates": [
+          {
+            "rank_value": 0.5,
+            "symbol": "AAA"
+          },
+          {
+            "rank_value": 0.4,
+            "symbol": "BBB"
+          },
+          {
+            "rank_value": 0.3,
+            "symbol": "CCC"
+          }
+        ],
+        "diagnostics_info": {
+          "mismatch_flag": 1,
+          "predicate_only_pass_count": 0,
+          "ranked_top_n_count": 3,
+          "ranking_source": "latest_only",
+          "setup_predicate_count": 3
+        }
+      },
+      "rank_col": "drop3d",
+      "rank_direction": "desc",
+      "top_n": 3,
+      "universe_size": 4
+    },
+    "system4": {
+      "full_scan": {
+        "candidates": [
+          {
+            "rank_value": 5.0,
+            "symbol": "AAA"
+          },
+          {
+            "rank_value": 12.0,
+            "symbol": "BBB"
+          },
+          {
+            "rank_value": 18.0,
+            "symbol": "CCC"
+          }
+        ],
+        "diagnostics_info": {
+          "mismatch_flag": 0,
+          "predicate_only_pass_count": 0,
+          "ranked_top_n_count": 3,
+          "ranking_source": "full_scan",
+          "setup_predicate_count": 3
+        }
+      },
+      "latest_only": {
+        "candidates": [
+          {
+            "rank_value": 5,
+            "symbol": "AAA"
+          },
+          {
+            "rank_value": 12,
+            "symbol": "BBB"
+          },
+          {
+            "rank_value": 18,
+            "symbol": "CCC"
+          }
+        ],
+        "diagnostics_info": {
+          "mismatch_flag": 1,
+          "predicate_only_pass_count": 0,
+          "ranked_top_n_count": 3,
+          "ranking_source": "latest_only",
+          "setup_predicate_count": 3
+        }
+      },
+      "rank_col": "rsi4",
+      "rank_direction": "asc",
+      "top_n": 3,
+      "universe_size": 5
+    },
+    "system5": {
+      "full_scan": {
+        "candidates": [
+          {
+            "rank_value": 60.0,
+            "symbol": "AAA"
+          }
+        ],
+        "diagnostics_info": {
+          "mismatch_flag": 0,
+          "predicate_only_pass_count": 0,
+          "ranked_top_n_count": 1,
+          "ranking_source": "full_scan",
+          "setup_predicate_count": 1
+        }
+      },
+      "latest_only": {
+        "candidates": [
+          {
+            "rank_value": 60,
+            "symbol": "AAA"
+          },
+          {
+            "rank_value": 55,
+            "symbol": "BBB"
+          },
+          {
+            "rank_value": 45,
+            "symbol": "CCC"
+          }
+        ],
+        "diagnostics_info": {
+          "mismatch_flag": 1,
+          "predicate_only_pass_count": 0,
+          "ranked_top_n_count": 3,
+          "ranking_source": "latest_only",
+          "setup_predicate_count": 3
+        }
+      },
+      "rank_col": "adx7",
+      "rank_direction": "desc",
+      "top_n": 3,
+      "universe_size": 5
+    },
+    "system6": {
+      "full_scan": {
+        "candidates": [
+          {
+            "rank_value": 0.25,
+            "symbol": "AAA"
+          },
+          {
+            "rank_value": 0.2,
+            "symbol": "BBB"
+          },
+          {
+            "rank_value": 0.18,
+            "symbol": "CCC"
+          }
+        ],
+        "diagnostics_info": {
+          "mismatch_flag": 1,
+          "predicate_only_pass_count": 0,
+          "ranked_top_n_count": 3,
+          "ranking_source": "latest_only",
+          "setup_predicate_count": 3
+        }
+      },
+      "latest_only": {
+        "candidates": [
+          {
+            "rank_value": 0.25,
+            "symbol": "AAA"
+          },
+          {
+            "rank_value": 0.2,
+            "symbol": "BBB"
+          },
+          {
+            "rank_value": 0.18,
+            "symbol": "CCC"
+          }
+        ],
+        "diagnostics_info": {
+          "mismatch_flag": 1,
+          "predicate_only_pass_count": 0,
+          "ranked_top_n_count": 3,
+          "ranking_source": "latest_only",
+          "setup_predicate_count": 3
+        }
+      },
+      "rank_col": "return_6d",
+      "rank_direction": "desc",
+      "top_n": 3,
+      "universe_size": 5
+    },
+    "system7": {
+      "full_scan": {
+        "candidates": [
+          {
+            "rank_value": null,
+            "symbol": "SPY"
+          }
+        ],
+        "diagnostics_info": {
+          "mismatch_flag": 0,
+          "predicate_only_pass_count": 0,
+          "ranked_top_n_count": 1,
+          "ranking_source": "full_scan",
+          "setup_predicate_count": 0
+        }
+      },
+      "latest_only": {
+        "candidates": [
+          {
+            "rank_value": null,
+            "symbol": "SPY"
+          }
+        ],
+        "diagnostics_info": {
+          "mismatch_flag": 0,
+          "predicate_only_pass_count": 0,
+          "ranked_top_n_count": 1,
+          "ranking_source": "latest_only",
+          "setup_predicate_count": 1
+        }
+      },
+      "rank_col": null,
+      "rank_direction": null,
+      "top_n": 3,
+      "universe_size": 1
+    }
+  },
+  "schema_version": 1,
+  "top_n": 3
+}
