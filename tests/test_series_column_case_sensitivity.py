@@ -65,14 +65,17 @@ def test_line_980_call_site_uses_uppercase() -> None:
     # Grab the region around the historical bug site — anchor on the setup_pass
     # gate predicate for stability across refactors.
     marker = "setup_pass = final_pass_count if spy_gate != 0 else 0"
-    idx = src.find(marker)
+    # Use rfind: the marker appears both in an explanatory comment (added by the
+    # G1 fix) and in the actual code below it. We want the code site, which is
+    # the last occurrence.
+    idx = src.rfind(marker)
     assert idx > 0, (
         f"expected sentinel {marker!r} to still exist in today_signals.py — "
         "if the gate predicate has been rewritten, update this regression test."
     )
-    # Search backward ~600 chars — the call to _make_spy_gate lives immediately
-    # above.
-    window = src[max(0, idx - 800) : idx]
+    # Search backward ~1500 chars — the call to _make_spy_gate lives immediately
+    # above, but the G1 explanatory comment block pushes it further up.
+    window = src[max(0, idx - 1500) : idx]
     assert '_make_spy_gate(' in window, (
         "expected _make_spy_gate(...) call immediately above the System1 gate "
         "predicate. Refactor moved things? Update this test."

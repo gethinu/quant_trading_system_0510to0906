@@ -129,7 +129,12 @@ class NtfyPublisher(Publisher):
         timeout: float = 10.0,
         dashboard_url: str = DASHBOARD_URL,
     ) -> None:
-        self.topic = topic or os.getenv("NTFY_TOPIC") or ""
+        # None (default) → fall back to env; explicit "" → respect empty (used
+        # by callers to test the "unconfigured / dry-run only" code path without
+        # having an ambient NTFY_TOPIC env var leak in).
+        if topic is None:
+            topic = os.getenv("NTFY_TOPIC") or ""
+        self.topic = topic
         self.base_url = (base_url or _default_url()).rstrip("/")
         try:
             self.priority = int(
