@@ -25,6 +25,76 @@ DASHBOARD_URL = "https://quant-trading-monitor.vercel.app"
 _MAX_RETRIES = 4
 # ntfy body は 4KB 程度が無難。長い summary は丸める。
 _BODY_LIMIT = 3800
+# X-Title の実用上の最大長。iPhone 通知の 1 行目に収まる目安。
+_TITLE_LIMIT = 120
+
+
+def _to_safe_ascii_title(title: str, message: SignalMessage) -> str:
+    """ntfy X-Title 用の安全な ASCII タイトルを組み立てる (最終防波堤)。
+
+    narrator.py 側で headline は ASCII+emoji + <=50 字に validation され
+    synth 済みだが、上流の変更・fallback 経路・古い narrative_YYYYMMDD.json
+    再送などで日本語 headline が渡ってくる可能性は残る。ここでは:
+
+      1. 元 title が ASCII 保持率 60% 以上ならそのまま採用 (narrator の
+         synth 済 headline はここを通る)。
+      2. 主に非 ASCII (日本語 headline 等) の場合は narrator を捨て、
+         portfolio 統計から決定論的な ASCII を synth する:
+             "YYYY-MM-DD | N signals | BUY x / SELL y | $Zk"
+      3. 何も synth できない場合の最終 fallback は "Today's Signals"。
+
+    2026-07-02 incident: 単純に encode("ascii", "ignore") だと
+    「7系統49シグナル、BUY主流…」→「749BUYSELL10100%3」に潰れて読めない。
+    """
+    stripped = (title or "").encode("ascii", "ignore").decode("ascii")
+    ascii_only = stripped.strip()
+    original = (title or "").strip()
+
+    # (1) 元 title が ASCII 主体 (非 ASCII 抜きで 60% 以上残る + 8 char 以上
+    #     + 英字含む) ならそのまま採用。narrator の synth 済 headline
+    #     (絵文字 + ASCII) はこの分岐に来る。
+    if original and ascii_only:
+        preserved = len(ascii_only) / max(len(original), 1)
+        has_word_char = any(c.isalpha() for c in ascii_only)
+        if preserved >= 0.6 and len(ascii_only) >= 8 and has_word_char:
+            return ascii_only[:_TITLE_LIMIT]
+
+    # (2) 構造化 ASCII を synth。portfolio から総数 / BUY / SELL / notional。
+    parts: list[str] = []
+    if message.date:
+        parts.append(message.date)
+    total = message.total_signals
+    if total > 0:
+        parts.append(f"{total} signals")
+
+    buy, sell = 0, 0
+    for cfg in (message.systems or {}).values():
+        for s in cfg.get("signals", []) or []:
+            side = str(s.get("side") or "").upper()
+            if side == "BUY":
+                buy += 1
+            elif side == "SELL":
+                sell += 1
+    if buy or sell:
+        parts.append(f"BUY {buy} / SELL {sell}")
+
+    notional = float(
+        (message.payload.get("portfolio", {}) or {}).get(
+            "total_notional_usd", 0
+        )
+        or 0
+    )
+    if notional > 0:
+        if notional >= 1_000_000:
+            parts.append(f"${notional / 1_000_000:.1f}M")
+        elif notional >= 1_000:
+            parts.append(f"${notional / 1_000:.0f}K")
+        else:
+            parts.append(f"${notional:.0f}")
+
+    if parts:
+        return " | ".join(parts)[:_TITLE_LIMIT]
+    return "Today's Signals"
 
 
 def _mask_topic(topic: str | None) -> str:
@@ -62,7 +132,9 @@ class NtfyPublisher(Publisher):
         self.topic = topic or os.getenv("NTFY_TOPIC") or ""
         self.base_url = (base_url or _default_url()).rstrip("/")
         try:
-            self.priority = int(priority if priority is not None else os.getenv("NTFY_PRIORITY", 4))
+            self.priority = int(
+                priority if priority is not None else os.getenv("NTFY_PRIORITY", 4)
+            )
         except (TypeError, ValueError):
             self.priority = 4
         self.timeout = timeout
@@ -106,11 +178,12 @@ class NtfyPublisher(Publisher):
         priority = 5 if warn else self.priority
 
         # narrator.headline を優先し X-Title に (無ければ既存 title)。
-        # ヘッダは ASCII 制約が安全なので、非 ASCII (日本語 headline 等) は
-        # 落ちて既存 title に fallback する (body 側には UTF-8 で全文載せている)。
+        # narrator.py 側で ASCII+emoji + <=50 字に validation 済 headline が
+        # 渡ってくる想定だが、古い narrative_YYYYMMDD.json や API 経路の
+        # 経緯で日本語が来る可能性を残すため _to_safe_ascii_title で最終
+        # 防波堤を通す (2026-07-02 mangled-title incident regression 防止)。
         title = message.narrative_headline() or message.title()
-        # 絵文字/非 ASCII はタグ(X-Tags)/body 側で表現し、title は素の text に。
-        safe_title = title.encode("ascii", "ignore").decode("ascii").strip() or "Today's Signals"
+        safe_title = _to_safe_ascii_title(title, message)
 
         headers = {
             "X-Title": safe_title,
@@ -162,7 +235,10 @@ class NtfyPublisher(Publisher):
                 if resp.status_code == 429 or resp.status_code >= 500:
                     backoff = min(2 ** (attempt - 1), 8)
                     logger.warning(
-                        "ntfy %d (attempt %d) backoff=%ss", resp.status_code, attempt, backoff
+                        "ntfy %d (attempt %d) backoff=%ss",
+                        resp.status_code,
+                        attempt,
+                        backoff,
                     )
                     time.sleep(backoff)
                     last_detail = f"retryable_{resp.status_code}"
@@ -172,7 +248,12 @@ class NtfyPublisher(Publisher):
             except Exception as exc:  # noqa: BLE001
                 backoff = min(2 ** (attempt - 1), 8)
                 last_detail = f"exception: {exc}"
-                logger.warning("ntfy post 例外 (attempt %d): %s backoff=%ss", attempt, exc, backoff)
+                logger.warning(
+                    "ntfy post 例外 (attempt %d): %s backoff=%ss",
+                    attempt,
+                    exc,
+                    backoff,
+                )
                 time.sleep(backoff)
 
         return PublishResult(

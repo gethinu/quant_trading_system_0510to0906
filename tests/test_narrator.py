@@ -103,9 +103,10 @@ def _sample_signals() -> dict:
 
 # --- 1. 正常系 --------------------------------------------------------------
 def test_narrate_success(monkeypatch):
+    """narrator が新 format 準拠の ASCII headline を返せば pass-through される。"""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
     resp_text = (
-        "HEADLINE: メガテック集中買い、SPY hedge on\n"
+        "HEADLINE: 📈 07-01 3 signals / BUY:2 SELL:1 / $50K\n"
         "sys1 は AAPL と MSFT を SMA200 breakout で買い。\n"
         "sys7 は SPY short で catastrophe hedge を発火。"
     )
@@ -117,7 +118,9 @@ def test_narrate_success(monkeypatch):
     result = narrator.narrate(_sample_signals())
 
     assert result, "narrate は非空 dict を返すべき"
-    assert result["headline"] == "メガテック集中買い、SPY hedge on"
+    # ASCII + emoji + <=50 字なら LLM 出力がそのまま採用される
+    assert result["headline"] == "📈 07-01 3 signals / BUY:2 SELL:1 / $50K"
+    assert not result.get("headline_synth")
     assert "AAPL" in result["summary"] or "sys1" in result["summary"]
     assert result["model"] == "claude-haiku-4-5-20251001"
     assert result["cost_usd"] > 0
@@ -127,9 +130,43 @@ def test_narrate_success(monkeypatch):
     assert not result.get("fallback")
 
 
+def test_narrate_japanese_headline_replaced_with_synth(monkeypatch, caplog):
+    """LLM が日本語 headline を返しても post-process で ASCII synth に差替される。
+
+    2026-07-02 mangled-title incident の regression test。narrator が
+    ntfy X-Title 制約を破る出力を返しても、iPhone 通知は clean な ASCII で
+    見える (summary/reasons は温存)。
+    """
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    resp_text = (
+        "HEADLINE: 7系統49シグナル、BUY主流・SELL10件・生存率100%が3系統\n"
+        "sys1 は AAPL と MSFT を SMA200 breakout で買い。\n"
+        "sys7 は SPY short で catastrophe hedge を発火。"
+    )
+    _install_fake_anthropic(monkeypatch, resp_text)
+
+    with caplog.at_level("WARNING"):
+        result = SignalNarrator().narrate(_sample_signals())
+
+    assert result["headline_synth"] is True
+    # 日本語混入 headline は消え、synth に置き換わっている
+    assert not any("　" <= ch <= "鿿" for ch in result["headline"])
+    # 新 format の要素が入っている
+    assert "signals" in result["headline"]
+    assert "BUY:" in result["headline"]
+    assert "SELL:" in result["headline"]
+    # summary は LLM 出力を温存
+    assert "AAPL" in result["summary"] or "sys1" in result["summary"]
+    assert any("format 違反" in rec.message for rec in caplog.records)
+
+
 def test_narrate_uses_model_override(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
-    _install_fake_anthropic(monkeypatch, "HEADLINE: x\nbody AAPL SPY")
+    # 新 format 準拠 headline を fake
+    _install_fake_anthropic(
+        monkeypatch,
+        "HEADLINE: 📈 07-01 3 signals / BUY:2 SELL:1 / $50K\nbody AAPL SPY",
+    )
     narrator = SignalNarrator(model="claude-sonnet-5")
     result = narrator.narrate(_sample_signals())
     assert result["model"] == "claude-sonnet-5"
@@ -192,7 +229,13 @@ def test_narrate_hallucination_falls_back(monkeypatch, caplog):
         result = SignalNarrator().narrate(_sample_signals())
 
     assert result.get("fallback") is True
-    assert "across" in result["headline"]  # "N signals across M systems"
+    # fallback headline も新 format (ASCII + emoji, <=50 chars) を採用
+    assert "signals" in result["headline"]
+    assert " / " in result["headline"]
+    assert all(
+        ord(ch) < 0x7F or ord(ch) >= 0x2600  # ASCII or emoji block
+        for ch in result["headline"]
+    )
     assert any("hallucination" in rec.message.lower() for rec in caplog.records)
 
 
