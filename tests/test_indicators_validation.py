@@ -181,6 +181,46 @@ def test_validate_empty_data():
     assert result is True
 
 
+def test_validate_tolerates_junk_tickers_at_head():
+    """回帰: dict 先頭に短命ジャンク銘柄が並んでも、大多数が流動的なら abort しない。
+
+    旧実装は「先頭 10 銘柄 strict」でアルファベット順キーだと AAC.U (2行) 等の
+    ジャンクが先頭に集中し、build_rolling が正常でも guard が全体 abort していた。
+    履歴長優先サンプリング + 欠損許容率でこれを解消したことを固定する。
+    """
+    # 大多数 (25銘柄) は指標付き＝長い履歴、少数 (3銘柄) はジャンク＝指標なし
+    liquid = create_test_data_with_indicators(
+        [f"LIQ{i}" for i in range(25)], include_indicators=True
+    )
+    junk = create_test_data_with_indicators(
+        ["AAC.U", "AADX", "AAXJ"], include_indicators=False
+    )
+    # ジャンクの履歴を短くして「短命銘柄」を再現
+    for sym, df in junk.items():
+        junk[sym] = df.head(2).copy()
+
+    # dict 先頭にジャンクを配置（アルファベット順キーの最悪ケースを模倣）
+    data_dict = {**junk, **liquid}
+
+    # strict_mode=True でも abort しない（履歴長優先サンプル→流動銘柄が選ばれる）
+    passed, missing_report = validate_precomputed_indicators(
+        data_dict, systems=[1, 2, 3, 4, 5, 6, 7], strict_mode=True
+    )
+    assert passed is True
+
+
+def test_validate_fails_when_majority_missing():
+    """欠損が許容率を超える（＝rebuild が本当に走っていない）場合は従来通り fail。"""
+    data_dict = create_test_data_with_indicators(
+        [f"SYM{i}" for i in range(20)], include_indicators=False
+    )
+    passed, missing_report = validate_precomputed_indicators(
+        data_dict, systems=[1], strict_mode=False
+    )
+    assert passed is False
+    assert len(missing_report) > 0
+
+
 def test_validate_partial_indicators():
     """部分的に指標がある場合のテスト"""
     test_data = create_test_data_with_indicators(["AAPL"], include_indicators=False)

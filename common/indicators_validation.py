@@ -60,6 +60,8 @@ def validate_precomputed_indicators(
     systems: list[int] | None = None,
     strict_mode: bool = True,
     log_callback=None,
+    sample_size: int = 20,
+    missing_tolerance: float = 0.2,
 ) -> tuple[bool, dict[str, list[str]]]:
     """
     指標事前計算状況を検証し、不足があればエラーレポートを返す
@@ -69,9 +71,19 @@ def validate_precomputed_indicators(
         systems: チェック対象システム番号リスト（Noneなら全System）
         strict_mode: True=不足時エラー、False=警告のみ
         log_callback: ログ出力関数
+        sample_size: 検証にサンプリングする銘柄数（履歴の長い＝流動的な銘柄を優先）
+        missing_tolerance: 許容する欠損銘柄割合（この割合を超えたら不足と判定）
 
     Returns:
         (validation_passed, missing_indicators_report)
+
+    Note:
+        以前は「dict 先頭 10 銘柄を strict」で、キーがアルファベット順の場合
+        先頭に短命ジャンクティッカー (例: AAC.U=2行) が集中し、build_rolling が
+        正常でも guard が全体 abort する flakiness があった。対策として
+        (1) サンプルを履歴の長い＝確立した流動銘柄優先に変更、
+        (2) 少数の変則銘柄を許容する欠損割合 (missing_tolerance) を導入した。
+        「build_rolling が本当に走ったか」という guard 本来の意図は維持する。
     """
     if not data_dict:
         return True, {}
@@ -93,13 +105,22 @@ def validate_precomputed_indicators(
     missing_report = {}
     validation_errors = []
 
-    # サンプル銘柄でのチェック（最初の10銘柄程度）
-    sample_symbols = list(data_dict.keys())[: min(10, len(data_dict))]
+    # サンプル銘柄でのチェック
+    # 履歴が長い銘柄ほど確立した流動銘柄で、rebuild が走っていれば必ず指標を持つ。
+    # 先頭固定 (アルファベット順→ジャンク偏重) を避け、行数降順で上位をサンプルする。
+    def _hist_len(sym: str) -> int:
+        df = data_dict.get(sym)
+        return 0 if df is None else len(df)
 
+    ranked_symbols = sorted(data_dict.keys(), key=_hist_len, reverse=True)
+    sample_symbols = ranked_symbols[: min(sample_size, len(ranked_symbols))]
+
+    evaluated = 0
     for symbol in sample_symbols:
         df = data_dict[symbol]
         if df is None or df.empty:
             continue
+        evaluated += 1
 
         missing_for_symbol = []
 
@@ -119,10 +140,16 @@ def validate_precomputed_indicators(
                 validation_errors.append(f"{symbol}: {', '.join(missing_for_symbol)}")
 
     # 検証結果の判定
-    validation_passed = len(missing_report) == 0
+    # 欠損銘柄が許容割合以下なら pass（少数のジャンク銘柄で全体を止めない）。
+    # 評価銘柄が 0 の場合は全て空データ → 判定できないので pass 扱い（従来踏襲）。
+    missing_fraction = (len(missing_report) / evaluated) if evaluated else 0.0
+    validation_passed = missing_fraction <= missing_tolerance
 
     if not validation_passed:
-        error_summary = f"指標事前計算チェックで不足を検出: {len(missing_report)}/{len(sample_symbols)}銘柄で問題あり"
+        error_summary = (
+            f"指標事前計算チェックで不足を検出: {len(missing_report)}/{evaluated}銘柄で問題あり "
+            f"(欠損率 {missing_fraction:.0%} > 許容 {missing_tolerance:.0%})"
+        )
         log_callback(f"❌ {error_summary}")
 
         if len(validation_errors) <= 5:
@@ -138,7 +165,7 @@ def validate_precomputed_indicators(
                 [
                     "🚨 指標事前計算が不足しています",
                     f"対象システム: {systems}",
-                    f"不足銘柄: {len(missing_report)}/{len(sample_symbols)}",
+                    f"不足銘柄: {len(missing_report)}/{evaluated} (欠損率 {missing_fraction:.0%})",
                     "解決方法: scripts/build_rolling_with_indicators.py を実行してください",
                 ]
             )
