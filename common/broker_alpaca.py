@@ -170,6 +170,36 @@ def submit_order(
                 stop_price=stop_loss,
             ),  # type: ignore[call-arg]
         )
+    elif order_type == "bracket":
+        # BRACKET (OTOCO): entry (market or limit) と同時に take_profit / stop_loss の
+        # 子注文を Alpaca 側に登録する。entry 約定を待って子注文が生きる (未約定なら子は起動しない)。
+        # S2/S3/S5/S6 の profit target + stop-loss を entry 同時発注に使う。
+        if take_profit is None or stop_loss is None:
+            raise ValueError("bracket 注文には take_profit と stop_loss が必要です。")
+        # entry sub-type: limit_price 指定なら limit entry、無ければ market entry
+        common_kwargs: dict[str, Any] = {
+            "symbol": symbol,
+            "qty": qty,
+            "side": side_enum,
+            "time_in_force": tif,
+            "order_class": OrderClass.BRACKET,  # type: ignore[attr-defined]
+            "take_profit": TakeProfitRequest(  # type: ignore[call-arg]
+                limit_price=take_profit,
+            ),
+            "stop_loss": StopLossRequest(  # type: ignore[call-arg]
+                stop_price=stop_loss,
+            ),
+            **_coid,
+        }
+        if limit_price is not None:
+            req = LimitOrderRequest(  # type: ignore[call-arg]
+                limit_price=limit_price,
+                **common_kwargs,
+            )
+        else:
+            req = MarketOrderRequest(  # type: ignore[call-arg]
+                **common_kwargs,
+            )
     elif order_type == "trailing_stop":
         if trail_percent is None and stop_price is None:
             raise ValueError("trail_percent か trail_price のいずれかが必要です。")
@@ -180,6 +210,7 @@ def submit_order(
             time_in_force=tif,
             trail_percent=trail_percent,
             trail_price=stop_price,
+            **_coid,
         )
     else:
         raise ValueError(f"未知の order_type: {order_type}")

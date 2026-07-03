@@ -12,6 +12,8 @@
       5. [publish]     scripts/publish_signals.py --input {json}
       5b.[paper_orders] scripts/paper_trading_dryrun.py --signals-json ... (default)
                          もしくは paper_trading_submit.py --confirm --yes (AutoSubmitPaper 時)
+      5c.[exit_check]  scripts/paper_exit_check.py (default dry-run, --confirm で本発注)
+                         現 position と SYSTEM_TRADE_RULES の照合で exit order 案を生成 / 発注
       6. [vercel]      scripts/publish_data_to_vercel.ps1
 
 .PARAMETER Date
@@ -38,8 +40,12 @@
 .PARAMETER SkipPaperOrders
     paper_orders step (Alpaca Paper 発注 intent 生成) をスキップ。
 
+.PARAMETER SkipExitCheck
+    exit_check step (Alpaca Paper position の exit rule 照合 / 発注) をスキップ。
+
 .PARAMETER AutoSubmitPaper
-    paper_orders step で **実際に Paper 口座へ発注**する。無指定は dry-run のみ (JSON 出力)。
+    paper_orders (entry) と exit_check (exit) の両 step で
+    **実際に Paper 口座へ発注**する。無指定は dry-run のみ (JSON 出力)。
     Task Scheduler の Action に含めない限り絶対に発注しない。
     **live 口座 (実マネー) は本 pipeline では扱わない。**
 
@@ -66,6 +72,7 @@ param(
     [switch]$DryRunPublish = $false,
     [switch]$SkipLatestCheck = $false,
     [switch]$SkipPaperOrders = $false,
+    [switch]$SkipExitCheck = $false,
     [switch]$AutoSubmitPaper = $false,
     [string]$Tier = ""
 )
@@ -107,6 +114,7 @@ $LogFile = Join-Path $LogDir "daily_pipeline_$(Get-Date -Format 'yyyyMMdd_HHmmss
 $SignalsJson = Join-Path $ProjectRoot "results_csv\today_signals_$DateCompact.json"
 $NarrativeJson = Join-Path $ProjectRoot "results_csv\narrative_$DateCompact.json"
 $PaperOrdersJson = Join-Path $ProjectRoot "results_csv\paper_orders_$DateCompact.json"
+$ExitOrdersJson = Join-Path $ProjectRoot "results_csv\exit_orders_$DateCompact.json"
 
 # Tier 解決: CLI 引数 > env ALPACA_TIER > "small"
 if (-not $Tier) {
@@ -280,6 +288,38 @@ try {
             $po = Invoke-Step -Name "paper_orders_dryrun" -PyArgs $poArgs
             if ($po -ne 0) { $Failures += "paper_orders_dryrun(exit=$po)" }
         }
+    }
+
+    # --- Step 5c: exit_check (Alpaca Paper position の exit rule 照合 / 発注) ---
+    # 現 position を Alpaca から pull し、SYSTEM_TRADE_RULES と照合して
+    # (a) protection (stop / trailing / take_profit) が未発注なら発注
+    # (b) time-based (S2/S3/S5/S6) / SPY breakout (S7) 判定で成行 close order 生成
+    # を実行する。default = dry-run (JSON 出力のみ)、-AutoSubmitPaper で実発注。
+    # entry step (5b) と同じ opt-in flag をシェアする (両方 dry-run か両方本発注)。
+    if ($SkipExitCheck) {
+        Write-Log "[exit_check] SkipExitCheck 指定によりスキップ"
+    }
+    else {
+        if ($AutoSubmitPaper) {
+            Write-Log "[exit_check] AutoSubmitPaper=ON  → paper 口座へ exit 発注を試行します"
+            $ecArgs = @(
+                (Join-Path $ProjectRoot "scripts\paper_exit_check.py"),
+                "--date", $Date,
+                "--output-json", $ExitOrdersJson,
+                "--confirm", "--yes"
+            )
+        }
+        else {
+            Write-Log "[exit_check] dry-run (submit skipped: autosubmit not enabled)"
+            $ecArgs = @(
+                (Join-Path $ProjectRoot "scripts\paper_exit_check.py"),
+                "--date", $Date,
+                "--output-json", $ExitOrdersJson
+            )
+        }
+        $ec = Invoke-Step -Name "exit_check" -PyArgs $ecArgs
+        if ($ec -eq 1) { $Failures += "exit_check(exit=1)" }
+        elseif ($ec -eq 2) { $Failures += "exit_check(safety_abort)" }
     }
 
     # --- Step 6: publish data to Vercel (git commit + push) ------------
