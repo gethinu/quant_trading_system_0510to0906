@@ -105,6 +105,8 @@ class PreparedOrder:
     notional_usd: float | None = None
     tier: str | None = None
     dry_run: bool = False
+    exec_mode: str | None = None  # "notional" | "qty" — どちらで発注したか
+    skip_reason: str | None = None  # pre-submit で skip した理由 (silent drop 禁止)
     extra: dict[str, Any] = field(default_factory=dict)
 
     def to_row(self) -> dict[str, Any]:
@@ -487,6 +489,129 @@ def _flatten_json_signals(json_data: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
+# =========================================================================
+# Pre-submit execution-mode validator (2026-07-04)
+# =========================================================================
+# 実 paper 発注 (2026-07-04) で判明した Alpaca のフラクショナル制約:
+#   - fractional (notional) 注文は空売りできない        -> code 42210000
+#   - 非 fractionable 銘柄は notional 注文を拒否する       -> code 40310000
+# よって notional が使えるのは「long かつ fractionable」の時だけ。
+# それ以外 (short / 非fractionable / prefer_fractional=False) は整数株 qty へ
+# 自動フォールバックする。サイズできない場合は **silent drop せず** skip 理由を
+# 付けて返し、呼び出し側のサマリで必ず可視化する。
+EXEC_NOTIONAL = "notional"
+EXEC_QTY = "qty"
+EXEC_SKIP = "skip"
+
+_FRACTIONABLE_CACHE: dict[str, bool | None] = {}
+
+
+def plan_order_execution(
+    *,
+    side: str,
+    notional_usd: float,
+    price: float,
+    fractionable: bool | None,
+    prefer_fractional: bool = True,
+) -> tuple[str, int, float, str]:
+    """1 注文の実行方式を Alpaca のフラクショナル制約に触れないよう決める (pure)。
+
+    Returns:
+        (mode, qty, notional, reason)
+        - mode == EXEC_NOTIONAL: MarketOrderRequest(notional=...) で発注 (long+fractionable)
+        - mode == EXEC_QTY:      整数株 qty で発注 (short / 非fractionable / prefer_fractional=False)
+        - mode == EXEC_SKIP:     サイズ不能。reason を付けて返す (呼び出し側が必ず可視化)
+    """
+    side_l = (side or "").strip().lower()
+    is_short = side_l in ("sell", "short", "sell_short")
+
+    # notional が合法なのは「long かつ fractionable かつ caller が fractional 希望」時のみ
+    if prefer_fractional and not is_short and fractionable is True:
+        return (EXEC_NOTIONAL, 0, round(notional_usd, 2), "long+fractionable→notional")
+
+    # それ以外は整数株。サイズには正の price が要る。
+    if is_short:
+        why = "short"
+    elif fractionable is False:
+        why = "non_fractionable"
+    elif fractionable is None:
+        why = "fractionable_unknown"
+    else:
+        why = "prefer_qty"
+
+    if price is None or price <= 0:
+        return (
+            EXEC_SKIP,
+            0,
+            round(notional_usd, 2),
+            f"skip:{why}:no_positive_price_to_size_whole_shares",
+        )
+    qty = int(notional_usd // price)
+    if qty < 1:
+        return (
+            EXEC_SKIP,
+            0,
+            round(notional_usd, 2),
+            f"skip:{why}:notional_${notional_usd:.2f}_below_1_share_@${price:.2f}",
+        )
+    return (EXEC_QTY, qty, round(notional_usd, 2), f"{why}→whole_share_qty={qty}")
+
+
+def get_asset_fractionable(client: Any, symbol: str) -> bool | None:
+    """Alpaca asset の ``fractionable`` フラグを照会 (結果を module cache)。
+
+    取得失敗時は ``None`` (unknown) を返し、classifier 側で保守的に整数株へ倒す。
+    """
+    key = (symbol or "").upper()
+    if not key:
+        return None
+    if key in _FRACTIONABLE_CACHE:
+        return _FRACTIONABLE_CACHE[key]
+    frac: bool | None
+    try:
+        asset = client.get_asset(key)
+        frac = bool(getattr(asset, "fractionable", False))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("get_asset(%s) 失敗、非fractionable扱い(unknown): %s", key, exc)
+        frac = None
+    _FRACTIONABLE_CACHE[key] = frac
+    return frac
+
+
+def fetch_open_order_state(client: Any) -> tuple[dict[str, set[str]], set[str]]:
+    """現在の open orders から wash-guard / 冪等性判定の材料を取る (read-only)。
+
+    Returns:
+        (open_sides, open_coids)
+        - open_sides: ``{symbol: {"buy","sell"}}`` — 反対側 order 検知 (wash trade 回避)
+        - open_coids: 既に open な client_order_id 集合 — 二重 submit 回避
+
+    ユーザーの既存注文 (別経路/手動の exit 注文含む) は **一切変更しない**。
+    衝突する自注文を skip するだけで、他人の注文は read のみ。
+    """
+    open_sides: dict[str, set[str]] = {}
+    open_coids: set[str] = set()
+    try:
+        from alpaca.trading.enums import QueryOrderStatus
+        from alpaca.trading.requests import GetOrdersRequest
+
+        req = GetOrdersRequest(status=QueryOrderStatus.OPEN, limit=500)
+        orders = client.get_orders(filter=req)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("open orders 取得失敗 (wash-guard/冪等性 無効化): %s", exc)
+        return open_sides, open_coids
+    for o in orders:
+        sym = str(getattr(o, "symbol", "")).upper()
+        raw_side = str(getattr(o, "side", "")).lower()
+        side = "buy" if "buy" in raw_side else ("sell" if "sell" in raw_side else raw_side)
+        coid = getattr(o, "client_order_id", None)
+        if sym:
+            open_sides.setdefault(sym, set()).add(side)
+        if coid:
+            open_coids.add(str(coid))
+    return open_sides, open_coids
+
+
 def signals_json_to_orders(
     json_data: dict[str, Any],
     tier: str,
@@ -566,6 +691,7 @@ def signals_json_to_orders(
             tier=tier,
             dry_run=dry_run,
         )
+        po.extra["price"] = price  # whole-share フォールバックのサイズ計算用
         prepared.append(po)
 
     logger.info(
@@ -578,14 +704,58 @@ def signals_json_to_orders(
             _audit_log({"event": "dry_run_json", **po.to_row()})
         return prepared
 
+    # --- 発注前バリデーション用の口座状態を 1 回だけ read (read-only) ---
+    open_sides, open_coids = fetch_open_order_state(client)
+
     submitted: list[PreparedOrder] = []
     for po in prepared:
+        price = float(po.extra.get("price") or 0.0)
+        opp_side = "sell" if po.side == "buy" else "buy"
+
+        # (1) 冪等性: 同一 client_order_id が既に open なら二重 submit しない
+        if po.client_order_id and po.client_order_id in open_coids:
+            po.skip_reason = "already_open:duplicate_client_order_id"
+            _audit_log({"event": "skip_duplicate_coid", **po.to_row()})
+            logger.info("skip (既に open): %s", po.client_order_id)
+            submitted.append(po)
+            continue
+
+        # (2) wash-trade 回避: 反対側の open order がある銘柄は skip。
+        #     ユーザーの既存注文 (exit 注文等) は絶対にキャンセルしない。
+        if opp_side in open_sides.get(po.symbol, set()):
+            po.skip_reason = f"wash_trade_conflict:existing_{opp_side}_order (既存注文は保持)"
+            _audit_log({"event": "skip_wash_conflict", **po.to_row()})
+            logger.info("skip (wash 回避): %s %s vs 既存 %s", po.symbol, po.side, opp_side)
+            submitted.append(po)
+            continue
+
+        # (3) 実行方式を分類: long+fractionable→notional / それ以外→整数株 / 不能→skip
+        fractionable = get_asset_fractionable(client, po.symbol)
+        mode, qty, notional, reason = plan_order_execution(
+            side=po.side,
+            notional_usd=float(po.notional_usd or 0.0),
+            price=price,
+            fractionable=fractionable,
+            prefer_fractional=prefer_fractional,
+        )
+        po.exec_mode = mode
+        po.extra["fractionable"] = fractionable
+        po.extra["plan_reason"] = reason
+
+        if mode == EXEC_SKIP:
+            po.skip_reason = reason
+            _audit_log({"event": "skip_unsizable", **po.to_row()})
+            logger.info("skip (サイズ不能): %s %s", po.symbol, reason)
+            submitted.append(po)
+            continue
+
         try:
-            if prefer_fractional and po.notional_usd:
+            if mode == EXEC_NOTIONAL:
                 from alpaca.trading.requests import MarketOrderRequest
+
                 req = MarketOrderRequest(
                     symbol=po.symbol,
-                    notional=float(po.notional_usd),
+                    notional=float(notional),
                     side="buy" if po.side == "buy" else "sell",
                     time_in_force="day",
                     client_order_id=po.client_order_id,
@@ -594,23 +764,25 @@ def signals_json_to_orders(
                 po.order_id = str(getattr(order, "id", "") or "")
                 po.status = str(getattr(order, "status", "") or "")
                 _audit_log({"event": "submitted_notional", **po.to_row()})
-                submitted.append(po)
-            else:
+            else:  # EXEC_QTY — 整数株 (short / 非fractionable)
+                po.qty = qty
                 result = submit_paper_order(
-                    po.symbol, po.qty, po.side,
+                    po.symbol, qty, po.side,
                     order_type=po.order_type,
                     time_in_force=po.time_in_force,
                     client_order_id=po.client_order_id,
                     dry_run=False,
                     client=client,
                 )
-                result.system = po.system
-                result.entry_date = po.entry_date
-                result.notional_usd = po.notional_usd
-                result.tier = po.tier
-                result.dry_run = False
-                submitted.append(result)
-        except Exception as exc:
+                po.order_id = result.order_id
+                po.status = result.status
+                _audit_log({"event": "submitted_qty", **po.to_row()})
+            # 自注文を口座状態に反映し、同一バッチ内の後続 self-wash / 二重を防ぐ
+            open_sides.setdefault(po.symbol, set()).add(po.side)
+            if po.client_order_id:
+                open_coids.add(po.client_order_id)
+            submitted.append(po)
+        except Exception as exc:  # noqa: BLE001
             po.error = str(exc)
             _audit_log({"event": "submit_error_json", **po.to_row()})
             logger.warning("submit 失敗 %s: %s", po.symbol, exc)
@@ -1233,6 +1405,12 @@ __all__ = [
     "submit_paper_order",
     "signals_to_orders",
     "signals_json_to_orders",
+    "plan_order_execution",
+    "get_asset_fractionable",
+    "fetch_open_order_state",
+    "EXEC_NOTIONAL",
+    "EXEC_QTY",
+    "EXEC_SKIP",
     "parse_system_from_client_order_id",
     "parse_entry_date_from_client_order_id",
     "fetch_position_snapshots",

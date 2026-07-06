@@ -128,11 +128,28 @@ def _submit_from_json(args: argparse.Namespace) -> int:
 
     ok = sum(1 for o in orders if o.order_id)
     fail = sum(1 for o in orders if o.error)
+    skipped = [o for o in orders if getattr(o, "skip_reason", None)]
     print(
         f"\n完了: 入力 signals={input_signal_count} "
-        f"生成={len(orders)} 送信={ok} 失敗={fail} "
+        f"生成={len(orders)} 送信={ok} 失敗={fail} skip={len(skipped)} "
         f"(--confirm={args.confirm})"
     )
+    # skip / fail は silent に落とさず、必ず理由付きで可視化する
+    # (silent success / silent drop を潰す方針)。
+    if skipped:
+        from collections import Counter
+
+        kinds = Counter(
+            str(o.skip_reason).split(":", 1)[0] for o in skipped
+        )
+        print(f"[skip] pre-submit で {len(skipped)} 件スキップ (内訳: {dict(kinds)}):")
+        for o in skipped:
+            print(f"    - {o.system} {o.symbol} {o.side}: {o.skip_reason}")
+    if fail:
+        print(f"[fail] 発注失敗 {fail} 件:")
+        for o in orders:
+            if o.error:
+                print(f"    - {o.system} {o.symbol} {o.side}: {str(o.error)[:80]}")
 
     # F2 P0#5: 「input signals > 0 なのに生成 orders = 0」は subscriber が
     # silent success と誤解できないよう可視化する。真の flat book
@@ -170,6 +187,7 @@ def _submit_from_json(args: argparse.Namespace) -> int:
                 "count": len(orders),
                 "submitted": ok,
                 "failed": fail,
+                "skipped": len(skipped),
                 "input_signals": input_signal_count,
                 "status": status_marker,
             },

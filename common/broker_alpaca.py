@@ -82,6 +82,7 @@ try:  # pragma: no cover - SDK 未導入環境でも壊れないように
         LimitOrderRequest,
         MarketOrderRequest,
         StopLossRequest,
+        StopOrderRequest,
         TakeProfitRequest,
         TrailingStopOrderRequest,
     )
@@ -94,6 +95,7 @@ except Exception:  # pragma: no cover
     GetOrdersRequest = None
     TakeProfitRequest = None
     StopLossRequest = None
+    StopOrderRequest = None
     TrailingStopOrderRequest = None
     TradingStream = None
 
@@ -164,7 +166,7 @@ def submit_order(
 ):
     """注文を送信する共通関数。
 
-    order_type: "market" | "limit" | "oco" | "trailing_stop"
+    order_type: "market" | "limit" | "oco" | "bracket" | "trailing_stop" | "stop"
 
     client_order_id: 指定すると Alpaca 側の冪等キーとして送信される。
         同一 client_order_id の再送は 422 (duplicate) となり、重複発注を防げる。
@@ -262,6 +264,22 @@ def submit_order(
             time_in_force=tif,
             trail_percent=trail_percent,
             trail_price=stop_price,
+            **_coid,
+        )
+    elif order_type == "stop":
+        # プレーンな stop (成行トリガ) 注文。exit の protect_stop で使う。
+        # 以前は未対応で "未知の order_type: stop" を投げ、exit 発注が全滅していた
+        # (2026-07-04 実 paper 発注で判明)。
+        if stop_price is None:
+            raise ValueError("stop 注文には stop_price が必要です。")
+        if StopOrderRequest is None:
+            raise RuntimeError("Alpaca SDK に StopOrderRequest がありません。")
+        req = StopOrderRequest(  # type: ignore[call-arg]
+            symbol=symbol,
+            qty=qty,
+            side=side_enum,
+            time_in_force=tif,
+            stop_price=stop_price,
             **_coid,
         )
     else:
