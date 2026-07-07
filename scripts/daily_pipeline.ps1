@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     当日シグナル日次パイプライン (cache -> signals -> coverage -> publish -> paper_orders) を
     1 スクリプトで通す Windows Task Scheduler 用 orchestrator。
