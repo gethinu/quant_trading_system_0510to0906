@@ -17,7 +17,8 @@ risk:
     max_long_positions: 40       # long 側 建玉数上限 (sys1/3/4/5 × 10)
     max_short_positions: 30      # short 側 建玉数上限 (sys2/6/7 × 10)
     max_gross_exposure_pct: 1.0  # gross(long$+short$)/equity 上限 (cash口座の物理上限)
-    max_net_exposure_pct: 1.0    # |net|(|long$-short$|)/equity 上限 (0.5 推奨だが既定は no-op)
+    max_net_exposure_pct: 0.5    # |net|(|long$-short$|)/equity 上限。50/50 の意図を活かし
+                                 # 方向性リスクを equity の 50% までに抑える (user 有効化 2026-07-07)
     # --- off-by-default (0 = 無効。値を入れると発火) ---
     drawdown_flatten_pct: 0.0    # peak drawdown がこの割合で全 flatten (例 0.30)
     max_positions_per_sector: 0  # 1 sector あたり建玉数上限 (例 5)
