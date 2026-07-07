@@ -97,6 +97,28 @@ def _to_safe_ascii_title(title: str, message: SignalMessage) -> str:
     return "Today's Signals"
 
 
+def _sanitize_ascii_title(title: str) -> str:
+    """任意 title を ntfy X-Title 用に印字可能 ASCII + emoji のみへ絞る。
+
+    ``_to_safe_ascii_title`` は SignalMessage を必要とするが、こちらは
+    execution summary など payload を持たない汎用 title 用の軽量版。日本語などの
+    非 ASCII は落とす (iPhone 通知が非 ASCII を strip して mangle するのを防ぐ)。
+    """
+    kept: list[str] = []
+    for ch in title or "":
+        cp = ord(ch)
+        if 0x20 <= cp <= 0x7E:  # printable ASCII (space 含む)
+            kept.append(ch)
+        elif 0x2600 <= cp <= 0x27BF or 0x1F300 <= cp <= 0x1FAFF or cp == 0xFE0F:
+            kept.append(ch)  # emoji ブロック
+    out = "".join(kept).strip()
+    # 連続 space を 1 つに圧縮 (非 ASCII を落とした跡の空白を整理)
+    out = " ".join(out.split())
+    if not out:
+        return "Execution Summary"
+    return out[:_TITLE_LIMIT]
+
+
 def _mask_topic(topic: str | None) -> str:
     """Return an unguessable-shape but useful-in-logs marker for the ntfy topic.
 
@@ -199,10 +221,43 @@ class NtfyPublisher(Publisher):
         }
         return body, headers
 
+    # -- text sending (execution summary 等、signals JSON 以外の通知用) ----
+    def send_text(
+        self,
+        title: str,
+        body: str,
+        *,
+        tags: str = "chart_with_upwards_trend",
+        priority: int | None = None,
+        dry_run: bool = False,
+    ) -> PublishResult:
+        """任意の title/body を ntfy へ送信する (signal publish 以外の汎用経路)。
+
+        execution summary (submit 後の実発注サマリ) など、SignalMessage schema に
+        乗らない通知を、既存の retry / topic masking / dashboard action ボタンを
+        再利用して送るための入口。title は ASCII+emoji に sanitize する
+        (iPhone X-Title は非 ASCII を strip するため)。
+        """
+        safe_title = _sanitize_ascii_title(title)
+        if len(body) > _BODY_LIMIT:
+            body = body[: _BODY_LIMIT - 1] + "…"
+        headers = {
+            "X-Title": safe_title,
+            "X-Priority": str(priority if priority is not None else self.priority),
+            "X-Tags": tags,
+            "X-Actions": f"view, Open dashboard, {self.dashboard_url}, clear=true",
+        }
+        return self._transport(body, headers, dry_run=dry_run)
+
     # -- transport ------------------------------------------------------
     def send(self, signals_json: dict[str, Any], *, dry_run: bool = False) -> PublishResult:
         body, headers = self._build(signals_json)
+        return self._transport(body, headers, dry_run=dry_run)
 
+    def _transport(
+        self, body: str, headers: dict[str, str], *, dry_run: bool = False
+    ) -> PublishResult:
+        """組み立て済み body/headers を ntfy へ POST する (retry + masking 共通処理)。"""
         if dry_run:
             return PublishResult(
                 publisher=self.name,

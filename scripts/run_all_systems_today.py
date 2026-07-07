@@ -2532,6 +2532,48 @@ def _safe_progress_call(
         pass
 
 
+def _build_metrics_summary_context() -> dict[str, Any]:
+    """GLOBAL_STAGE_METRICS の snapshot から metrics summary 用 context を作る。
+
+    docs ``today_signal_scan/7. 保存・通知フェーズ`` が要求する「実行サマリー
+    (対象数・エントリー数・エグジット数・損益)」の per-system 表
+    (Tgt/FIL/STU/TRD/Entry/Exit) を ``_save_and_notify_phase`` が発火できるよう、
+    従来 in-memory にしか無かった funnel を context dict に落とす。
+    値が無い phase は map に載せない (block 側で 0 表示になる)。
+    """
+    prefilter_map: dict[str, int] = {}
+    setup_map: dict[str, int] = {}
+    exit_counts_map: dict[str, int] = {}
+    try:
+        snapshots = GLOBAL_STAGE_METRICS.all_snapshots()
+    except Exception:
+        snapshots = {}
+    for name, snap in (snapshots or {}).items():
+        key = str(name).strip().lower()
+        fil = getattr(snap, "filter_pass", None)
+        stu = getattr(snap, "setup_pass", None)
+        exc = getattr(snap, "exit_count", None)
+        if fil is not None:
+            prefilter_map[key] = int(fil)
+        if stu is not None:
+            setup_map[key] = int(stu)
+        if exc is not None:
+            exit_counts_map[key] = int(exc)
+    tgt_base = 0
+    try:
+        universe = GLOBAL_STAGE_METRICS.get_universe_target()
+        if universe is not None:
+            tgt_base = int(universe)
+    except Exception:
+        tgt_base = 0
+    return {
+        "prefilter_map": prefilter_map,
+        "setup_map": setup_map,
+        "exit_counts_map": exit_counts_map,
+        "tgt_base": tgt_base,
+    }
+
+
 def _save_and_notify_phase(
     ctx: TodayRunContext,
     *,
@@ -2683,12 +2725,24 @@ def _save_and_notify_phase(
                 {"name": key, "value": value, "inline": True}
                 for key, value in summary_pairs
             ]
-            send_metrics_notification(
-                day_str=str(td_str),
-                fields=summary_fields + lines,
-                summary_pairs=summary_pairs,
-                title=title,
-            )
+            # docs phase 8: サマリは必ずログに残し (実行締めの記録)、
+            # 実際の通知送信は notify 有効時のみ (notify=False の save 専用実行で
+            # 予期せぬ通知が飛ぶのを防ぐ)。
+            try:
+                _log("📈 本日の最終メトリクス (system別 Tgt/FIL/STU/TRD/Entry/Exit):")
+                for pair in summary_pairs:
+                    _log(f"  {pair[0]}: {pair[1]}")
+                for line in lines:
+                    _log(f"  {line['name']}: {line['value']}")
+            except Exception:
+                pass
+            if notify:
+                send_metrics_notification(
+                    day_str=str(td_str),
+                    fields=summary_fields + lines,
+                    summary_pairs=summary_pairs,
+                    title=title,
+                )
         except Exception:
             pass
 
@@ -6448,7 +6502,9 @@ def main() -> int:
                 final_df=final_df,
                 per_system=per_system or {},
                 order_1_7=[f"system{i}" for i in range(1, 8)],
-                metrics_summary_context=None,
+                # docs phase 8 準拠: in-memory funnel から metrics サマリ context を
+                # 組み立てて渡す (従来は None で恒常 skip され「未計測」だった)。
+                metrics_summary_context=_build_metrics_summary_context(),
                 output_root_for_final=out_root,
             )
         finally:
