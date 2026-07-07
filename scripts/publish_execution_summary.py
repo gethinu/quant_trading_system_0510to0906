@@ -96,6 +96,18 @@ def main(argv: list[str] | None = None) -> int:
 
     title, body = format_execution_summary(recon)
 
+    # 副産物として recon を書き戻す (build した場合、dashboard が execution funnel を
+    # 参照できるよう)。dry-run でも書く = dry-run 実行でもダッシュにサマリが出る。
+    if not args.recon_json:
+        date_str = args.date or (recon.get("date") or datetime.now().strftime("%Y-%m-%d"))
+        out = _default_path(Path(args.results_dir), "recon", str(date_str))
+        try:
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(json.dumps(recon, ensure_ascii=False, indent=2), encoding="utf-8")
+            logger.info("recon 書き出し: %s", out)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("recon 書き戻し失敗 (無視): %s", exc)
+
     if args.dry_run:
         print(f"X-Title: {title}\n---\n{body}")
         return 0
@@ -114,16 +126,6 @@ def main(argv: list[str] | None = None) -> int:
     tags = "bar_chart" + (",warning" if urgent else "")
     result = pub.send_text(title, body, tags=tags, priority=(5 if urgent else None))
     logger.info("execution summary 配信: ok=%s detail=%s", result.ok, result.detail)
-
-    # 副産物として recon を書き戻す (build した場合、dashboard が参照できるよう)
-    if not args.recon_json:
-        date_str = args.date or (recon.get("date") or datetime.now().strftime("%Y-%m-%d"))
-        out = _default_path(Path(args.results_dir), "recon", str(date_str))
-        try:
-            out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_text(json.dumps(recon, ensure_ascii=False, indent=2), encoding="utf-8")
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("recon 書き戻し失敗 (無視): %s", exc)
 
     return 0 if result.ok else 2
 

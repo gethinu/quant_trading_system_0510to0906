@@ -322,6 +322,27 @@ try {
         elseif ($ec -eq 2) { $Failures += "exit_check(safety_abort)" }
     }
 
+    # --- Step 5d: execution summary (submit 後の実発注サマリを recon 化 + 通知) ---
+    # entry(5b)/exit(5c) の結果を today_signals/paper_orders/exit_orders から recon 化し、
+    # sig→gen→entry→fill→exit + system別 + drop 内訳 の整列サマリを配信する。
+    # Step5 の publish (signal 予告) はそのまま残し、本 step は実発注確定後の結果を別便で送る。
+    # AutoSubmitPaper 時のみ実送信、それ以外は dry-run (recon 生成 + 本文表示のみ・送信なし)。
+    if ($SkipPublish) {
+        Write-Log "[exec_summary] SkipPublish 指定によりスキップ"
+    }
+    elseif (-not (Test-Path $SignalsJson)) {
+        Write-Log "[exec_summary] signals JSON が無いためスキップ: $SignalsJson"
+    }
+    else {
+        $esArgs = @(
+            (Join-Path $ProjectRoot "scripts\publish_execution_summary.py"),
+            "--date", $Date
+        )
+        if ((-not $AutoSubmitPaper) -or $DryRunPublish) { $esArgs += @("--dry-run") }
+        $es = Invoke-Step -Name "exec_summary" -PyArgs $esArgs
+        if ($es -eq 1 -or $es -eq 2) { $Failures += "exec_summary(exit=$es)" }
+    }
+
     # --- Step 6: publish data to Vercel (git commit + push) ------------
     if (-not (Test-Path $SignalsJson)) {
         Write-Log "[vercel] signals JSON が無いため data push をスキップ"
