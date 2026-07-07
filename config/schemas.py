@@ -7,10 +7,29 @@ from pydantic import BaseModel, Field, field_validator
 # mypy: disable-error-code=call-arg
 
 
+class PortfolioRiskModel(BaseModel):
+    """portfolio-level 管理上限 (Phase 5, 2026-07-07)。
+
+    デフォルトは既存ルール (per-system 10 / 50-50 / bucket) から導出した no-op。
+    詳細と根拠: docs/POSITION_MANAGEMENT_PHASE5_20260707.md。
+    """
+
+    # active (保守的 no-op デフォルト)
+    max_total_positions: int = Field(70, ge=0)
+    max_long_positions: int = Field(40, ge=0)
+    max_short_positions: int = Field(30, ge=0)
+    max_gross_exposure_pct: float = Field(1.0, ge=0)
+    max_net_exposure_pct: float = Field(1.0, ge=0)
+    # off-by-default (0 = 無効)
+    drawdown_flatten_pct: float = Field(0.0, ge=0, le=1)
+    max_positions_per_sector: int = Field(0, ge=0)
+
+
 class RiskModel(BaseModel):
     risk_pct: float = Field(0.02, ge=0, lt=1)
     max_positions: int = Field(10, ge=0)
     max_pct: float = Field(0.10, ge=0, lt=1)
+    portfolio: PortfolioRiskModel = PortfolioRiskModel()
 
 
 class DataModel(BaseModel):

@@ -193,8 +193,17 @@ _DEFAULT_SYSTEM_ORDER_TYPE = {
 
 ### 5.2 future consideration (docs 未明記の項目、実装は user 判断待ち)
 
+> **UPDATE 2026-07-07 — Phase 5 解禁**: 本節の (b) portfolio 総 position cap /
+> (c) long-short 集約 cap / (d) sector cap / drawdown flatten を、user 判断により
+> spec 化 + 実装した。新 spec と採用デフォルト・根拠は
+> [`docs/POSITION_MANAGEMENT_PHASE5_20260707.md`](./POSITION_MANAGEMENT_PHASE5_20260707.md)
+> を single source of truth とする。count/exposure cap は保守的 no-op デフォルトで
+> active、drawdown flatten と sector cap は off-by-default。(a) dedup は option A を追認
+> (挙動変更なし)。
+
 以下は「docs に無い機能を独自に追加するのは絶対 NG」の user 方針に従い、
 本 dispatch では **提案のみ**。user が判断したら別 dispatch で spec 化 + 実装。
+(→ 2026-07-07 に上記のとおり解禁済み)
 
 #### (a) cross-system 同一銘柄 dedup の明文化
 

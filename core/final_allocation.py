@@ -1615,6 +1615,141 @@ def _resolve_max_positions(
     return result
 
 
+def _load_portfolio_caps() -> dict[str, float]:
+    """portfolio-level 上限を settings から読む (欠損時は no-op default)。
+
+    Phase 5 (2026-07-07)。default は既存ルール由来の no-op。
+    詳細: docs/POSITION_MANAGEMENT_PHASE5_20260707.md。
+    """
+    defaults: dict[str, float] = {
+        "max_total_positions": 70,
+        "max_long_positions": 40,
+        "max_short_positions": 30,
+        "max_gross_exposure_pct": 1.0,
+        "max_net_exposure_pct": 1.0,
+    }
+    try:
+        from config.settings import get_settings
+
+        pf = get_settings().risk.portfolio
+        return {
+            "max_total_positions": int(getattr(pf, "max_total_positions", 70)),
+            "max_long_positions": int(getattr(pf, "max_long_positions", 40)),
+            "max_short_positions": int(getattr(pf, "max_short_positions", 30)),
+            "max_gross_exposure_pct": float(
+                getattr(pf, "max_gross_exposure_pct", 1.0)
+            ),
+            "max_net_exposure_pct": float(getattr(pf, "max_net_exposure_pct", 1.0)),
+        }
+    except Exception:
+        return defaults
+
+
+def _apply_portfolio_caps(
+    final_df: pd.DataFrame,
+    *,
+    caps: Mapping[str, float],
+    active_positions: Sequence[object] | None,
+    symbol_system_map: Mapping[str, Any] | None,
+    long_systems: Sequence[str],
+    short_systems: Sequence[str],
+    equity: float,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """優先度順 final_df に portfolio 上限 (件数 total/long/short + gross/net exposure)
+    を適用し、超過分を末尾から trim する。
+
+    - 既保有 (active_positions) + 新規 が上限を超えないよう新規側を削る。
+    - exposure は ``position_value`` 列がある時のみ (新規分の gross/net を equity×pct と比較)。
+    - default caps は no-op (現状 allocation は上限を超えない) なので通常は無 trim。
+    戻り値: (trimmed_df, report)。report は観測性のため summary に載せる。
+    """
+    report: dict[str, Any] = {"applied": False}
+    if final_df is None or getattr(final_df, "empty", True):
+        return final_df, report
+
+    active_by_system = count_active_positions_by_system(
+        active_positions, symbol_system_map
+    )
+    long_set = {str(s).strip().lower() for s in long_systems}
+    short_set = {str(s).strip().lower() for s in short_systems}
+    held_long = sum(v for k, v in active_by_system.items() if k in long_set)
+    held_short = sum(v for k, v in active_by_system.items() if k in short_set)
+    held_total = sum(active_by_system.values())
+
+    max_total = int(caps.get("max_total_positions", 70))
+    max_long = int(caps.get("max_long_positions", 40))
+    max_short = int(caps.get("max_short_positions", 30))
+    gross_cap = float(equity) * float(caps.get("max_gross_exposure_pct", 1.0))
+    net_cap = float(equity) * float(caps.get("max_net_exposure_pct", 1.0))
+
+    allow_long = max(0, max_long - held_long)
+    allow_short = max(0, max_short - held_short)
+    allow_total = max(0, max_total - held_total)
+
+    has_pv = "position_value" in final_df.columns
+    kept_idx: list[Any] = []
+    n_long = n_short = n_total = 0
+    long_usd = short_usd = 0.0
+    trims: dict[str, int] = {}
+
+    for idx, row in final_df.iterrows():
+        side = str(row.get("side", "")).strip().lower()
+        if n_total >= allow_total:
+            trims["total"] = trims.get("total", 0) + 1
+            continue
+        if side == "long" and n_long >= allow_long:
+            trims["long_count"] = trims.get("long_count", 0) + 1
+            continue
+        if side == "short" and n_short >= allow_short:
+            trims["short_count"] = trims.get("short_count", 0) + 1
+            continue
+        if has_pv:
+            try:
+                pv = float(row.get("position_value") or 0.0)
+            except (TypeError, ValueError):
+                pv = 0.0
+            new_long = long_usd + (pv if side == "long" else 0.0)
+            new_short = short_usd + (pv if side == "short" else 0.0)
+            if gross_cap > 0 and (new_long + new_short) > gross_cap:
+                trims["gross_exposure"] = trims.get("gross_exposure", 0) + 1
+                continue
+            if net_cap > 0 and abs(new_long - new_short) > net_cap:
+                trims["net_exposure"] = trims.get("net_exposure", 0) + 1
+                continue
+            long_usd, short_usd = new_long, new_short
+        kept_idx.append(idx)
+        n_total += 1
+        if side == "long":
+            n_long += 1
+        elif side == "short":
+            n_short += 1
+
+    if len(kept_idx) < len(final_df):
+        trimmed_df = final_df.loc[kept_idx].copy().reset_index(drop=True)
+    else:
+        trimmed_df = final_df
+
+    report = {
+        "applied": True,
+        "held": {"long": held_long, "short": held_short, "total": held_total},
+        "caps": {
+            "max_total": max_total,
+            "max_long": max_long,
+            "max_short": max_short,
+            "gross_cap_usd": round(gross_cap, 2),
+            "net_cap_usd": round(net_cap, 2),
+        },
+        "allow": {"long": allow_long, "short": allow_short, "total": allow_total},
+        "kept": {"long": n_long, "short": n_short, "total": n_total},
+        "trimmed": trims,
+        "new_long_usd": round(long_usd, 2),
+        "new_short_usd": round(short_usd, 2),
+    }
+    if trims:
+        logger.info("[PORTFOLIO_CAP] trimmed %s (held L%d/S%d)", trims, held_long, held_short)
+    return trimmed_df, report
+
+
 def finalize_allocation(
     per_system: Mapping[str, pd.DataFrame],
     *,
@@ -2090,6 +2225,33 @@ def finalize_allocation(
         final_df = _sort_final_frame(final_df)
     else:
         final_df = final_df.copy()
+
+    # portfolio-level caps (Phase 5, 2026-07-07): 優先度順 (sort 済) の final_df に
+    # 件数 (total/long/short) + gross/net exposure 上限を適用。default は no-op。
+    # 既保有 + 新規 が上限を超えないよう新規を末尾から trim する。
+    try:
+        portfolio_caps = _load_portfolio_caps()
+        equity_base = _safe_positive_float(default_capital, allow_zero=True) or 100000.0
+        final_df, caps_report = _apply_portfolio_caps(
+            final_df,
+            caps=portfolio_caps,
+            active_positions=positions,
+            symbol_system_map=symbol_system_map,
+            long_systems=list(long_alloc.keys()),
+            short_systems=list(short_alloc.keys()),
+            equity=float(equity_base),
+        )
+        try:
+            existing_diag = summary.system_diagnostics or {}
+            if not isinstance(existing_diag, dict):
+                existing_diag = {}
+            existing_diag = dict(existing_diag)
+            existing_diag["portfolio_caps"] = caps_report
+            summary.system_diagnostics = existing_diag
+        except Exception:
+            pass
+    except Exception as exc:  # noqa: BLE001 - caps は best-effort、失敗しても allocation 継続
+        logger.warning("[PORTFOLIO_CAP] 適用に失敗、trim なしで継続: %s", exc)
 
     if "system" in final_df.columns:
         try:

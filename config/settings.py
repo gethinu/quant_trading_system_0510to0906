@@ -32,10 +32,29 @@ load_dotenv(dotenv_path=PROJECT_ROOT / ".env", override=False)
 # Dataclasses (セクション別)
 # -----------------------------
 @dataclass(frozen=True)
+class PortfolioRiskConfig:
+    """portfolio-level 管理上限 (Phase 5, 2026-07-07)。
+
+    デフォルトは既存ルール (per-system 10 / 50-50 / bucket) からの導出 no-op。
+    詳細と根拠: docs/POSITION_MANAGEMENT_PHASE5_20260707.md。
+    """
+
+    max_total_positions: int = 70
+    max_long_positions: int = 40
+    max_short_positions: int = 30
+    max_gross_exposure_pct: float = 1.0
+    max_net_exposure_pct: float = 1.0
+    # off-by-default (0 = 無効)
+    drawdown_flatten_pct: float = 0.0
+    max_positions_per_sector: int = 0
+
+
+@dataclass(frozen=True)
 class RiskConfig:
     risk_pct: float = 0.02
     max_positions: int = 10
     max_pct: float = 0.10
+    portfolio: PortfolioRiskConfig = field(default_factory=PortfolioRiskConfig)
 
 
 @dataclass(frozen=True)
@@ -345,6 +364,35 @@ def _load_config_json_or_yaml_validated(project_root: Path) -> dict[str, Any]:
 # -----------------------------
 
 
+def _build_portfolio_risk_config(cfg: dict[str, Any]) -> PortfolioRiskConfig:
+    """risk.portfolio セクションから portfolio-level 上限を構築 (欠損は no-op default)。"""
+    pf = cfg.get("portfolio", {}) or {}
+    if not isinstance(pf, dict):
+        pf = {}
+    d = PortfolioRiskConfig()
+
+    def _i(key: str, default: int) -> int:
+        return _coerce_int(pf.get(key, default), default)
+
+    def _f(key: str, default: float) -> float:
+        try:
+            return float(pf.get(key, default))
+        except (TypeError, ValueError):
+            return default
+
+    return PortfolioRiskConfig(
+        max_total_positions=_i("max_total_positions", d.max_total_positions),
+        max_long_positions=_i("max_long_positions", d.max_long_positions),
+        max_short_positions=_i("max_short_positions", d.max_short_positions),
+        max_gross_exposure_pct=_f("max_gross_exposure_pct", d.max_gross_exposure_pct),
+        max_net_exposure_pct=_f("max_net_exposure_pct", d.max_net_exposure_pct),
+        drawdown_flatten_pct=_f("drawdown_flatten_pct", d.drawdown_flatten_pct),
+        max_positions_per_sector=_i(
+            "max_positions_per_sector", d.max_positions_per_sector
+        ),
+    )
+
+
 def _build_risk_config(cfg: dict[str, Any]) -> RiskConfig:
     raw_max_pos = os.getenv("MAX_POSITIONS", cfg.get("max_positions", 10))
     max_pos_val = _coerce_int(raw_max_pos, 10)
@@ -352,6 +400,7 @@ def _build_risk_config(cfg: dict[str, Any]) -> RiskConfig:
         risk_pct=float(os.getenv("RISK_PCT", cfg.get("risk_pct", 0.02))),
         max_positions=max_pos_val,
         max_pct=float(os.getenv("MAX_PCT", cfg.get("max_pct", 0.10))),
+        portfolio=_build_portfolio_risk_config(cfg),
     )
 
 
