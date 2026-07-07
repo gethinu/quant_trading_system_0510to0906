@@ -1967,6 +1967,53 @@ def _fetch_positions_and_symbol_map() -> tuple[list[Any], dict[str, str]]:
     return positions, symbol_system_map
 
 
+def _resolve_positions_for_allocation() -> tuple[list[Any] | None, Any | None]:
+    """配分用に Alpaca 現保有ポジション + symbol_system_map を解決する (paper, read-only)。
+
+    docs ``today_signal_scan/6. 配分・最終リスト生成フェーズ`` 準拠:
+        「Alpaca の現保有ポジションと symbol_system_map.json を突き合わせて
+         システム別空き枠を算出します」。
+    従来は active_positions=None で突合が実質無効だった (fable5 audit item7/8) のを
+    ここで配線し、finalize_allocation(positions=...) に渡して available_slots に反映する。
+
+    安全策 (fail-open = 従来挙動へ縮退):
+    - env ``ALLOCATION_RECONCILE_POSITIONS`` が偽値 (0/false/no/off) なら突合無効。
+    - APCA creds 未設定なら Alpaca に触れず None (test/CI/backtest 保護)。
+    - fetch 失敗時も None にフォールバック。allocation 段は best-effort で良い
+      (submit 段 signals_json_to_orders / signals_to_orders の held-check が
+       duplicate exposure の hard guard)。
+    """
+    try:
+        symbol_system_map: Any = load_symbol_system_map()
+    except Exception:
+        symbol_system_map = None
+
+    flag = os.environ.get("ALLOCATION_RECONCILE_POSITIONS", "1").strip().lower()
+    if flag in ("0", "false", "no", "off"):
+        return None, symbol_system_map
+
+    if not (os.getenv("APCA_API_KEY_ID") and os.getenv("APCA_API_SECRET_KEY")):
+        # creds 無し = 口座に触れない環境。従来通り突合しない。
+        return None, symbol_system_map
+
+    try:
+        positions, fetched_map = _fetch_positions_and_symbol_map()
+    except Exception as exc:  # noqa: BLE001
+        _log(f"⚠️ 現保有ポジション取得に失敗、突合なしで継続: {exc}", level="WARNING")
+        return None, symbol_system_map
+
+    if not symbol_system_map and fetched_map:
+        symbol_system_map = fetched_map
+    try:
+        _log(
+            f"📊 現保有ポジション {len(positions)} 件を配分の空き枠算出に反映 "
+            "(docs today_signal_scan/6 突合)"
+        )
+    except Exception:
+        pass
+    return positions, symbol_system_map
+
+
 def _submit_orders(
     final_df: pd.DataFrame,
     *,
@@ -5189,14 +5236,12 @@ def compute_today_signals(  # noqa: C901  # type: ignore[reportGeneralTypeIssues
     # === Allocation & Final Assembly ===
     # ここで per_system から最終候補 (final_df) を構築し AllocationSummary を取得する。
     try:
-        # シンボル→system マップ（存在しなくても継続）
-        try:
-            symbol_system_map = load_symbol_system_map()
-        except Exception:
-            symbol_system_map = None
-
-        # アクティブポジション情報（将来: broker / キャッシュから取得可能なら拡張）
-        active_positions = None  # NOTE: Could be retrieved via ctx if needed
+        # シンボル→system マップ + Alpaca 現保有ポジション。
+        # docs today_signal_scan/6 (配分フェーズ): 現保有と突合してシステム別
+        # 空き枠 (available_slots) を算出する。従来 active_positions=None で突合が
+        # 実質無効だった (fable5 audit item7/8) のをここで配線する。
+        # (creds 無し / env 無効 / fetch 失敗 時は None にフォールバック = 従来挙動)
+        active_positions, symbol_system_map = _resolve_positions_for_allocation()
 
         # デバッグ: 配分前の候補データを出力
         if os.environ.get("ALLOCATION_DEBUG", "0") == "1":

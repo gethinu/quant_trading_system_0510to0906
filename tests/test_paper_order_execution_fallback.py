@@ -106,10 +106,17 @@ class _FakeOrder:
         self.client_order_id = coid
 
 
+class _FakePosition:
+    def __init__(self, symbol, qty):
+        self.symbol = symbol
+        self.qty = qty
+
+
 class _FakeClient:
-    def __init__(self, fractionable_map, open_orders):
+    def __init__(self, fractionable_map, open_orders, positions=None):
         self._frac = fractionable_map
         self._open = open_orders
+        self._positions = positions or []
         self.notional_calls: list = []
 
     def get_asset(self, sym):
@@ -119,6 +126,10 @@ class _FakeClient:
 
     def get_orders(self, filter=None):  # noqa: A002 (mirror alpaca API kw)
         return self._open
+
+    def get_all_positions(self):
+        # signals_json_to_orders の held-position 突合 (2026-07-07 C2) で使う。
+        return list(self._positions)
 
     def submit_order(self, order_data=None):
         self.notional_calls.append(order_data)
@@ -237,3 +248,58 @@ def test_no_silent_drop_every_order_has_terminal_state(monkeypatch, paper_env):
     for o in orders:
         terminal = bool(o.order_id) or bool(o.error) or bool(o.skip_reason)
         assert terminal, f"{o.symbol} has no terminal state (silent drop!)"
+
+
+# --------------------------------------------------------------------------
+# 3. C2 (2026-07-07) — 既保有ポジションとの突合 (duplicate exposure 対策)
+# --------------------------------------------------------------------------
+def test_already_held_same_direction_is_skipped(monkeypatch, paper_env):
+    """既に long 保有中の銘柄への buy は重ね買いせず skip_reason 付きで残す。"""
+    monkeypatch.setattr(
+        ba, "submit_order_with_retry",
+        lambda *a, **k: _FakeOrder("should-not-be-called"),
+    )
+    client = _FakeClient(
+        fractionable_map={"AAPL": True},
+        open_orders=[],
+        positions=[_FakePosition("AAPL", 10)],  # 既に AAPL を 10 株 long 保有
+    )
+    json_data = {
+        "date": "2026-07-02",
+        "systems": {"sys1": {"signals": [
+            {"symbol": "AAPL", "side": "buy", "entry_price": 200.0, "weight": 1.0},
+        ]}},
+    }
+    orders = signals_json_to_orders(json_data, tier="small", dry_run=False, client=client)
+    assert len(orders) == 1
+    assert orders[0].order_id is None
+    assert orders[0].skip_reason and "already_held" in orders[0].skip_reason
+    assert client.notional_calls == []  # 実 submit されていない
+
+
+def test_opposite_direction_not_blocked_by_held(monkeypatch, paper_env):
+    """既に short 保有中でも buy (反対方向) は held-check で skip されない。
+
+    反対売買/netting は wash-guard (open orders) と Alpaca netting に委ねる方針。
+    ここでは held-check が buy を止めない (open_orders 空なので wash も通る) こと。
+    """
+    submitted: list = []
+    monkeypatch.setattr(
+        ba, "submit_order_with_retry",
+        lambda client, symbol, qty, **kw: submitted.append((symbol, qty)) or _FakeOrder(f"qid-{symbol}"),
+    )
+    client = _FakeClient(
+        fractionable_map={"AAPL": True},
+        open_orders=[],
+        positions=[_FakePosition("AAPL", -10)],  # AAPL を 10 株 short 保有
+    )
+    json_data = {
+        "date": "2026-07-02",
+        "systems": {"sys1": {"signals": [
+            {"symbol": "AAPL", "side": "buy", "entry_price": 200.0, "weight": 1.0},
+        ]}},
+    }
+    orders = signals_json_to_orders(json_data, tier="small", dry_run=False, client=client)
+    assert len(orders) == 1
+    # held-check では skip されない (already_held 理由が付かない)
+    assert not (orders[0].skip_reason and "already_held" in (orders[0].skip_reason or ""))

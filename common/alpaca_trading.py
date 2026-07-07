@@ -718,6 +718,11 @@ def signals_json_to_orders(
 
     # --- 発注前バリデーション用の口座状態を 1 回だけ read (read-only) ---
     open_sides, open_coids = fetch_open_order_state(client)
+    # 既保有ポジション {symbol: signed_qty}。同方向の重ね買いを防ぐための突合材料。
+    # docs today_signal_scan/6 (現保有と突合) + fable5 audit item7/8 の duplicate
+    # exposure 対策。fetch 失敗は _fetch_open_positions が PositionsFetchError を
+    # raise して fail-closed (silent {} で既保有に重ねて buy しない = P0#7 の設計)。
+    open_positions = _fetch_open_positions(client)
 
     submitted: list[PreparedOrder] = []
     for po in prepared:
@@ -729,6 +734,17 @@ def signals_json_to_orders(
             continue
         price = float(po.extra.get("price") or 0.0)
         opp_side = "sell" if po.side == "buy" else "buy"
+
+        # (0) 既保有ポジションとの突合: 同方向で既に保有している銘柄は重ね買いしない。
+        #     反対方向 (netting / 反対売買) は wash-guard (open orders) と Alpaca 側
+        #     netting に委ね、ここでは touch しない (ユーザーの exit 注文を壊さない)。
+        held = float(open_positions.get(po.symbol, 0.0) or 0.0)
+        if (po.side == "buy" and held > 0) or (po.side == "sell" and held < 0):
+            po.skip_reason = f"already_held:{po.side}_qty={held:g}"
+            _audit_log({"event": "skip_already_held", **po.to_row()})
+            logger.info("skip (既保有 %s): %s qty=%s", po.side, po.symbol, held)
+            submitted.append(po)
+            continue
 
         # (1) 冪等性: 同一 client_order_id が既に open なら二重 submit しない
         if po.client_order_id and po.client_order_id in open_coids:
