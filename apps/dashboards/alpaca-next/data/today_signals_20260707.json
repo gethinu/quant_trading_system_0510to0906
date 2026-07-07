@@ -1,20 +1,461 @@
 {
   "version": "1.0",
   "date": "2026-07-07",
-  "generated_at": "2026-07-07T11:42:49+09:00",
+  "generated_at": "2026-07-07T12:53:17+09:00",
   "provider": "polygon",
-  "systems": {},
+  "systems": {
+    "sys1": {
+      "signals": [
+        {
+          "symbol": "SDOT",
+          "side": "BUY",
+          "entry_price": 72.0,
+          "weight": 0.0058,
+          "rank": 1,
+          "reason": "ROC200が1位（全1557銘柄中）のため"
+        },
+        {
+          "symbol": "WOLF",
+          "side": "BUY",
+          "entry_price": 44.56,
+          "weight": 0.0072,
+          "rank": 2,
+          "reason": "ROC200が3位（全1557銘柄中）のため"
+        },
+        {
+          "symbol": "BNY",
+          "side": "BUY",
+          "entry_price": 146.02,
+          "weight": 0.0316,
+          "rank": 3,
+          "reason": "ROC200が5位（全1557銘柄中）のため"
+        },
+        {
+          "symbol": "NUAI",
+          "side": "BUY",
+          "entry_price": 5.2,
+          "weight": 0.0075,
+          "rank": 4,
+          "reason": "ROC200が6位（全1557銘柄中）のため"
+        },
+        {
+          "symbol": "ERAS",
+          "side": "BUY",
+          "entry_price": 17.92,
+          "weight": 0.0175,
+          "rank": 5,
+          "reason": "ROC200が7位（全1557銘柄中）のため"
+        },
+        {
+          "symbol": "SLS",
+          "side": "BUY",
+          "entry_price": 13.27,
+          "weight": 0.0126,
+          "rank": 6,
+          "reason": "ROC200が9位（全1557銘柄中）のため"
+        },
+        {
+          "symbol": "MXL",
+          "side": "BUY",
+          "entry_price": 112.39,
+          "weight": 0.0091,
+          "rank": 7,
+          "reason": "ROC200が10位（全1557銘柄中）のため"
+        },
+        {
+          "symbol": "VICR",
+          "side": "BUY",
+          "entry_price": 350.21,
+          "weight": 0.0095,
+          "rank": 8,
+          "reason": "ROC200が上位のため"
+        },
+        {
+          "symbol": "ICHR",
+          "side": "BUY",
+          "entry_price": 111.77,
+          "weight": 0.0121,
+          "rank": 9,
+          "reason": "ROC200が上位のため"
+        }
+      ],
+      "n_candidates_input": 10,
+      "n_signals_output": 9,
+      "gate_survival_ratio": 0.9
+    },
+    "sys2": {
+      "signals": [
+        {
+          "symbol": "LFST",
+          "side": "SELL",
+          "entry_price": 11.43,
+          "weight": 0.0538,
+          "rank": 39,
+          "reason": "モメンタムが強く過熱のため"
+        },
+        {
+          "symbol": "HNGE",
+          "side": "SELL",
+          "entry_price": 85.07,
+          "weight": 0.0484,
+          "rank": 40,
+          "reason": "モメンタムが強く過熱のため"
+        },
+        {
+          "symbol": "MBX",
+          "side": "SELL",
+          "entry_price": 55.92,
+          "weight": 0.0439,
+          "rank": 41,
+          "reason": "モメンタムが強く過熱のため"
+        },
+        {
+          "symbol": "PTGX",
+          "side": "SELL",
+          "entry_price": 125.17,
+          "weight": 0.0373,
+          "rank": 42,
+          "reason": "モメンタムが強く過熱のため"
+        },
+        {
+          "symbol": "GPGI",
+          "side": "SELL",
+          "entry_price": 16.63,
+          "weight": 0.0356,
+          "rank": 43,
+          "reason": "モメンタムが強く過熱のため"
+        },
+        {
+          "symbol": "BLZE",
+          "side": "SELL",
+          "entry_price": 16.36,
+          "weight": 0.0217,
+          "rank": 44,
+          "reason": "モメンタムが強く過熱のため"
+        },
+        {
+          "symbol": "PRCH",
+          "side": "SELL",
+          "entry_price": 15.98,
+          "weight": 0.0299,
+          "rank": 45,
+          "reason": "モメンタムが強く過熱のため"
+        },
+        {
+          "symbol": "ALHC",
+          "side": "SELL",
+          "entry_price": 24.01,
+          "weight": 0.0267,
+          "rank": 46,
+          "reason": "モメンタムが強く過熱のため"
+        },
+        {
+          "symbol": "AAL",
+          "side": "SELL",
+          "entry_price": 18.15,
+          "weight": 0.0241,
+          "rank": 47,
+          "reason": "モメンタムが強く過熱のため"
+        },
+        {
+          "symbol": "SEZL",
+          "side": "SELL",
+          "entry_price": 175.18,
+          "weight": 0.019,
+          "rank": 48,
+          "reason": "モメンタムが強く過熱のため"
+        }
+      ],
+      "n_candidates_input": 10,
+      "n_signals_output": 10,
+      "gate_survival_ratio": 1.0
+    },
+    "sys3": {
+      "signals": [
+        {
+          "symbol": "UBXG",
+          "side": "BUY",
+          "entry_price": 5.01,
+          "weight": 0.008,
+          "rank": 10,
+          "reason": "3日下落率が7位（全1163銘柄中）のため"
+        },
+        {
+          "symbol": "KALA",
+          "side": "BUY",
+          "entry_price": 1.78,
+          "weight": 0.01,
+          "rank": 11,
+          "reason": "3日下落率が8位（全1163銘柄中）のため"
+        },
+        {
+          "symbol": "STI",
+          "side": "BUY",
+          "entry_price": 9.08,
+          "weight": 0.0108,
+          "rank": 12,
+          "reason": "3日下落率が9位（全1163銘柄中）のため"
+        },
+        {
+          "symbol": "IVF",
+          "side": "BUY",
+          "entry_price": 1.83,
+          "weight": 0.011,
+          "rank": 13,
+          "reason": "3日下落率が11位（全1163銘柄中）のため"
+        },
+        {
+          "symbol": "VCIG",
+          "side": "BUY",
+          "entry_price": 2.37,
+          "weight": 0.0088,
+          "rank": 14,
+          "reason": "3日下落率が12位（全1163銘柄中）のため"
+        },
+        {
+          "symbol": "PCLA",
+          "side": "BUY",
+          "entry_price": 5.7,
+          "weight": 0.0066,
+          "rank": 15,
+          "reason": "3日下落率が17位（全1163銘柄中）のため"
+        },
+        {
+          "symbol": "CLSK",
+          "side": "BUY",
+          "entry_price": 13.62,
+          "weight": 0.0195,
+          "rank": 16,
+          "reason": "3日下落率が19位（全1163銘柄中）のため"
+        },
+        {
+          "symbol": "RIOT",
+          "side": "BUY",
+          "entry_price": 23.96,
+          "weight": 0.0208,
+          "rank": 17,
+          "reason": "3日下落率が23位（全1163銘柄中）のため"
+        },
+        {
+          "symbol": "MIMI",
+          "side": "BUY",
+          "entry_price": 2.34,
+          "weight": 0.0105,
+          "rank": 18,
+          "reason": "3日下落率が24位（全1163銘柄中）のため"
+        }
+      ],
+      "n_candidates_input": 10,
+      "n_signals_output": 9,
+      "gate_survival_ratio": 0.9
+    },
+    "sys4": {
+      "signals": [
+        {
+          "symbol": "MAR",
+          "side": "BUY",
+          "entry_price": 368.32,
+          "weight": 0.0299,
+          "rank": 19,
+          "reason": "SPY上昇局面の押し目候補のため"
+        },
+        {
+          "symbol": "FANG",
+          "side": "BUY",
+          "entry_price": 171.96,
+          "weight": 0.0279,
+          "rank": 20,
+          "reason": "SPY上昇局面の押し目候補のため"
+        },
+        {
+          "symbol": "EQIX",
+          "side": "BUY",
+          "entry_price": 1013.62,
+          "weight": 0.0274,
+          "rank": 21,
+          "reason": "SPY上昇局面の押し目候補のため"
+        },
+        {
+          "symbol": "GM",
+          "side": "BUY",
+          "entry_price": 75.52,
+          "weight": 0.0245,
+          "rank": 22,
+          "reason": "SPY上昇局面の押し目候補のため"
+        },
+        {
+          "symbol": "PBR",
+          "side": "BUY",
+          "entry_price": 15.99,
+          "weight": 0.0225,
+          "rank": 23,
+          "reason": "SPY上昇局面の押し目候補のため"
+        },
+        {
+          "symbol": "DLR",
+          "side": "BUY",
+          "entry_price": 176.32,
+          "weight": 0.0191,
+          "rank": 24,
+          "reason": "SPY上昇局面の押し目候補のため"
+        },
+        {
+          "symbol": "SU",
+          "side": "BUY",
+          "entry_price": 53.57,
+          "weight": 0.0174,
+          "rank": 25,
+          "reason": "SPY上昇局面の押し目候補のため"
+        },
+        {
+          "symbol": "HAL",
+          "side": "BUY",
+          "entry_price": 33.01,
+          "weight": 0.0161,
+          "rank": 26,
+          "reason": "SPY上昇局面の押し目候補のため"
+        },
+        {
+          "symbol": "NUE",
+          "side": "BUY",
+          "entry_price": 219.02,
+          "weight": 0.0119,
+          "rank": 27,
+          "reason": "SPY上昇局面の押し目候補のため"
+        },
+        {
+          "symbol": "HST",
+          "side": "BUY",
+          "entry_price": 23.35,
+          "weight": 0.0139,
+          "rank": 28,
+          "reason": "SPY上昇局面の押し目候補のため"
+        }
+      ],
+      "n_candidates_input": 10,
+      "n_signals_output": 10,
+      "gate_survival_ratio": 1.0
+    },
+    "sys5": {
+      "signals": [
+        {
+          "symbol": "LESL",
+          "side": "BUY",
+          "entry_price": 9.58,
+          "weight": 0.0137,
+          "rank": 29,
+          "reason": "ADXが強く、反発期待のため"
+        },
+        {
+          "symbol": "BFLY",
+          "side": "BUY",
+          "entry_price": 7.93,
+          "weight": 0.0155,
+          "rank": 30,
+          "reason": "ADXが強く、反発期待のため"
+        },
+        {
+          "symbol": "TRVI",
+          "side": "BUY",
+          "entry_price": 17.61,
+          "weight": 0.0305,
+          "rank": 31,
+          "reason": "ADXが強く、反発期待のため"
+        },
+        {
+          "symbol": "WNC",
+          "side": "BUY",
+          "entry_price": 13.25,
+          "weight": 0.0237,
+          "rank": 32,
+          "reason": "ADXが強く、反発期待のため"
+        },
+        {
+          "symbol": "DFTX",
+          "side": "BUY",
+          "entry_price": 43.4,
+          "weight": 0.0153,
+          "rank": 33,
+          "reason": "ADXが強く、反発期待のため"
+        },
+        {
+          "symbol": "LIND",
+          "side": "BUY",
+          "entry_price": 26.75,
+          "weight": 0.0239,
+          "rank": 34,
+          "reason": "ADXが強く、反発期待のため"
+        },
+        {
+          "symbol": "ELVN",
+          "side": "BUY",
+          "entry_price": 48.76,
+          "weight": 0.0211,
+          "rank": 35,
+          "reason": "ADXが強く、反発期待のため"
+        },
+        {
+          "symbol": "ICCM",
+          "side": "BUY",
+          "entry_price": 5.28,
+          "weight": 0.0044,
+          "rank": 36,
+          "reason": "ADXが強く、反発期待のため"
+        },
+        {
+          "symbol": "IDYA",
+          "side": "BUY",
+          "entry_price": 36.17,
+          "weight": 0.0186,
+          "rank": 37,
+          "reason": "ADXが強く、反発期待のため"
+        },
+        {
+          "symbol": "CDNL",
+          "side": "BUY",
+          "entry_price": 86.0,
+          "weight": 0.0093,
+          "rank": 38,
+          "reason": "ADXが強く、反発期待のため"
+        }
+      ],
+      "n_candidates_input": 10,
+      "n_signals_output": 10,
+      "gate_survival_ratio": 1.0
+    },
+    "sys6": {
+      "signals": [
+        {
+          "symbol": "ASTH",
+          "side": "SELL",
+          "entry_price": 49.81,
+          "weight": 0.0539,
+          "rank": 49,
+          "reason": "過去6日騰落率が1位（全1銘柄中）のため"
+        }
+      ],
+      "n_candidates_input": 1,
+      "n_signals_output": 1,
+      "gate_survival_ratio": 1.0
+    },
+    "sys7": {
+      "signals": [],
+      "n_candidates_input": 0,
+      "n_signals_output": 0,
+      "gate_survival_ratio": 0.0
+    }
+  },
   "portfolio": {
-    "total_signals": 0,
-    "total_notional_usd": 0.0,
+    "total_signals": 49,
+    "total_notional_usd": 36932.73,
     "hedge": null
   },
   "meta": {
     "cli_version": "0.1.0",
-    "run_id": "20260707_114204_c78ee4",
-    "elapsed_seconds": 45.5,
-    "status": "aborted",
-    "abort_reason": "compute_today_signals_systemexit:1",
+    "run_id": "20260707_123715_830473",
+    "elapsed_seconds": 962.5,
+    "status": "ok",
+    "abort_reason": null,
     "publish_status": "ok"
   }
 }
