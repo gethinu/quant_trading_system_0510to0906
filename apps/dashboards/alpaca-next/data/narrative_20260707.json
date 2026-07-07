@@ -1,0 +1,9 @@
+{
+  "date": "2026-07-07",
+  "headline": "📭 07-07 0 signals / BUY:0 SELL:0 / $0K",
+  "summary": "本日（7月7日）のシグナル配信はありません。システム処理が中断されたため、7つの systematic strategy（sys1-7）からの当日シグナルは生成されていません。 市場参加者は本日のポジション判断において、本システムの systematic signals に依拠することはできません。",
+  "per_symbol_reasons": {},
+  "model": "claude-haiku-4-5-20251001",
+  "cost_usd": 0.001806,
+  "elapsed_seconds": 5.0
+}
