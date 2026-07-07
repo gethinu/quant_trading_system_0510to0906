@@ -241,3 +241,46 @@ def test_csv_path_input_signals_but_zero_orders_returns_exit_3(
     assert rc == 3, "CSV path also must surface input>0 & planned=0 as exit 3"
     captured = capsys.readouterr().out
     assert "[WARN]" in captured
+
+
+# ---------------------------------------------------------------------------
+# no_orders_submitted anomaly (2026-07-07): confirm 実行で生成はあるが全 skip
+# ---------------------------------------------------------------------------
+def test_confirm_all_skipped_is_no_orders_submitted_exit_3(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """--confirm で order は生成されたが全件 skip (min_notional 等) → silent success
+    させず no_orders_submitted anomaly (exit 3) にする。"""
+    from common.alpaca_trading import PreparedOrder
+
+    monkeypatch.setenv("ALPACA_PAPER", "true")
+    monkeypatch.setenv("ALPACA_API_BASE_URL", "https://paper-api.alpaca.markets")
+
+    src = _write_json(
+        tmp_path,
+        {
+            "date": "2026-07-03",
+            "systems": {"sys1": {"signals": [
+                {"symbol": "TINY", "side": "BUY", "entry_price": 10.0, "weight": 0.001},
+            ]}},
+        },
+    )
+    args = _mk_args(tmp_path, src, confirm=True)
+
+    skipped_order = PreparedOrder(
+        symbol="TINY", qty=0, side="buy", order_type="market",
+        client_order_id="system1-TINY-20260703", system="system1",
+        entry_date="2026-07-03", notional_usd=1.0, tier="small", dry_run=False,
+        skip_reason="skip:below_min_notional:$1.00<$5.00",
+    )
+    with mock.patch.object(pts, "assert_paper_env", return_value=None), \
+         mock.patch.object(pts, "signals_json_to_orders", return_value=[skipped_order]):
+        rc = pts._submit_from_json(args)
+
+    assert rc == 3, "confirm & 全 skip は no_orders_submitted (exit 3)"
+    out = _read_output(tmp_path)
+    assert out["status"] == "no_orders_submitted"
+    assert out["submitted"] == 0
+    assert out["skipped"] == 1
+    captured = capsys.readouterr().out
+    assert "1 件も送信されませんでした" in captured

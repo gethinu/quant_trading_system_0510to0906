@@ -343,7 +343,13 @@ def build_signals_json(
         }
         # phase funnel (未計測なら None が並ぶ)。dashboard SIGNAL PIPELINE 用。
         if sk in funnel_by_sys:
-            system_entry["funnel"] = funnel_by_sys[sk]
+            funnel = dict(funnel_by_sys[sk])
+            # entry_count は _save_and_notify_phase (CLI save 経路) 経由でしか埋まらず
+            # headless (daily) では None になりがち。final_df 由来の n_signals_output
+            # (= 当日採用シグナル数) で補完し、dashboard funnel の Entry を埋める。
+            if funnel.get("entry_count") is None:
+                funnel["entry_count"] = n_out
+            system_entry["funnel"] = funnel
         systems_out[sk] = system_entry
 
     # --- hedge (sys7 = SPY short) ---------------------------------------
