@@ -42,6 +42,7 @@ from common.utils_spy import (
     get_signal_target_trading_day,
     get_spy_with_indicators,
 )
+from common.system_constants import HEDGE_INDEX_SYMBOLS
 from config.settings import get_settings
 from core.system1 import system1_row_passes_setup
 from core.system5 import DEFAULT_ATR_PCT_THRESHOLD, format_atr_pct_threshold_label
@@ -672,6 +673,63 @@ def _apply_shortability_filter(
         pass
 
     return prepared
+
+
+def _exclude_hedge_symbols_for_entry(
+    system_name: str,
+    prepared: dict[str, pd.DataFrame] | pd.DataFrame | None,
+    market_df: pd.DataFrame | None,
+    log_callback: Callable[[str], None] | None,
+) -> tuple[dict[str, pd.DataFrame] | pd.DataFrame | None, pd.DataFrame | None]:
+    """SPY（ヘッジ/インデックス銘柄）を systems 1-6 のエントリー候補から除外する。
+
+    docs/systems/INDEX.md: システム7 は「SPY 固定のヘッジ戦略（変更禁止）」であり、
+    システム1-6 は普通株が対象。SPY はマーケットレジーム判定 (SPY>SMA100/SMA200 の
+    ゲート) と System7 のために毎日ロードされるが、システム1-6 の *エントリー候補*
+    には決して含めてはならない。
+
+    prepared から SPY を取り除くことで、候補生成・setup 集計・filter 集計のすべてから
+    SPY を一貫して排除する。市場レジームゲートは呼び出し側が渡す ``market_df`` (spy_df)
+    を参照するため影響を受けないが、万一 ``market_df`` が未指定/空の場合は取り除いた
+    SPY フレームをゲート用フォールバックとして温存する。System7 は SPY 専用のため対象外。
+
+    背景: 2026-07-08 の日次走行 (run_id 20260708_060309) で、EODHD の common-stock
+    フィルタが 401 で失敗し universe が degrade、常時鮮度維持される SPY だけが sys1 の
+    ROC200 ランキングに残り「SPY BUY rank1」を誤出力した。本関数はその再発防止ゲート。
+    """
+    name = (system_name or "").lower()
+    if name == "system7":
+        return prepared, market_df
+    if not isinstance(prepared, dict) or not prepared:
+        return prepared, market_df
+
+    removed_spy: pd.DataFrame | None = None
+    removed_names: list[str] = []
+    for key in list(prepared.keys()):
+        if str(key).upper() in HEDGE_INDEX_SYMBOLS:
+            frame = prepared.pop(key)
+            removed_names.append(str(key).upper())
+            if str(key).upper() == "SPY" and isinstance(frame, pd.DataFrame):
+                removed_spy = frame
+
+    if not removed_names:
+        return prepared, market_df
+
+    # 市場レジームゲート用に SPY フレームを温存（market_df 未指定/空のときのみ）
+    if removed_spy is not None and (
+        market_df is None or getattr(market_df, "empty", True)
+    ):
+        market_df = removed_spy
+
+    if log_callback:
+        try:
+            log_callback(
+                f"🚫 {name}: ヘッジ/インデックス銘柄をエントリー対象から除外: "
+                + ", ".join(sorted(removed_names))
+            )
+        except Exception:
+            pass
+    return prepared, market_df
 
 
 def _compute_filter_pass(
@@ -2830,6 +2888,13 @@ def get_today_signals_for_strategy(
         today_ts,
         prepare_result.skip_stats,
         log_callback,
+    )
+
+    # systems 1-6: SPY（ヘッジ/インデックス銘柄）をエントリー候補から除外する。
+    # docs/systems/INDEX.md 準拠 (sys7=SPY 固定ヘッジ, sys1-6=普通株)。
+    # 市場レジームゲートは market_df を使うため影響しない。System7 は対象外。
+    prepared, market_df = _exclude_hedge_symbols_for_entry(
+        system_name, prepared, market_df, log_callback
     )
 
     _log_elapsed(log_callback, "⏱️ フィルター/前処理完了", t0)
