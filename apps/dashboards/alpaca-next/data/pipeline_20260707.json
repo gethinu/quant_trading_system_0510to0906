@@ -37,7 +37,7 @@
           "name": "TRDlist",
           "label": "TRDlist",
           "condition": "ROC200 降順 上位候補",
-          "count": 10,
+          "count": 1,
           "measured": false,
           "ratio_of_prev": null,
           "ratio_of_universe": null
@@ -46,9 +46,9 @@
           "name": "Entry",
           "label": "Entry",
           "condition": "allocation 後エントリ発火",
-          "count": 9,
+          "count": 1,
           "measured": false,
-          "ratio_of_prev": 0.9,
+          "ratio_of_prev": 1.0,
           "ratio_of_universe": null
         },
         {
@@ -61,7 +61,7 @@
           "ratio_of_universe": null
         }
       ],
-      "final_signals": 9
+      "final_signals": 1
     },
     "sys2": {
       "system_id": "sys2",
@@ -97,7 +97,7 @@
           "name": "TRDlist",
           "label": "TRDlist",
           "condition": "ADX7 降順 上位候補",
-          "count": 10,
+          "count": 0,
           "measured": false,
           "ratio_of_prev": null,
           "ratio_of_universe": null
@@ -106,9 +106,9 @@
           "name": "Entry",
           "label": "Entry",
           "condition": "allocation 後エントリ発火",
-          "count": 10,
+          "count": 0,
           "measured": false,
-          "ratio_of_prev": 1.0,
+          "ratio_of_prev": null,
           "ratio_of_universe": null
         },
         {
@@ -121,7 +121,7 @@
           "ratio_of_universe": null
         }
       ],
-      "final_signals": 10
+      "final_signals": 0
     },
     "sys3": {
       "system_id": "sys3",
@@ -157,7 +157,7 @@
           "name": "TRDlist",
           "label": "TRDlist",
           "condition": "drop3d 降順 上位候補",
-          "count": 10,
+          "count": 0,
           "measured": false,
           "ratio_of_prev": null,
           "ratio_of_universe": null
@@ -166,9 +166,9 @@
           "name": "Entry",
           "label": "Entry",
           "condition": "allocation 後エントリ発火",
-          "count": 9,
+          "count": 0,
           "measured": false,
-          "ratio_of_prev": 0.9,
+          "ratio_of_prev": null,
           "ratio_of_universe": null
         },
         {
@@ -181,7 +181,7 @@
           "ratio_of_universe": null
         }
       ],
-      "final_signals": 9
+      "final_signals": 0
     },
     "sys4": {
       "system_id": "sys4",
@@ -217,7 +217,7 @@
           "name": "TRDlist",
           "label": "TRDlist",
           "condition": "RSI4 昇順 上位候補 (最も oversold)",
-          "count": 10,
+          "count": 1,
           "measured": false,
           "ratio_of_prev": null,
           "ratio_of_universe": null
@@ -226,9 +226,9 @@
           "name": "Entry",
           "label": "Entry",
           "condition": "allocation 後エントリ発火",
-          "count": 10,
+          "count": 0,
           "measured": false,
-          "ratio_of_prev": 1.0,
+          "ratio_of_prev": 0.0,
           "ratio_of_universe": null
         },
         {
@@ -241,7 +241,7 @@
           "ratio_of_universe": null
         }
       ],
-      "final_signals": 10
+      "final_signals": 0
     },
     "sys5": {
       "system_id": "sys5",
@@ -277,7 +277,7 @@
           "name": "TRDlist",
           "label": "TRDlist",
           "condition": "ADX7 降順 上位候補",
-          "count": 10,
+          "count": 0,
           "measured": false,
           "ratio_of_prev": null,
           "ratio_of_universe": null
@@ -286,9 +286,9 @@
           "name": "Entry",
           "label": "Entry",
           "condition": "allocation 後エントリ発火",
-          "count": 10,
+          "count": 0,
           "measured": false,
-          "ratio_of_prev": 1.0,
+          "ratio_of_prev": null,
           "ratio_of_universe": null
         },
         {
@@ -301,7 +301,7 @@
           "ratio_of_universe": null
         }
       ],
-      "final_signals": 10
+      "final_signals": 0
     },
     "sys6": {
       "system_id": "sys6",
@@ -337,7 +337,7 @@
           "name": "TRDlist",
           "label": "TRDlist",
           "condition": "return_6d 降順 上位候補",
-          "count": 1,
+          "count": 0,
           "measured": false,
           "ratio_of_prev": null,
           "ratio_of_universe": null
@@ -346,9 +346,9 @@
           "name": "Entry",
           "label": "Entry",
           "condition": "allocation 後エントリ発火",
-          "count": 1,
+          "count": 0,
           "measured": false,
-          "ratio_of_prev": 1.0,
+          "ratio_of_prev": null,
           "ratio_of_universe": null
         },
         {
@@ -361,7 +361,7 @@
           "ratio_of_universe": null
         }
       ],
-      "final_signals": 1
+      "final_signals": 0
     },
     "sys7": {
       "system_id": "sys7",
