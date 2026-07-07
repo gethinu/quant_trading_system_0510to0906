@@ -188,6 +188,34 @@ def _iter_rows(df: Any) -> list[dict[str, Any]]:
         return []
 
 
+def _funnel_from_snapshot(snap: Any) -> dict[str, int | None]:
+    """StageSnapshot (または dict) から funnel の各 phase count を取り出す。
+
+    phase: target(Tgt) / filter_pass(FIL) / setup_pass(STU) /
+    candidate_count(TRD) / entry_count(Entry) / exit_count(Exit)。
+    値が無い phase は None (dashboard は '未計測' 表示)。
+    """
+    keys = (
+        "target",
+        "filter_pass",
+        "setup_pass",
+        "candidate_count",
+        "entry_count",
+        "exit_count",
+    )
+    out: dict[str, int | None] = {}
+    for name in keys:
+        if isinstance(snap, dict):
+            value = snap.get(name)
+        else:
+            value = getattr(snap, name, None)
+        try:
+            out[name] = int(value) if value is not None else None
+        except (TypeError, ValueError):
+            out[name] = None
+    return out
+
+
 def build_signals_json(
     final_df: Any,
     per_system: dict[str, Any] | None,
@@ -200,6 +228,7 @@ def build_signals_json(
     generated_at: datetime | None = None,
     status: str = "ok",
     abort_reason: str | None = None,
+    stage_metrics: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """``(final_df, per_system)`` を version 1.0 の JSON dict に変換する。
 
@@ -255,6 +284,20 @@ def build_signals_json(
                 continue
             all_sys_keys.add(sk)
 
+    # --- stage_metrics funnel (optional) --------------------------------
+    # Tgt/FIL/STU/TRD/Entry/Exit の per-system phase count を JSON へ serialize。
+    # これが無いと Vercel dashboard の SIGNAL PIPELINE funnel が全 '未計測' になる
+    # (phase count は従来 in-memory の GLOBAL_STAGE_METRICS にしか無く JSON 化されて
+    #  いなかった)。caller (signal_export.run_headless) が snapshot dict を渡す。
+    funnel_by_sys: dict[str, dict[str, int | None]] = {}
+    if stage_metrics:
+        for raw_name, snap in stage_metrics.items():
+            sk = normalize_system_key(raw_name)
+            if sk is None:
+                continue
+            funnel_by_sys[sk] = _funnel_from_snapshot(snap)
+            all_sys_keys.add(sk)
+
     # --- portfolio 集計 (weight 計算のため total notional を先に) --------
     total_notional = 0.0
     for sigs in signals_by_sys.values():
@@ -292,12 +335,16 @@ def build_signals_json(
         n_in = candidate_counts.get(sk, len(sigs))
         n_out = len(clean_sigs)
         ratio = round(n_out / n_in, 4) if n_in else 0.0
-        systems_out[sk] = {
+        system_entry: dict[str, Any] = {
             "signals": clean_sigs,
             "n_candidates_input": n_in,
             "n_signals_output": n_out,
             "gate_survival_ratio": ratio,
         }
+        # phase funnel (未計測なら None が並ぶ)。dashboard SIGNAL PIPELINE 用。
+        if sk in funnel_by_sys:
+            system_entry["funnel"] = funnel_by_sys[sk]
+        systems_out[sk] = system_entry
 
     # --- hedge (sys7 = SPY short) ---------------------------------------
     hedge: dict[str, Any] | None = None
@@ -320,6 +367,21 @@ def build_signals_json(
             "total_signals": sum(v["n_signals_output"] for v in systems_out.values()),
             "total_notional_usd": round(total_notional, 2),
             "hedge": hedge,
+            # universe_target (Tgt): funnel の最上流。system7(=SPY,target=1) に
+            # 引きずられないよう per-system target の最大値で shared universe を近似。
+            # funnel 未計測なら None。
+            "universe_target": (
+                max(
+                    (
+                        f["target"]
+                        for f in funnel_by_sys.values()
+                        if f.get("target")
+                    ),
+                    default=None,
+                )
+                if funnel_by_sys
+                else None
+            ),
         },
         "meta": {
             "cli_version": cli_version,
@@ -444,6 +506,18 @@ def run_headless(argv: list[str]) -> int:
         return 1
     elapsed = time.time() - t0
 
+    # compute_today_signals は実行中に GLOBAL_STAGE_METRICS を副作用で埋める。
+    # ここで snapshot を取り出し funnel (Tgt/FIL/STU/TRD/Entry/Exit) を JSON に載せる。
+    stage_metrics: dict[str, Any] | None = None
+    try:
+        from common.stage_metrics import GLOBAL_STAGE_METRICS
+
+        snapshots = GLOBAL_STAGE_METRICS.all_snapshots()
+        if snapshots:
+            stage_metrics = dict(snapshots)
+    except Exception:  # noqa: BLE001 - funnel は best-effort。失敗しても signals は出す。
+        stage_metrics = None
+
     payload = build_signals_json(
         final_df,
         per_system,
@@ -452,6 +526,7 @@ def run_headless(argv: list[str]) -> int:
         elapsed_seconds=elapsed,
         status=status,
         abort_reason=abort_reason,
+        stage_metrics=stage_metrics,
     )
 
     out_path = Path(args.output_json) if args.output_json else default_output_path(date_str)

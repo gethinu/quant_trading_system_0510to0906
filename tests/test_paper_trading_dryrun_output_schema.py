@@ -121,7 +121,12 @@ def test_unknown_tier_falls_back_to_small():
 
 
 def test_min_notional_skips_tiny_allocations():
-    """weight が極小の signal は min_notional 未達で skip される。"""
+    """weight が極小の signal は min_notional 未達で skip_reason が付く。
+
+    observability fix (2026-07-07): 以前は silent ``continue`` で list から
+    消えていたが、silent drop を潰すため skip_reason を付けて残すようになった。
+    TINY は返り値に *残る* が skip_reason が付き、BIG は付かないことを検証する。
+    """
     data = {
         "date": "2026-07-01",
         "systems": {
@@ -133,11 +138,14 @@ def test_min_notional_skips_tiny_allocations():
             }
         },
     }
-    # tier=small ($1000), min_notional=$5 → TINY は $1 で skip、BIG のみ残る
+    # tier=small ($1000), min_notional=$5 → TINY は $1 で skip_reason 付き、BIG は素通り
     orders = signals_json_to_orders(data, tier="small", dry_run=True, min_notional_usd=5.0)
-    symbols = {o.symbol for o in orders}
-    assert "BIG" in symbols
-    assert "TINY" not in symbols
+    by_sym = {o.symbol: o for o in orders}
+    assert "BIG" in by_sym
+    assert "TINY" in by_sym  # silent drop せず残す
+    assert by_sym["BIG"].skip_reason is None
+    assert by_sym["TINY"].skip_reason is not None
+    assert "below_min_notional" in by_sym["TINY"].skip_reason
 
 
 def test_client_order_id_is_deterministic():

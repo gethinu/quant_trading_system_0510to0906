@@ -97,19 +97,34 @@ def _dryrun_from_json(args):
         df = pd.DataFrame(rows)
         cols = [
             "symbol", "side", "qty", "notional_usd", "order_type",
-            "time_in_force", "system", "tier", "dry_run", "client_order_id",
+            "time_in_force", "system", "tier", "dry_run", "skip_reason",
+            "client_order_id",
         ]
         df = df[[c for c in cols if c in df.columns]]
         print("\n===== DRY-RUN (from JSON): 送信予定注文 (実発注なし) =====")
         print(df.to_string(index=False))
-        total_notional = sum((o.notional_usd or 0.0) for o in orders)
-        print(
-            f"\n合計 {len(df)} 注文  tier={args.tier}  "
-            f"total_notional=${total_notional:,.2f}  equity=${args.equity:,.0f}"
+        skipped = [o for o in orders if getattr(o, "skip_reason", None)]
+        submittable = len(orders) - len(skipped)
+        # total_notional は「送信可 (skip でない)」注文のみ集計 = 実際に deploy される額。
+        total_notional = sum(
+            (o.notional_usd or 0.0)
+            for o in orders
+            if not getattr(o, "skip_reason", None)
         )
+        print(
+            f"\n合計 {len(df)} 生成  送信可 {submittable}  skip {len(skipped)}  "
+            f"tier={args.tier}  total_notional(送信可)=${total_notional:,.2f}  "
+            f"equity=${args.equity:,.0f}"
+        )
+        if skipped:
+            from collections import Counter
+
+            kinds = Counter(str(o.skip_reason).split(":", 1)[0] for o in skipped)
+            print(f"[skip] {len(skipped)} 件 (内訳: {dict(kinds)})")
 
     if args.output_json:
         out_path = Path(args.output_json)
+        _skipped = [o for o in orders if getattr(o, "skip_reason", None)]
         _write_orders_json(
             orders,
             out_path,
@@ -121,6 +136,8 @@ def _dryrun_from_json(args):
                 "prefer_fractional": (not args.no_fractional),
                 "mode": "dry_run",
                 "count": len(orders),
+                "submittable": len(orders) - len(_skipped),
+                "skipped": len(_skipped),
             },
         )
         print(f"[write] paper_orders JSON: {out_path}")

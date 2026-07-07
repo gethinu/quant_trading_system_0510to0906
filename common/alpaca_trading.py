@@ -664,20 +664,30 @@ def signals_json_to_orders(
         else:
             notional = per_signal_default
 
-        if notional < min_notional_usd:
-            continue
-
-        qty: int = 0
-        if not prefer_fractional:
-            if price <= 0:
-                continue
-            qty = int(notional / price)
-            if qty <= 0:
-                continue
-
         client_order_id = (
             f"{system}-{sym}-{date_compact}" if date_compact else f"{system}-{sym}"
         )
+
+        # observability fix (2026-07-07): min_notional 未満 / 整数株サイズ不能は
+        # silent ``continue`` で落とさず、skip_reason を付けた PreparedOrder として
+        # 残す。こうすると caller サマリ (paper_trading_submit) の skip 内訳に必ず
+        # 現れ、「入力 signals=N → 生成/送信」の乖離が理由付きで説明可能になる。
+        # (旧挙動は sub-$5 signal を無言で drop し、48→X の差が unobservable だった)
+        pre_skip: str | None = None
+        if notional < min_notional_usd:
+            pre_skip = (
+                f"skip:below_min_notional:${notional:.2f}<${min_notional_usd:.2f}"
+            )
+
+        qty: int = 0
+        if pre_skip is None and not prefer_fractional:
+            if price <= 0:
+                pre_skip = "skip:no_positive_price:whole_share_size_impossible"
+            else:
+                qty = int(notional / price)
+                if qty <= 0:
+                    pre_skip = f"skip:below_1_share:${notional:.2f}_@${price:.2f}"
+
         po = PreparedOrder(
             symbol=sym,
             qty=qty,
@@ -692,6 +702,8 @@ def signals_json_to_orders(
             dry_run=dry_run,
         )
         po.extra["price"] = price  # whole-share フォールバックのサイズ計算用
+        if pre_skip is not None:
+            po.skip_reason = pre_skip
         prepared.append(po)
 
     logger.info(
@@ -709,6 +721,12 @@ def signals_json_to_orders(
 
     submitted: list[PreparedOrder] = []
     for po in prepared:
+        # pre-generation で既に skip 判定済 (min_notional 未満 / 整数株サイズ不能)
+        # は発注せず結果にそのまま残す (skip_reason は付与済)。
+        if po.skip_reason:
+            _audit_log({"event": "skip_pre_generation", **po.to_row()})
+            submitted.append(po)
+            continue
         price = float(po.extra.get("price") or 0.0)
         opp_side = "sell" if po.side == "buy" else "buy"
 

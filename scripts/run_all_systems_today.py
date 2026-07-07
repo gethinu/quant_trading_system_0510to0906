@@ -4966,18 +4966,20 @@ def compute_today_signals(  # noqa: C901  # type: ignore[reportGeneralTypeIssues
                 _log(f"[{system_name}] ❌ {system_name}: {count} 件 🚫")
 
             # UI 進捗: 候補抽出件数を 75% ステージとして通知（早期に TRDlist を可視化）
-            # System3/System5 は diagnostics から setup_predicate_count を取得して STUpass に反映
+            # STUpass = diagnostics.setup_predicate_count を *全 system* で反映する。
+            # 旧実装は system3/system5 だけ抽出していたため、他 5 system の STUpass が
+            # 常に '未計測' (-) になり funnel が埋まらなかった (2026-07-07 funnel fix)。
+            # setup_predicate_count を持たない system は None のまま = 従来挙動 (退行なし)。
             try:
                 setup_count = None
-                if system_name in ("system3", "system5"):
-                    diag_payload = getattr(strategy, "last_diagnostics", None)
-                    if isinstance(diag_payload, dict):
-                        setup_count = diag_payload.get("setup_predicate_count")
-                        if setup_count is not None:
-                            try:
-                                setup_count = int(setup_count)
-                            except Exception:
-                                setup_count = None
+                diag_payload = getattr(strategy, "last_diagnostics", None)
+                if isinstance(diag_payload, dict):
+                    raw_setup = diag_payload.get("setup_predicate_count")
+                    if raw_setup is not None:
+                        try:
+                            setup_count = int(raw_setup)
+                        except (TypeError, ValueError):
+                            setup_count = None
                 _stage(
                     system_name, 75, candidate_count=int(count), setup_count=setup_count
                 )

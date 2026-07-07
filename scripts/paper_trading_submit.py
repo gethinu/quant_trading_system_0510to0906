@@ -157,9 +157,16 @@ def _submit_from_json(args: argparse.Namespace) -> int:
     if input_signal_count == 0:
         status_marker = "no_input_signals"  # 真の flat book: 静かに exit 0
     elif len(orders) == 0:
-        status_marker = "no_orders_generated"  # anomaly
+        status_marker = "no_orders_generated"  # anomaly: 関数が何も返さなかった
     elif fail > 0 and ok == 0:
         status_marker = "all_submit_failed"
+    elif args.confirm and ok == 0:
+        # 実発注 (--confirm) したのに 1 件も送信されなかった (全件 skip:
+        # min_notional 未満 / wash / unsizable 等)。observability fix (2026-07-07)
+        # で min_notional drop が skip として orders に載るようになったため、この
+        # 「全 skip」を silent success させず no_orders_generated とは別の anomaly
+        # として区別する。dry-run は order_id が無く ok==0 が正常なので対象外。
+        status_marker = "no_orders_submitted"
     elif fail > 0:
         status_marker = "partial_failed"
     else:
@@ -170,6 +177,12 @@ def _submit_from_json(args: argparse.Namespace) -> int:
             "[WARN] input signals があるのに 1 件も order が生成されませんでした "
             f"(input={input_signal_count})。schema drift / min_notional 過小 / "
             "tier キー不整合を確認してください。"
+        )
+    elif status_marker == "no_orders_submitted":
+        print(
+            "[WARN] order は生成されましたが 1 件も送信されませんでした "
+            f"(input={input_signal_count} 生成={len(orders)} skip={len(skipped)})。"
+            "skip 内訳 (min_notional 未満 / wash / unsizable 等) を確認してください。"
         )
 
     if args.output_json:
@@ -197,9 +210,9 @@ def _submit_from_json(args: argparse.Namespace) -> int:
     # exit code policy:
     #   0 = ok / no_input_signals (真の flat book)
     #   1 = partial_failed / all_submit_failed
-    #   3 = no_orders_generated (anomaly: subscribers が silent success と
-    #       区別できるよう区別 code。1 だと submit_error と紛れる)
-    if status_marker == "no_orders_generated":
+    #   3 = no_orders_generated / no_orders_submitted (anomaly: subscribers が
+    #       silent success と区別できるよう区別 code。1 だと submit_error と紛れる)
+    if status_marker in ("no_orders_generated", "no_orders_submitted"):
         return 3
     return 0 if fail == 0 else 1
 
