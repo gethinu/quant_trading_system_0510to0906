@@ -261,9 +261,9 @@ python -c "import json; stats = json.load(open('logs/daily_update_stats.json'));
 ## 📚 関連ドキュメント
 
 - [`docs/README.md`](../docs/README.md): プロジェクト全体のナビゲーションハブ
-- [`docs/operations/daily_schedule.md`](../docs/operations/daily_schedule.md): 日次運用の詳細
-- [`scripts/update_from_bulk_last_day.py`](update_from_bulk_last_day.py): Bulk 更新の実装詳細
-- [`scripts/update_cache_all.py`](update_cache_all.py): 個別 API 更新の実装詳細
+- [`docs/operations/daily_scheduler_setup.md`](operations/daily_scheduler_setup.md): 日次運用の詳細
+- [`scripts/update_from_bulk_last_day.py`](../scripts/update_from_bulk_last_day.py): Bulk 更新の実装詳細
+- [`scripts/update_cache_all.py`](../scripts/update_cache_all.py): 個別 API 更新の実装詳細
 
 ## 🆘 サポート
 

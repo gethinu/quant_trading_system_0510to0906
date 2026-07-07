@@ -17,12 +17,12 @@
 シグナル抽出の 8 フェーズ詳細：
 
 1. [実行全体の流れ](../today_signal_scan/1.%20実行全体の流れ.md)
-2. [基礎データ読込](../today_signal_scan/2.%20基礎データ読込フェーズ.md)
-3. [フィルター実行](../today_signal_scan/4.%20フィルター実行フェーズ.md)
-4. [セットアップ評価](../today_signal_scan/5.%20セットアップ評価フェーズ.md)
-5. [シグナル抽出](../today_signal_scan/6.%20シグナル抽出フェーズ（トレード候補選定）.md)
-6. [配分・最終リスト生成](../today_signal_scan/7.%20配分・最終リスト生成フェーズ.md)
-7. [保存・通知](../today_signal_scan/8.%20保存・通知フェーズ.md)
+2. [基礎データ読込](../today_signal_scan/2.%20基礎データ読込フェーズ.md)
+3. [フィルター実行](../today_signal_scan/3.%20フィルター実行フェーズ.md)
+4. [セットアップ評価](../today_signal_scan/4.%20セットアップ評価フェーズ.md)
+5. [シグナル抽出](../today_signal_scan/5.%20シグナル抽出フェーズ（トレード候補選定）.md)
+6. [配分・最終リスト生成](../today_signal_scan/6.%20配分・最終リスト生成フェーズ.md)
+7. [保存・通知](../today_signal_scan/7.%20保存・通知フェーズ.md)
 
 ### [Two-Phase 処理](../today_signal_scan/two-phaze_and_rank_rule.md)
 

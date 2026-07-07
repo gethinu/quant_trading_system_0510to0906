@@ -142,8 +142,8 @@ python scripts\run_all_systems_today.py --save-csv
 ## 📚 関連ドキュメント
 
 - [README.md](README.md) - プロジェクト全体の説明
-- [config/config.yaml](config/config.yaml) - 設定ファイル
-- [schedulers/runner.py](schedulers/runner.py) - スケジューラー本体
+- [config/config.yaml](../config/config.yaml) - 設定ファイル
+- [schedulers/runner.py](../schedulers/runner.py) - スケジューラー本体
 
 ## 💡 Tips
 

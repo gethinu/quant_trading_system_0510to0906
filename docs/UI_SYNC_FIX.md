@@ -199,5 +199,5 @@ Get-Content logs\progress_today.jsonl | ConvertFrom-Json | Where-Object { $_.eve
 
 ## 参考
 
-- JSONL 進捗イベント仕様: [docs/technical/progress_events.md](progress_events.md) (存在する場合)
+- JSONL 進捗イベント仕様: `docs/technical/progress_events.md` (存在する場合)
 - 検証パネル使用方法: UI 上の「🔍 検証: 進捗イベント (JSONL)」展開パネル

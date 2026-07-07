@@ -291,7 +291,7 @@ ValueError: year 10312 is out of range
 
 - [System6 仕様](../systems/システム6.txt) - 閾値に関する注意事項を追記済み
 - [Diagnostics](./diagnostics.md) - Setup 統計の見方
-- [今日のシグナル処理](../today_signal_scan/5.%20セットアップ評価フェーズ.md) - Setup 判定ロジック
+- [今日のシグナル処理](../today_signal_scan/4.%20セットアップ評価フェーズ.md) - Setup 判定ロジック
 
 ---
 

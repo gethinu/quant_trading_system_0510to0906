@@ -9,19 +9,19 @@ description: Detailed technical documentation for each trading system
 
 ## Table of Contents
 
-1. [System1: Swing Mean-Reversion (Long)](#system1)
-2. [System2: Daily Short (Short)](#system2)
-3. [System3: 3-Day Drop Mean-Reversion (Long)](#system3)
-4. [System4: Setup Breakout (Long)](#system4)
-5. [System5: Trend Following (Long)](#system5)
-6. [System6: Enhanced Short (Short)](#system6)
-7. [System7: SPY Hedge (Short)](#system7)
-8. [Diagnostics Standard](#diagnostics)
-9. [Option-B Framework](#optionb)
+1. [System1: Swing Mean-Reversion (Long)](#system1-swing-mean-reversion-long)
+2. [System2: Daily Short (Short)](#system2-daily-short)
+3. [System3: 3-Day Drop Mean-Reversion (Long)](#system3-3-day-drop-mean-reversion)
+4. [System4: Setup Breakout (Long)](#system4-setup-breakout)
+5. [System5: Trend Following (Long)](#system5-trend-following)
+6. [System6: Enhanced Short (Short)](#system6-enhanced-short)
+7. [System7: SPY Hedge (Short)](#system7-spy-hedge)
+8. [Diagnostics Standard](#diagnostics-standard)
+9. [Option-B Framework](#option-b-framework)
 
 ---
 
-## System1: Swing Mean-Reversion (Long) {#system1}
+## System1: Swing Mean-Reversion (Long)
 
 ### Overview
 
@@ -73,7 +73,7 @@ ENABLE_OPTION_B_SYSTEM1 = False (feature flag)
 
 ---
 
-## System2: Daily Short {#system2}
+## System2: Daily Short
 
 ### Overview
 
@@ -112,7 +112,7 @@ setup = trend_down AND volume_spike
 
 ---
 
-## System3: 3-Day Drop Mean-Reversion {#system3}
+## System3: 3-Day Drop Mean-Reversion
 
 ### Overview
 
@@ -326,7 +326,7 @@ MIN_ATR_RATIO_FOR_TEST = 0.03 (test mode override, optional)
 
 ---
 
-## System4: Setup Breakout {#system4}
+## System4: Setup Breakout
 
 ### Overview
 
@@ -362,7 +362,7 @@ setup = accumulation AND breakout
 
 ---
 
-## System5: Trend Following {#system5}
+## System5: Trend Following
 
 ### Overview
 
@@ -429,7 +429,7 @@ MIN_ADX_FOR_TEST = 25.0 (test mode override, optional)
 
 ---
 
-## System6: Enhanced Short {#system6}
+## System6: Enhanced Short
 
 ### Overview
 
@@ -466,7 +466,7 @@ System6 でも latest_only のゼロ候補時に診断が安定するように�
 
 ---
 
-## System7: SPY Hedge {#system7}
+## System7: SPY Hedge
 
 ### Overview
 
@@ -498,7 +498,7 @@ setup = symbol_check AND hedge_trigger
 
 ---
 
-## Diagnostics Standard {#diagnostics}
+## Diagnostics Standard
 
 ### Common Diagnostics Fields
 
@@ -548,7 +548,7 @@ set_diagnostics_after_ranking(
 
 ---
 
-## Option-B Framework {#optionb}
+## Option-B Framework
 
 ### Overview
 

@@ -186,7 +186,7 @@ streamlit run apps/app_integrated.py
 
 - [Playwright 公式ドキュメント](https://playwright.dev/)
 - [Streamlit テスト戦略](https://docs.streamlit.io/knowledge-base/using-streamlit/how-to-test-your-streamlit-app)
-- [プロジェクト内 E2E ガイド](../e2e/README.md)
+- [プロジェクト内 E2E ガイド](../../e2e/README.md)
 
 ## 🔄 既存テストとの連携
 

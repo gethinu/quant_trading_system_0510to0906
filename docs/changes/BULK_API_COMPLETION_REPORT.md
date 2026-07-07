@@ -258,8 +258,8 @@ python scripts/verify_bulk_accuracy.py
 ### プロジェクト内
 
 - [メイン README](../README.md)
-- [CHANGELOG](../CHANGELOG.md#unreleased)
-- [環境変数一覧](../docs/technical/environment_variables.md)
+- [CHANGELOG](../../CHANGELOG.md#unreleased)
+- [環境変数一覧](../technical/environment_variables.md)
 
 ### 外部リソース
 

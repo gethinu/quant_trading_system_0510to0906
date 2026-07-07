@@ -243,6 +243,6 @@ $env:EXPORT_DIAGNOSTICS_SNAPSHOT_ALWAYS
 ## 参照
 
 - 環境変数一覧: [docs/technical/environment_variables.md](../technical/environment_variables.md)
-- 進捗イベント仕様: [docs/technical/progress_events.md](../technical/progress_events.md)
+- 進捗イベント仕様: `docs/technical/progress_events.md`
 - 診断 API: [docs/technical/diagnostics.md](../technical/diagnostics.md)
 - UI キャプチャスクリプト: [scripts/capture_ui_progress.py](../../scripts/capture_ui_progress.py)

@@ -234,8 +234,8 @@ BULK_API_MIN_RELIABILITY=90.0      # 高基準
 ## 関連ドキュメント
 
 - [環境変数一覧](../technical/environment_variables.md#7-bulk-apiデータ品質検証)
-- [日次更新処理](daily_update_guide.md)
-- [キャッシュシステム](../technical/cache_architecture.md)
+- 日次更新処理
+- キャッシュシステム
 
 ## 変更履歴
 

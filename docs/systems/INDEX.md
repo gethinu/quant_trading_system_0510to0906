@@ -57,5 +57,5 @@
 ### 関連ドキュメント
 
 - [今日のシグナル処理](../today_signal_scan/) - 実行フロー詳細
-- [必須指標](../required_indicators.md) - 計算仕様
+- [必須指標](../technical/required_indicators.md) - 計算仕様
 - [統合バックテスト](../../common/integrated_backtest.py) - テスト基盤

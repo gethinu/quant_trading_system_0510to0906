@@ -203,9 +203,9 @@ if not ok:
 
 ## 関連ドキュメント
 
-- [キャッシュ更新の詳細](../technical/cache_system.md)
-- [当日シグナル処理フロー](../today_signal_scan/README.md)
-- [環境変数設定](../systems/environment_variables.md)
+- キャッシュ更新の詳細
+- [当日シグナル処理フロー](../today_signal_scan/INDEX.md)
+- [環境変数設定](../technical/environment_variables.md)
 
 ---
 

@@ -190,7 +190,7 @@ python scripts/verify_bulk_accuracy.py
 
 - [Bulk API 品質ガイド](../operations/bulk_api_quality_guide.md)
 - [環境変数一覧](../technical/environment_variables.md#7-bulk-apiデータ品質検証)
-- [日次更新処理](daily_update_guide.md)
+- 日次更新処理
 
 ---
 
