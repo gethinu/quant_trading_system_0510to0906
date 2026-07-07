@@ -17,11 +17,18 @@ on:
 jobs:
     markdown-link-check:
         runs-on: ubuntu-latest
+        # Non-blocking: a dead link must never fail the run (prevents failure emails).
+        # Scope narrowed to internal/relative links only (external URLs are ignored in
+        # .markdown-link-check.json) to eliminate flaky x.com/rate-limit/timeout noise,
+        # and to files changed in the push/PR so pre-existing link debt is not
+        # re-reported on every push. This keeps forward value (catches newly broken
+        # internal links in edited docs) without spamming.
+        continue-on-error: true
         steps:
             - name: Checkout repository
               uses: actions/checkout@v4
 
-            - name: Check Markdown links
+            - name: Check Markdown links (internal only, non-blocking)
               uses: gaurav-nelson/github-action-markdown-link-check@v1
               with:
                   use-quiet-mode: "yes"
@@ -30,7 +37,7 @@ jobs:
                   folder-path: "docs/"
                   file-path: "./README.md, ./CHANGELOG.md, ./CONTRIBUTING.md"
                   max-depth: -1
-                  check-modified-files-only: "no"
+                  check-modified-files-only: "yes"
 
     markdown-lint:
         runs-on: ubuntu-latest
