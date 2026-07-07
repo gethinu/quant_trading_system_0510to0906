@@ -136,6 +136,7 @@ from common.today_filters import (
 )
 from common.utils_spy import (
     get_latest_nyse_trading_day,
+    get_next_nyse_trading_day,
     get_signal_target_trading_day,
     get_spy_with_indicators,
 )
@@ -3699,6 +3700,46 @@ def compute_today_signals(  # noqa: C901  # type: ignore[reportGeneralTypeIssues
         ctx.signal_base_day = pd.Timestamp(prev_trading).normalize()
     except Exception:
         ctx.signal_base_day = entry_day
+
+    # --- データ可用性ガード: as-of をキャッシュ実在の最新取引日で頭打ち --------
+    # データベンダー (Polygon) が最新営業日をまだ提供していない場合
+    # (当日 EOD 前 / 休日・週末 / マシン時計がベンダー提供日より先行) は、
+    # clock 由来の signal_base_day が「キャッシュにまだ存在しない日」を指す。
+    # すると全銘柄が鮮度落ちで除外され total_signals=0 で異常停止する
+    # (= 2026-07-07 に観測された症状)。これを避けるため、市場基準の SPY rolling
+    # に実在する最新取引日を上限として as-of / base を後退させ、
+    # 「最後にデータが確定している取引日」でシグナルを生成する。
+    # 休日・週末・当日 EOD 前は実データ日基準で自動的に回避される。
+    # キャッシュが十分新しい通常運用では no-op (base <= cache_last)。
+    try:
+        _spy_roll = ctx.cache_manager.read("SPY", "rolling")
+        _cache_last = (
+            _extract_last_cache_date(_spy_roll) if _spy_roll is not None else None
+        )
+    except Exception:
+        _cache_last = None
+    if _cache_last is not None:
+        try:
+            _cache_last = pd.Timestamp(_cache_last).normalize()
+            _base = pd.Timestamp(getattr(ctx, "signal_base_day", entry_day)).normalize()
+            if _cache_last < _base:
+                _new_entry = pd.Timestamp(
+                    get_next_nyse_trading_day(_cache_last)
+                ).normalize()
+                _log(
+                    "⚠️ データ可用性ガード: 最新キャッシュ日 "
+                    f"{_cache_last.date()} が clock 由来のシグナル基準日 "
+                    f"{_base.date()} より過去です。ベンダー未提供 "
+                    "(当日EOD前/休日/時計先行) と判断し、as-of を後退させます: "
+                    f"entry {entry_day.date()}→{_new_entry.date()}, "
+                    f"base {_base.date()}→{_cache_last.date()}"
+                )
+                entry_day = _new_entry
+                ctx.today = entry_day
+                ctx.entry_day = entry_day
+                ctx.signal_base_day = _cache_last
+        except Exception:
+            pass
 
     # Update max_date_lag_days dynamically for weekend/holiday gaps when no env override is set
     # 基本方針: 明示的な環境変数オーバーライドがない場合、
