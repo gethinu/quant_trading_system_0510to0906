@@ -1,13 +1,17 @@
 import { loadPipeline } from '@/lib/loadPipeline';
 import { loadSignals } from '@/lib/loadSignals';
 import { loadNarrative } from '@/lib/loadNarrative';
+import { loadAlpaca } from '@/lib/loadAlpaca';
 import { NarrativeCard } from '@/components/NarrativeCard';
 import { PipelineSection } from '@/components/PipelineSection';
 import { SignalsSection } from '@/components/SignalsSection';
+import { AlpacaSection } from '@/components/AlpacaSection';
+import { Tabs } from '@/components/Tabs';
 import type {
   PipelinePayload,
   SignalsPayload,
   Narrative,
+  AlpacaSnapshot,
 } from '@/lib/types';
 
 export const dynamic = 'force-static';
@@ -47,38 +51,33 @@ function countSides(payload: SignalsPayload | null): {
   return { buy, sell };
 }
 
-export default function Home() {
-  const pipeline: PipelinePayload | null = loadPipeline();
-  const signals: SignalsPayload | null = loadSignals();
-  const narrative: Narrative | null = loadNarrative();
-
+/** Signals tab content — unchanged from the original single-page layout. */
+function SignalsView({
+  signals,
+  pipeline,
+  narrative,
+}: {
+  signals: SignalsPayload | null;
+  pipeline: PipelinePayload | null;
+  narrative: Narrative | null;
+}) {
   const universe = universeOf(pipeline);
   const total = signals?.portfolio.total_signals ?? 0;
   const notional = signals?.portfolio.total_notional_usd ?? 0;
   const { buy, sell } = countSides(signals);
-  const displayDate =
-    signals?.date ?? narrative?.date ?? pipeline?.date ?? '';
-
-  // 「今日は何が起きたか」を第一印象で伝える 3 KPI:
-  //   1. total signals (お金に直結する count)
-  //   2. BUY / SELL split (方向感)
-  //   3. notional (規模)
-  // universe は sub-info (小さい text で date 隣)。
   const hasSignals = total > 0;
 
   return (
-    <main className="mx-auto max-w-5xl p-4 sm:p-6 pb-16">
+    <div>
       <header className="mb-4">
         <div className="flex items-baseline justify-between gap-2">
           <h1 className="text-[11px] sm:text-xs tracking-widest text-muted uppercase">
             QUANT · daily signals
           </h1>
           <span className="text-[11px] text-muted tabular-nums">
-            {displayDate}
+            {signals?.date ?? ''}
             {universe != null ? (
-              <span className="ml-2">
-                · universe {universe.toLocaleString()}
-              </span>
+              <span className="ml-2">· universe {universe.toLocaleString()}</span>
             ) : null}
           </span>
         </div>
@@ -115,15 +114,47 @@ export default function Home() {
         {/* pipeline は詳細 (default collapsed via <details>) */}
         <PipelineSection payload={pipeline} />
       </div>
+    </div>
+  );
+}
+
+export default function Home() {
+  const pipeline: PipelinePayload | null = loadPipeline();
+  const signals: SignalsPayload | null = loadSignals();
+  const narrative: Narrative | null = loadNarrative();
+  const alpaca: AlpacaSnapshot | null = loadAlpaca();
+
+  const total = signals?.portfolio.total_signals ?? 0;
+  const pnlPct = alpaca?.account.pnl_today_pct ?? null;
+  const alpacaBadge =
+    alpaca != null
+      ? `${alpaca.summary.n_positions}${
+          pnlPct != null ? ` · ${pnlPct >= 0 ? '+' : '−'}${Math.abs(pnlPct).toFixed(1)}%` : ''
+        }`
+      : undefined;
+  const alpacaTone: 'up' | 'down' | 'flat' =
+    pnlPct == null ? 'flat' : pnlPct >= 0 ? 'up' : 'down';
+
+  return (
+    <main className="mx-auto max-w-5xl p-4 sm:p-6 pb-16">
+      <Tabs
+        signalsView={
+          <SignalsView signals={signals} pipeline={pipeline} narrative={narrative} />
+        }
+        alpacaView={<AlpacaSection payload={alpaca} />}
+        signalsBadge={total > 0 ? String(total) : undefined}
+        alpacaBadge={alpacaBadge}
+        alpacaBadgeTone={alpacaTone}
+      />
 
       <footer className="mt-6 text-[10px] text-muted leading-relaxed">
         <div>
-          <span className="text-cardfg">signals</span>:
-          {' '}today_signals_YYYYMMDD.json (schema v1.0) ·
-          {' '}<span className="text-cardfg">pipeline</span>:
-          {' '}pipeline_YYYYMMDD.json (v1) ·
-          {' '}<span className="text-cardfg">narrator</span>:
-          {' '}Claude Haiku 4.5 (fail-safe, cost 記録)
+          <span className="text-cardfg">signals</span>:{' '}
+          today_signals_YYYYMMDD.json (schema v1.0) ·{' '}
+          <span className="text-cardfg">pipeline</span>: pipeline_YYYYMMDD.json (v1) ·{' '}
+          <span className="text-cardfg">alpaca</span>: alpaca_snapshot_YYYYMMDD.json
+          (read-only/paper) ·{' '}
+          <span className="text-cardfg">narrator</span>: Claude Haiku 4.5
         </div>
         <div className="mt-1">Static export via Next.js. Data 更新は日次バッチ。</div>
       </footer>

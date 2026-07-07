@@ -65,7 +65,10 @@ $patterns = @(
     "today_signals_$DateCompact.json",
     "pipeline_$DateCompact.json",
     "polygon_daily_coverage_$DateCompact.json",
-    "narrative_$DateCompact.json"
+    "narrative_$DateCompact.json",
+    # Alpaca paper 口座の read-only スナップショット (scripts/export_alpaca_snapshot.py)。
+    # monitor の Alpaca タブがこれを読む。無い日は skip される (copy loop で握り潰し)。
+    "alpaca_snapshot_$DateCompact.json"
 )
 
 $copied = 0
@@ -90,7 +93,7 @@ if ($copied -eq 0) {
 # 2026-07-02 fix: filename は today_signals_YYYYMMDD.json 形式のため
 # `Sort-Object Name -Descending` は lexical でも date 降順と等価 (8桁 zero-padded)。
 # 削除は Remove-Item ではなく `git rm` で explicit に (commit の diff に載せる)。
-$prefixes = @("today_signals_", "pipeline_", "polygon_daily_coverage_", "narrative_")
+$prefixes = @("today_signals_", "pipeline_", "polygon_daily_coverage_", "narrative_", "alpaca_snapshot_")
 Set-Location $ProjectRoot
 $RelData = "apps/dashboards/alpaca-next/data"
 foreach ($prefix in $prefixes) {

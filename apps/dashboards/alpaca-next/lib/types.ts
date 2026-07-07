@@ -99,6 +99,144 @@ export interface SignalsPayload {
   meta: SignalsMeta;
 }
 
+// --- Alpaca account snapshot (alpaca_snapshot_YYYYMMDD.json, schema v1) ------
+// scripts/export_alpaca_snapshot.py の read-only 出力。account / equity 曲線 /
+// exposure / 保有一覧 (system tag + エグジット予定) を 1 ファイルに集約。
+
+export interface AlpacaAccount {
+  equity: number | null;
+  last_equity: number | null;
+  cash: number | null;
+  buying_power: number | null;
+  long_market_value: number | null;
+  short_market_value: number | null;
+  pnl_today_abs: number | null;
+  pnl_today_pct: number | null;
+  unrealized_pl_total: number | null;
+  status: string;
+  trading_blocked: boolean;
+  pattern_day_trader: boolean;
+}
+
+export interface EquityPoint {
+  t: string;
+  equity: number;
+  pl: number | null;
+  pl_pct: number | null;
+  /** running peak up to this point (drawdown band の上端)。 */
+  peak?: number;
+  /** peak からの下落率 (%)。負値 = 含み drawdown。 */
+  dd_pct?: number;
+  /** 末尾の live intraday equity point のみ true。 */
+  live?: boolean;
+}
+
+export interface EquityCurve {
+  timeframe: string;
+  period: string;
+  base_value: number | null;
+  points: EquityPoint[];
+  peak_equity: number | null;
+  max_drawdown_pct: number | null;
+  period_return_pct: number | null;
+  source: string;
+}
+
+export interface SystemExposure {
+  long_usd: number;
+  short_usd: number;
+  count: number;
+  unrealized_pl: number;
+  pct_of_gross: number;
+}
+
+export interface AlpacaExposure {
+  long_usd: number;
+  short_usd: number;
+  gross_usd: number;
+  net_usd: number;
+  gross_pct: number | null;
+  net_pct: number | null;
+  gross_cap_pct: number;
+  net_cap_pct: number;
+  by_system: Record<string, SystemExposure>;
+}
+
+export interface PnlExtreme {
+  symbol: string;
+  pl: number;
+  pl_pct: number | null;
+}
+
+export interface AlpacaSummary {
+  n_positions: number;
+  n_long: number;
+  n_short: number;
+  n_winning: number;
+  n_losing: number;
+  win_rate_pct: number | null;
+  unrealized_pl_total: number;
+  exit_soon_count: number;
+  biggest_winner: PnlExtreme | null;
+  biggest_loser: PnlExtreme | null;
+}
+
+export type PositionSide = 'long' | 'short';
+
+export interface AlpacaPosition {
+  symbol: string;
+  system: string;
+  side: PositionSide;
+  qty: number;
+  avg_entry_price: number;
+  current_price: number | null;
+  lastday_price: number | null;
+  market_value: number;
+  cost_basis: number | null;
+  unrealized_pl: number;
+  unrealized_pl_pct: number | null;
+  intraday_pl: number | null;
+  intraday_pl_pct: number | null;
+  entry_date: string | null;
+  holding_days: number | null;
+  max_holding_days: number;
+  days_remaining: number | null;
+  exit_date: string | null;
+  /** "time" | "trailing" | "stop" | "spy_hedge" | "unknown" */
+  exit_type: string;
+  /** now エグジット条件成立時のみ "time_based" 等。 */
+  exit_expected: string | null;
+  stop_price_est: number | null;
+  target_price_est: number | null;
+  distance_to_stop_pct: number | null;
+  distance_to_target_pct: number | null;
+}
+
+export interface AlpacaReconciliation {
+  signals_date: string | null;
+  signals_total: number | null;
+  signals_buy: number | null;
+  signals_sell: number | null;
+  orders_date: string | null;
+  orders_submitted: number | null;
+  held_now: number;
+  held_from_signals: number | null;
+  note: string | null;
+}
+
+export interface AlpacaSnapshot {
+  schema: string;
+  date: string;
+  generated_at: string;
+  provider: string;
+  account: AlpacaAccount;
+  equity_curve: EquityCurve;
+  exposure: AlpacaExposure;
+  summary: AlpacaSummary;
+  positions: AlpacaPosition[];
+  reconciliation: AlpacaReconciliation;
+}
+
 // --- Narrative (narrative_YYYYMMDD.json, AI narrator 出力) ------------------
 
 export interface Narrative {
