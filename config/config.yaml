@@ -23,6 +23,16 @@ risk:
     drawdown_flatten_pct: 0.0    # peak drawdown がこの割合で全 flatten (例 0.30)
     max_positions_per_sector: 0  # 1 sector あたり建玉数上限 (例 5)
 
+# ポジションサイジング方式 (2026-07-09)。詳細: docs/EQUITY_LINKED_SIZING_20260709.md。
+sizing:
+  # equity_linked = deploy_budget を口座 equity 連動に (既定)。
+  # fixed_tier    = 従来の tier 固定予算 (small=$1k/medium=$10k/large=$100k, 後方互換)。
+  mode: equity_linked
+  # deploy_budget = current_equity × equity_deploy_pct。既定 1.0 (gross≤1.0×equity cap いっぱい)。
+  # 後から 0.5 等の単一ノブで絞れる。risk cap (per-name 10% / gross 1.0 / net 0.5 / 件数) は
+  # この予算の *内側* で従来通り縛る (budget を上げても cap は緩まない)。
+  equity_deploy_pct: 1.0
+
 strategies:
   # 各システム固有パラメータ（必要に応じて追加）
   system1:

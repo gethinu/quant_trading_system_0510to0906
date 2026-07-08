@@ -32,6 +32,24 @@ class RiskModel(BaseModel):
     portfolio: PortfolioRiskModel = PortfolioRiskModel()
 
 
+class SizingModel(BaseModel):
+    """当日デプロイ予算のサイジング方式 (2026-07-09)。
+
+    mode="equity_linked" (既定) は deploy_budget=equity×equity_deploy_pct。
+    mode="fixed_tier" は従来の tier 固定予算 (後方互換)。
+    詳細: docs/EQUITY_LINKED_SIZING_20260709.md。
+    """
+
+    mode: str = "equity_linked"
+    equity_deploy_pct: float = Field(1.0, gt=0)
+
+    @field_validator("mode")
+    @classmethod
+    def _validate_mode(cls, v: str) -> str:
+        vv = str(v).strip().lower()
+        return vv if vv in ("equity_linked", "fixed_tier") else "equity_linked"
+
+
 class DataModel(BaseModel):
     vendor: str = "EODHD"
     eodhd_base: str = "https://eodhistoricaldata.com"
@@ -86,6 +104,7 @@ class AppConfigModel(BaseModel):
     # NOTE: pydantic plugin 未使用環境での mypy 誤検出 (call-arg) を抑制するため、
     # デフォルトインスタンス行に限定して理由付き ignore を付与。
     risk: RiskModel = RiskModel()
+    sizing: SizingModel = SizingModel()
     data: DataModel = DataModel()
     backtest: BacktestModel = BacktestModel()
     outputs: OutputsModel = OutputsModel()

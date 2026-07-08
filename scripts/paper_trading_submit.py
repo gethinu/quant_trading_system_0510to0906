@@ -40,7 +40,11 @@ from common.alpaca_trading import (  # noqa: E402
     signals_to_orders,
     submit_paper_order,
 )
-from scripts.paper_trading_dryrun import _write_orders_json, load_signals  # noqa: E402
+from scripts.paper_trading_dryrun import (  # noqa: E402
+    _write_orders_json,
+    build_sizing_kwargs,
+    load_signals,
+)
 
 
 def _confirm(prompt: str) -> bool:
@@ -94,15 +98,16 @@ def _submit_from_json(args: argparse.Namespace) -> int:
 
     input_signal_count = _count_input_signals(json_data)
 
+    sizing_kwargs, sizing_meta = build_sizing_kwargs(args)
     if not args.confirm:
         print("[--confirm なし] dry-run モードで実行します (実発注なし)。")
         orders = signals_json_to_orders(
             json_data,
             tier=args.tier,
             dry_run=True,
-            account_equity=args.equity,
             min_notional_usd=args.min_notional,
             prefer_fractional=(not args.no_fractional),
+            **sizing_kwargs,
         )
     else:
         try:
@@ -111,16 +116,17 @@ def _submit_from_json(args: argparse.Namespace) -> int:
             print(f"[SAFETY ABORT] {exc}")
             return 2
         print(
-            "=== PAPER 実発注モード (ALPACA_PAPER=true 確認済, tier="
-            f"{args.tier}) ==="
+            "=== PAPER 実発注モード (ALPACA_PAPER=true 確認済, mode="
+            f"{sizing_meta['sizing_mode']} equity=${sizing_meta['account_equity_usd']:,.0f}"
+            f" src={sizing_meta['equity_source']}) ==="
         )
         orders = signals_json_to_orders(
             json_data,
             tier=args.tier,
             dry_run=False,
-            account_equity=args.equity,
             min_notional_usd=args.min_notional,
             prefer_fractional=(not args.no_fractional),
+            **sizing_kwargs,
         )
 
     ok = sum(1 for o in orders if o.order_id)
@@ -188,7 +194,6 @@ def _submit_from_json(args: argparse.Namespace) -> int:
             {
                 "date": str(json_data.get("date") or ""),
                 "tier": args.tier,
-                "account_equity_usd": args.equity,
                 "min_notional_usd": args.min_notional,
                 "prefer_fractional": (not args.no_fractional),
                 "mode": "submitted" if args.confirm else "dry_run",
@@ -198,6 +203,7 @@ def _submit_from_json(args: argparse.Namespace) -> int:
                 "skipped": len(skipped),
                 "input_signals": input_signal_count,
                 "status": status_marker,
+                **sizing_meta,
             },
         )
         print(f"[write] paper_orders JSON: {out_path}")
@@ -241,7 +247,32 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="fractional (notional 発注) を無効化し整数株で発注する。",
     )
-    parser.add_argument("--equity", type=float, default=10000.0)
+    parser.add_argument(
+        "--equity",
+        type=float,
+        default=10000.0,
+        help="口座資産 fallback (equity_linked で Alpaca 取得失敗時に使用)。",
+    )
+    parser.add_argument(
+        "--sizing-mode",
+        dest="sizing_mode",
+        default=None,
+        choices=("equity_linked", "fixed_tier"),
+        help="サイジング方式。未指定なら settings(sizing.mode, 既定 equity_linked)。",
+    )
+    parser.add_argument(
+        "--equity-deploy-pct",
+        dest="equity_deploy_pct",
+        type=float,
+        default=None,
+        help="deploy_budget=equity×pct。未指定なら settings(sizing.equity_deploy_pct)。",
+    )
+    parser.add_argument(
+        "--no-equity-fetch",
+        dest="no_equity_fetch",
+        action="store_true",
+        help="Alpaca からの equity 取得を抑止し --equity を使う (決定論/テスト用)。",
+    )
     parser.add_argument("--demo", action="store_true", help="内蔵デモ fixture。")
     parser.add_argument(
         "--confirm",

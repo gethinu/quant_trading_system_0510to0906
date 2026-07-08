@@ -58,6 +58,27 @@ class RiskConfig:
 
 
 @dataclass(frozen=True)
+class SizingConfig:
+    """当日デプロイ予算のサイジング方式 (2026-07-09)。
+
+    mode:
+      - "equity_linked": deploy_budget = current_equity × equity_deploy_pct。
+        notional_i = weight_i × deploy_budget。gross 目標 ≈ pct×equity。
+        risk cap (per-name max_pct / gross / net / 件数) は *この予算の内側* で
+        従来通り縛る (budget を上げても cap は緩まない)。既定。
+      - "fixed_tier": 従来の tier 固定予算 (small=$1k/medium=$10k/large=$100k)。
+        後方互換のため撤去せず残す。tier 経路には dollar cap は掛けない (従来挙動)。
+    equity_deploy_pct:
+      deploy_budget = equity × この係数。既定 1.0 (gross≤1.0×equity cap いっぱい)。
+      後から 0.5 等の単一ノブで絞れる。0 以下/NaN は 1.0 に安全フォールバック。
+    詳細: docs/EQUITY_LINKED_SIZING_20260709.md。
+    """
+
+    mode: str = "equity_linked"
+    equity_deploy_pct: float = 1.0
+
+
+@dataclass(frozen=True)
 class DataConfig:
     vendor: str = "EODHD"
     eodhd_base: str = "https://eodhistoricaldata.com"
@@ -213,6 +234,7 @@ class Settings:
 
     # 新構成（YAMLセクション）
     risk: RiskConfig
+    sizing: SizingConfig
     data: DataConfig
     cache: CacheConfig
     backtest: BacktestConfig
@@ -402,6 +424,32 @@ def _build_risk_config(cfg: dict[str, Any]) -> RiskConfig:
         max_pct=float(os.getenv("MAX_PCT", cfg.get("max_pct", 0.10))),
         portfolio=_build_portfolio_risk_config(cfg),
     )
+
+
+def _build_sizing_config(cfg: dict[str, Any]) -> SizingConfig:
+    """sizing セクション (+ env override) から SizingConfig を構築。
+
+    env: SIZING_MODE, EQUITY_DEPLOY_PCT が YAML を上書きする。
+    mode は未知値なら既定 "equity_linked" に、equity_deploy_pct は 0 以下/非数なら
+    1.0 に安全フォールバック (誤設定で発注が消える/過大になるのを防ぐ)。
+    """
+    if not isinstance(cfg, dict):
+        cfg = {}
+    d = SizingConfig()
+
+    raw_mode = str(os.getenv("SIZING_MODE", cfg.get("mode", d.mode))).strip().lower()
+    mode = raw_mode if raw_mode in ("equity_linked", "fixed_tier") else d.mode
+
+    try:
+        pct = float(os.getenv("EQUITY_DEPLOY_PCT", cfg.get("equity_deploy_pct", d.equity_deploy_pct)))
+    except (TypeError, ValueError):
+        pct = d.equity_deploy_pct
+    import math as _math
+
+    if (not _math.isfinite(pct)) or pct <= 0:
+        pct = d.equity_deploy_pct
+
+    return SizingConfig(mode=mode, equity_deploy_pct=pct)
 
 
 def _build_data_config(cfg: dict[str, Any], root: Path) -> DataConfig:
@@ -642,6 +690,7 @@ def get_settings(create_dirs: bool = False) -> Settings:
 
     # 各セクションの設定を構築
     risk = _build_risk_config(cfg.get("risk", {}))
+    sizing = _build_sizing_config(cfg.get("sizing", {}))
     data = _build_data_config(cfg.get("data", {}), root)
     cache_cfg_raw = cfg.get("cache") or (
         cfg.get("data", {}).get("cache") if isinstance(cfg.get("data"), dict) else {}
@@ -671,6 +720,7 @@ def get_settings(create_dirs: bool = False) -> Settings:
         THREADS_DEFAULT=data.max_workers,
         MARKET_CAL_TZ=os.getenv("MARKET_CAL_TZ", "America/New_York"),
         risk=risk,
+        sizing=sizing,
         data=data,
         cache=cache,
         backtest=backtest,
@@ -709,6 +759,7 @@ def get_system_params(system_name: str) -> Mapping[str, Any]:
 __all__ = [
     "Settings",
     "RiskConfig",
+    "SizingConfig",
     "DataConfig",
     "CacheConfig",
     "CacheRollingConfig",

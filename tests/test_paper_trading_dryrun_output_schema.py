@@ -90,9 +90,15 @@ def test_dryrun_marks_dry_run_true():
         assert o.error is None
 
 
+# NOTE (2026-07-09): tier 系サイジングは sizing_mode="fixed_tier" (後方互換) を
+# 明示して検証する。既定 mode は equity_linked に変わったため、tier 予算の regression
+# は fixed_tier を明示指定して固定する。equity_linked の検証は
+# tests/test_equity_linked_sizing.py。
 def test_tier_notional_allocation():
-    """tier=small で total notional が $1000 (± 丸め誤差) に収まる。"""
-    orders = signals_json_to_orders(_sample_signals_json(), tier="small", dry_run=True)
+    """tier=small で total notional が $1000 (± 丸め誤差) に収まる (fixed_tier)。"""
+    orders = signals_json_to_orders(
+        _sample_signals_json(), tier="small", dry_run=True, sizing_mode="fixed_tier"
+    )
     total = sum(o.notional_usd or 0.0 for o in orders)
     assert total == 1000.0
     # weight=0.5/0.3/0.2 → notional=500/300/200
@@ -103,19 +109,25 @@ def test_tier_notional_allocation():
 
 
 def test_tier_medium_scales_up():
-    orders = signals_json_to_orders(_sample_signals_json(), tier="medium", dry_run=True)
+    orders = signals_json_to_orders(
+        _sample_signals_json(), tier="medium", dry_run=True, sizing_mode="fixed_tier"
+    )
     total = sum(o.notional_usd or 0.0 for o in orders)
     assert total == TIER_NOTIONAL_USD["medium"] == 10_000.0
 
 
 def test_tier_large_scales_up():
-    orders = signals_json_to_orders(_sample_signals_json(), tier="large", dry_run=True)
+    orders = signals_json_to_orders(
+        _sample_signals_json(), tier="large", dry_run=True, sizing_mode="fixed_tier"
+    )
     total = sum(o.notional_usd or 0.0 for o in orders)
     assert total == TIER_NOTIONAL_USD["large"] == 100_000.0
 
 
 def test_unknown_tier_falls_back_to_small():
-    orders = signals_json_to_orders(_sample_signals_json(), tier="giga", dry_run=True)
+    orders = signals_json_to_orders(
+        _sample_signals_json(), tier="giga", dry_run=True, sizing_mode="fixed_tier"
+    )
     total = sum(o.notional_usd or 0.0 for o in orders)
     assert total == TIER_NOTIONAL_USD["small"] == 1_000.0
 
@@ -152,7 +164,7 @@ def test_min_notional_skips_tiny_allocations():
     }
     # tier=small ($1000), min_notional=$5 → TINY は $1 で skip_reason 付き、BIG は素通り
     orders = signals_json_to_orders(
-        data, tier="small", dry_run=True, min_notional_usd=5.0
+        data, tier="small", dry_run=True, min_notional_usd=5.0, sizing_mode="fixed_tier"
     )
     by_sym = {o.symbol: o for o in orders}
     assert "BIG" in by_sym
@@ -213,7 +225,7 @@ def test_no_fractional_uses_integer_qty():
     # tier=small, weight 0.5/0.3/0.2 → notional 500/300/200 に対して価格 195.5/420/250
     # qty = 500/195.5 ≈ 2 株, 300/420 ≈ 0 株 (skip), 200/250 ≈ 0 株 (skip)
     orders = signals_json_to_orders(
-        data, tier="small", dry_run=True, prefer_fractional=False
+        data, tier="small", dry_run=True, prefer_fractional=False, sizing_mode="fixed_tier"
     )
     symbols = {o.symbol for o in orders}
     assert "AAPL" in symbols

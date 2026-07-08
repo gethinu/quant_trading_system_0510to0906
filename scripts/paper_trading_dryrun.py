@@ -16,9 +16,59 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from common.alpaca_trading import (  # noqa: E402
+    resolve_sizing_equity,
     signals_json_to_orders,
     signals_to_orders,
 )
+
+
+def build_sizing_kwargs(args, *, client=None) -> tuple[dict, dict]:
+    """CLI args + settings から signals_json_to_orders 用 sizing kwargs と meta を作る。
+
+    - mode / equity_deploy_pct は CLI 明示 > settings(sizing.*) の順。
+    - cap (per-name/gross/net) は settings(risk.*) を single source of truth に。
+    - equity は equity_linked のとき Alpaca paper から解決 (creds 無し/失敗は --equity へ
+      安全 fallback。--no-equity-fetch or TEST_MODE で fetch 抑止=従来挙動維持)。
+    返り値: (signals_json_to_orders へ渡す kwargs, 出力 JSON 用 meta)。
+    """
+    from config.settings import get_settings
+
+    s = get_settings()
+    mode = getattr(args, "sizing_mode", None) or s.sizing.mode
+    pct_arg = getattr(args, "equity_deploy_pct", None)
+    try:
+        pct = float(pct_arg) if pct_arg is not None else float(s.sizing.equity_deploy_pct)
+    except (TypeError, ValueError):
+        pct = float(s.sizing.equity_deploy_pct)
+    max_pct = float(s.risk.max_pct)
+    gross = float(s.risk.portfolio.max_gross_exposure_pct)
+    net = float(s.risk.portfolio.max_net_exposure_pct)
+
+    allow_fetch = False if getattr(args, "no_equity_fetch", False) else None
+    equity, eq_src = resolve_sizing_equity(
+        float(getattr(args, "equity", 10000.0) or 10000.0),
+        mode=mode,
+        client=client,
+        allow_fetch=allow_fetch,
+    )
+    kwargs = dict(
+        sizing_mode=mode,
+        equity_deploy_pct=pct,
+        account_equity=equity,
+        max_pct=max_pct,
+        max_gross_exposure_pct=gross,
+        max_net_exposure_pct=net,
+    )
+    meta = dict(
+        sizing_mode=mode,
+        equity_deploy_pct=pct,
+        account_equity_usd=equity,
+        equity_source=eq_src,
+        max_pct=max_pct,
+        max_gross_exposure_pct=gross,
+        max_net_exposure_pct=net,
+    )
+    return kwargs, meta
 
 
 def _demo_signals() -> pd.DataFrame:
@@ -111,13 +161,14 @@ def _dryrun_from_json(args):
     with src.open(encoding="utf-8") as fh:
         json_data = json.load(fh)
 
+    sizing_kwargs, sizing_meta = build_sizing_kwargs(args)
     orders = signals_json_to_orders(
         json_data,
         tier=args.tier,
         dry_run=True,
-        account_equity=args.equity,
         min_notional_usd=args.min_notional,
         prefer_fractional=(not args.no_fractional),
+        **sizing_kwargs,
     )
 
     if not orders:
@@ -149,10 +200,17 @@ def _dryrun_from_json(args):
             for o in orders
             if not getattr(o, "skip_reason", None)
         )
+        _mode = sizing_meta["sizing_mode"]
+        _budget_hint = (
+            f"tier={args.tier}"
+            if _mode != "equity_linked"
+            else f"deploy_pct={sizing_meta['equity_deploy_pct']:g}"
+        )
         print(
             f"\n合計 {len(df)} 生成  送信可 {submittable}  skip {len(skipped)}  "
-            f"tier={args.tier}  total_notional(送信可)=${total_notional:,.2f}  "
-            f"equity=${args.equity:,.0f}"
+            f"mode={_mode} {_budget_hint}  total_notional(送信可)=${total_notional:,.2f}  "
+            f"equity=${sizing_meta['account_equity_usd']:,.0f}"
+            f" (src={sizing_meta['equity_source']})"
         )
         if skipped:
             from collections import Counter
@@ -169,13 +227,13 @@ def _dryrun_from_json(args):
             {
                 "date": str(json_data.get("date") or ""),
                 "tier": args.tier,
-                "account_equity_usd": args.equity,
                 "min_notional_usd": args.min_notional,
                 "prefer_fractional": (not args.no_fractional),
                 "mode": "dry_run",
                 "count": len(orders),
                 "submittable": len(orders) - len(_skipped),
                 "skipped": len(_skipped),
+                **sizing_meta,
             },
         )
         print(f"[write] paper_orders JSON: {out_path}")
@@ -216,7 +274,30 @@ def main(argv=None):
         help="fractional (notional 発注) を無効化し整数株で発注する。",
     )
     parser.add_argument(
-        "--equity", type=float, default=10000.0, help="口座資産 (ログ用)。"
+        "--equity",
+        type=float,
+        default=10000.0,
+        help="口座資産 fallback (equity_linked で Alpaca 取得失敗時に使用)。",
+    )
+    parser.add_argument(
+        "--sizing-mode",
+        dest="sizing_mode",
+        default=None,
+        choices=("equity_linked", "fixed_tier"),
+        help="サイジング方式。未指定なら settings(sizing.mode, 既定 equity_linked)。",
+    )
+    parser.add_argument(
+        "--equity-deploy-pct",
+        dest="equity_deploy_pct",
+        type=float,
+        default=None,
+        help="deploy_budget=equity×pct。未指定なら settings(sizing.equity_deploy_pct)。",
+    )
+    parser.add_argument(
+        "--no-equity-fetch",
+        dest="no_equity_fetch",
+        action="store_true",
+        help="Alpaca からの equity 取得を抑止し --equity を使う (決定論/テスト用)。",
     )
     parser.add_argument(
         "--demo", action="store_true", help="内蔵デモ fixture で動作確認。"
