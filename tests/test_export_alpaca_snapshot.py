@@ -156,3 +156,59 @@ def test_latest_json_numeric_ordering(tmp_path):
     latest = ex._latest_json(tmp_path, "alpaca_snapshot_")
     assert latest is not None
     assert latest.name == "alpaca_snapshot_20260709.json"
+
+
+# --- ledger reconciliation (pure) -----------------------------------------
+def test_ledger_recon_all_consistent():
+    """position が台帳ネットと一致すれば desync_free、mismatch 0。"""
+    ledger = {"AAPL": {"net": 10.0, "n_fills": 1}, "MSFT": {"net": 0.5, "n_fills": 2}}
+    pos = {"AAPL": 10.0, "MSFT": 0.5}
+    rec = ex._build_ledger_reconciliation(ledger, pos)
+    assert rec["available"] is True
+    assert rec["n_consistent"] == 2
+    assert rec["n_mismatch"] == 0
+    assert rec["n_desync"] == 0
+    assert rec["desync_free"] is True
+
+
+def test_ledger_recon_flags_real_desync():
+    """position≠0 で qty が台帳と乖離 → class=position_vs_ledger, desync として検出。
+
+    forensic が捉えた「fill ネット0なのに逆建玉が残る」broker 過渡不整合の再現。
+    """
+    ledger = {"AAL": {"net": 0.0, "n_fills": 2}}  # entry+exit で net 0
+    pos = {"AAL": 1.0}  # なのに long +1 が残っている (反転ダスト)
+    rec = ex._build_ledger_reconciliation(ledger, pos)
+    assert rec["n_desync"] == 1
+    assert rec["desync_free"] is False
+    m = rec["mismatches"][0]
+    assert m["symbol"] == "AAL"
+    assert m["class"] == "position_vs_ledger"
+    assert m["likely_symbol_migration"] is False
+    assert m["position_qty"] == 1.0
+    assert m["ledger_net"] == 0.0
+
+
+def test_ledger_recon_symbol_migration_is_benign():
+    """position=0 で ledger_net≠0 → ledger_only_flat (ticker 改称等)。desync ではない。"""
+    # EXPI で buy 150 / AGNT で sell 150 → symbol 別ネットは非ゼロだが現ポジ0
+    ledger = {
+        "EXPI": {"net": 150.0, "n_fills": 3},
+        "AGNT": {"net": -150.0, "n_fills": 2},
+    }
+    pos: dict[str, float] = {}  # どちらも保有無し
+    rec = ex._build_ledger_reconciliation(ledger, pos)
+    assert rec["n_desync"] == 0
+    assert rec["desync_free"] is True
+    assert rec["n_mismatch"] == 2
+    classes = {m["symbol"]: m["class"] for m in rec["mismatches"]}
+    assert classes == {"EXPI": "ledger_only_flat", "AGNT": "ledger_only_flat"}
+    assert all(m["likely_symbol_migration"] for m in rec["mismatches"])
+
+
+def test_ledger_recon_unavailable_when_empty():
+    """fill 取得不可 (空 ledger) → available False、突合スキップで degrade。"""
+    rec = ex._build_ledger_reconciliation({}, {"AAPL": 10.0})
+    assert rec["available"] is False
+    assert rec["desync_free"] is None
+    assert rec["n_desync"] is None
