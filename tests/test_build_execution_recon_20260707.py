@@ -47,7 +47,11 @@ def _paper_orders() -> dict:
         "orders": [
             # sys1 long: 1 submitted (filled), 1 skipped(min_notional)
             {"system": "system1", "side": "buy", "order_id": "o1", "status": "filled"},
-            {"system": "system1", "side": "buy", "skip_reason": "skip:below_min_notional:$3<$5"},
+            {
+                "system": "system1",
+                "side": "buy",
+                "skip_reason": "skip:below_min_notional:$3<$5",
+            },
             # sys2 short: 1 failed
             {"system": "system2", "side": "sell", "error": "insufficient buying power"},
         ]
@@ -57,15 +61,32 @@ def _paper_orders() -> dict:
 def _exit_orders() -> dict:
     return {
         "exits": [
-            {"system": "system1", "side": "sell", "reason": "time_based", "order_id": "e1"},
-            {"system": "system1", "side": "sell", "reason": "protect_stop", "order_id": "e2"},
-            {"system": "system1", "side": "sell", "reason": "protect_trailing", "order_id": "e3"},
+            {
+                "system": "system1",
+                "side": "sell",
+                "reason": "time_based",
+                "order_id": "e1",
+            },
+            {
+                "system": "system1",
+                "side": "sell",
+                "reason": "protect_stop",
+                "order_id": "e2",
+            },
+            {
+                "system": "system1",
+                "side": "sell",
+                "reason": "protect_trailing",
+                "order_id": "e3",
+            },
         ]
     }
 
 
 def test_full_join():
-    recon = build_recon(_signals(), _paper_orders(), _exit_orders(), account_equity=10120.0)
+    recon = build_recon(
+        _signals(), _paper_orders(), _exit_orders(), account_equity=10120.0
+    )
     p = recon["portfolio"]
     assert p["universe_target"] == 4000
     assert p["signals"] == 3
@@ -100,7 +121,11 @@ def test_per_system_side_split():
 
 def test_inputs_flags_and_missing_tolerance():
     recon = build_recon(_signals(), None, None)
-    assert recon["inputs"] == {"signals": True, "paper_orders": False, "exit_orders": False}
+    assert recon["inputs"] == {
+        "signals": True,
+        "paper_orders": False,
+        "exit_orders": False,
+    }
     assert recon["portfolio"]["signals"] == 3
     assert recon["portfolio"]["entry_submitted"] == 0
     assert recon["portfolio"]["exit_submitted"] == 0

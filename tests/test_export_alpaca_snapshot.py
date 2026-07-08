@@ -28,7 +28,12 @@ def test_no_submit_symbols_referenced():
     src = ex.__file__
     with open(src, encoding="utf-8") as fh:
         text = fh.read()
-    for banned in ("submit_order", "MarketOrderRequest", "cancel_orders", "reset_paper_account"):
+    for banned in (
+        "submit_order",
+        "MarketOrderRequest",
+        "cancel_orders",
+        "reset_paper_account",
+    ):
         assert banned not in text, f"read-only exporter に発注系 {banned} が混入"
 
 
@@ -80,7 +85,9 @@ def test_augment_curve_drawdown_and_live_point():
 
 
 def test_augment_curve_replaces_same_day_point():
-    curve = {"points": [{"t": "2026-06-04", "equity": 100.0, "pl": None, "pl_pct": None}]}
+    curve = {
+        "points": [{"t": "2026-06-04", "equity": 100.0, "pl": None, "pl_pct": None}]
+    }
     ex._augment_curve(curve, live_equity=101.0, today="2026-06-04")
     assert len(curve["points"]) == 1
     assert curve["points"][0]["equity"] == 101.0
@@ -110,7 +117,9 @@ def test_exit_type_mapping():
 def test_build_reconciliation_reads_latest_files(tmp_path):
     # today_signals ファイルを2件置き、新しい方 (20260707) が採用されること
     (tmp_path / "today_signals_20260706.json").write_text(
-        json.dumps({"date": "2026-07-06", "portfolio": {"total_signals": 3}, "systems": {}}),
+        json.dumps(
+            {"date": "2026-07-06", "portfolio": {"total_signals": 3}, "systems": {}}
+        ),
         encoding="utf-8",
     )
     (tmp_path / "today_signals_20260707.json").write_text(

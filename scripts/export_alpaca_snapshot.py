@@ -125,7 +125,9 @@ def _fetch_orders_index(client: Any) -> dict[str, dict[str, Any]]:
         from alpaca.trading.enums import QueryOrderStatus
         from alpaca.trading.requests import GetOrdersRequest
 
-        raw = client.get_orders(GetOrdersRequest(status=QueryOrderStatus.ALL, limit=500))
+        raw = client.get_orders(
+            GetOrdersRequest(status=QueryOrderStatus.ALL, limit=500)
+        )
     except Exception:
         return idx
     for o in raw or []:
@@ -299,7 +301,11 @@ def _fetch_equity_curve(period: str, timeframe: str) -> dict[str, Any]:
         r = requests.get(
             f"{PAPER_BASE}/v2/account/portfolio/history",
             headers=headers,
-            params={"period": period, "timeframe": timeframe, "extended_hours": "false"},
+            params={
+                "period": period,
+                "timeframe": timeframe,
+                "extended_hours": "false",
+            },
             timeout=20,
         )
         j = r.json() if r.content else {}
@@ -320,7 +326,11 @@ def _fetch_equity_curve(period: str, timeframe: str) -> dict[str, Any]:
         if e is None or e <= 0:
             continue
         try:
-            day = str(pd.Timestamp(int(t), unit="s", tz="UTC").tz_convert("America/New_York").date())
+            day = str(
+                pd.Timestamp(int(t), unit="s", tz="UTC")
+                .tz_convert("America/New_York")
+                .date()
+            )
         except Exception:
             day = str(pd.Timestamp(int(t), unit="s").date())
         points.append(
@@ -328,20 +338,32 @@ def _fetch_equity_curve(period: str, timeframe: str) -> dict[str, Any]:
                 "t": day,
                 "equity": round(e, 2),
                 "pl": round(_f(pl[i]) or 0.0, 2) if i < len(pl) else None,
-                "pl_pct": round((_f(plpc[i]) or 0.0) * 100.0, 3) if i < len(plpc) else None,
+                "pl_pct": (
+                    round((_f(plpc[i]) or 0.0) * 100.0, 3) if i < len(plpc) else None
+                ),
             }
         )
     out["points"] = points
     return out
 
 
-def _augment_curve(curve: dict[str, Any], live_equity: float | None, today: str) -> None:
+def _augment_curve(
+    curve: dict[str, Any], live_equity: float | None, today: str
+) -> None:
     """running peak / drawdown を各点に付与し、live equity を末尾 point に足す。"""
     points: list[dict[str, Any]] = curve.get("points") or []
     # live 現在値を末尾に (API の 1D last は前営業日 close なので当日 intraday を足す)。
     if live_equity is not None and live_equity > 0:
         if not points or points[-1]["t"] != today:
-            points.append({"t": today, "equity": round(live_equity, 2), "pl": None, "pl_pct": None, "live": True})
+            points.append(
+                {
+                    "t": today,
+                    "equity": round(live_equity, 2),
+                    "pl": None,
+                    "pl_pct": None,
+                    "live": True,
+                }
+            )
         else:
             points[-1]["equity"] = round(live_equity, 2)
             points[-1]["live"] = True
@@ -361,7 +383,8 @@ def _augment_curve(curve: dict[str, Any], live_equity: float | None, today: str)
     curve["max_drawdown_pct"] = round(max_dd, 3)
     if len(points) >= 2 and points[0]["equity"]:
         curve["period_return_pct"] = round(
-            (points[-1]["equity"] - points[0]["equity"]) / points[0]["equity"] * 100.0, 3
+            (points[-1]["equity"] - points[0]["equity"]) / points[0]["equity"] * 100.0,
+            3,
         )
     else:
         curve["period_return_pct"] = None
@@ -385,7 +408,9 @@ def _accumulate_equity(results_dir: Path, today: str, equity: float | None) -> N
     by_date[today] = {"t": today, "equity": round(equity, 2)}
     merged = [by_date[k] for k in sorted(by_date)]
     try:
-        path.write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
+        path.write_text(
+            json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
     except Exception:
         pass
 
@@ -397,7 +422,7 @@ def _latest_json(results_dir: Path, prefix: str) -> Path | None:
     """prefix_YYYYMMDD.json のうち日付が最大のものを返す (数値比較)。"""
     best: tuple[int, Path] | None = None
     for f in results_dir.glob(f"{prefix}*.json"):
-        digits = "".join(ch for ch in f.stem[len(prefix):] if ch.isdigit())[:8]
+        digits = "".join(ch for ch in f.stem[len(prefix) :] if ch.isdigit())[:8]
         if len(digits) != 8:
             continue
         n = int(digits)
@@ -406,9 +431,7 @@ def _latest_json(results_dir: Path, prefix: str) -> Path | None:
     return best[1] if best else None
 
 
-def _build_reconciliation(
-    results_dir: Path, held_symbols: set[str]
-) -> dict[str, Any]:
+def _build_reconciliation(results_dir: Path, held_symbols: set[str]) -> dict[str, Any]:
     rec: dict[str, Any] = {
         "signals_date": None,
         "signals_total": None,
@@ -452,9 +475,17 @@ def _build_reconciliation(
         rec["orders_date"] = oj.get("date")
         orders = oj.get("orders", []) or []
         submitted = sum(
-            1 for o in orders if o.get("order_id") or str(o.get("status") or "").lower() in ("filled", "accepted", "new", "partially_filled")
+            1
+            for o in orders
+            if o.get("order_id")
+            or str(o.get("status") or "").lower()
+            in ("filled", "accepted", "new", "partially_filled")
         )
-        rec["orders_submitted"] = submitted if submitted else (len(orders) if oj.get("mode") == "submitted" else 0)
+        rec["orders_submitted"] = (
+            submitted
+            if submitted
+            else (len(orders) if oj.get("mode") == "submitted" else 0)
+        )
 
     if signal_symbols:
         rec["held_from_signals"] = len(signal_symbols & held_symbols)
@@ -473,7 +504,9 @@ def _load_net_cap() -> tuple[float, float]:
     try:
         import yaml  # type: ignore
 
-        cfg = yaml.safe_load((ROOT / "config" / "config.yaml").read_text(encoding="utf-8"))
+        cfg = yaml.safe_load(
+            (ROOT / "config" / "config.yaml").read_text(encoding="utf-8")
+        )
         pf = ((cfg or {}).get("risk") or {}).get("portfolio") or {}
         net = _f(pf.get("max_net_exposure_pct"))
         gross = _f(pf.get("max_gross_exposure_pct"))
@@ -485,7 +518,9 @@ def _load_net_cap() -> tuple[float, float]:
         return _DEFAULT_NET_CAP_PCT, _DEFAULT_GROSS_CAP_PCT
 
 
-def build_snapshot(client: Any, *, date_str: str, results_dir: Path, period: str) -> dict[str, Any]:
+def build_snapshot(
+    client: Any, *, date_str: str, results_dir: Path, period: str
+) -> dict[str, Any]:
     account = client.get_account()
     raw_positions = list(client.get_all_positions())
 
@@ -602,12 +637,22 @@ def build_snapshot(client: Any, *, date_str: str, results_dir: Path, period: str
         if days_remaining is not None and days_remaining <= 1:
             exit_soon += 1
         if biggest_win is None or upl > biggest_win["pl"]:
-            biggest_win = {"symbol": sym, "pl": round(upl, 2), "pl_pct": row["unrealized_pl_pct"]}
+            biggest_win = {
+                "symbol": sym,
+                "pl": round(upl, 2),
+                "pl_pct": row["unrealized_pl_pct"],
+            }
         if biggest_loss is None or upl < biggest_loss["pl"]:
-            biggest_loss = {"symbol": sym, "pl": round(upl, 2), "pl_pct": row["unrealized_pl_pct"]}
+            biggest_loss = {
+                "symbol": sym,
+                "pl": round(upl, 2),
+                "pl_pct": row["unrealized_pl_pct"],
+            }
 
         sysk = system or "unknown"
-        b = by_system.setdefault(sysk, {"long_usd": 0.0, "short_usd": 0.0, "count": 0, "unrealized_pl": 0.0})
+        b = by_system.setdefault(
+            sysk, {"long_usd": 0.0, "short_usd": 0.0, "count": 0, "unrealized_pl": 0.0}
+        )
         b["count"] += 1
         b["unrealized_pl"] = round(b["unrealized_pl"] + upl, 2)
         if side == "long":
@@ -616,7 +661,9 @@ def build_snapshot(client: Any, *, date_str: str, results_dir: Path, period: str
             b["short_usd"] = round(b["short_usd"] + abs_mv, 2)
 
     # sort positions: exit_expected first, then by |unrealized_pl| desc
-    positions.sort(key=lambda r: (0 if r["exit_expected"] else 1, -(abs(r["unrealized_pl"] or 0))))
+    positions.sort(
+        key=lambda r: (0 if r["exit_expected"] else 1, -(abs(r["unrealized_pl"] or 0)))
+    )
 
     equity = _f(getattr(account, "equity", None))
     last_equity = _f(getattr(account, "last_equity", None))
@@ -634,7 +681,7 @@ def build_snapshot(client: Any, *, date_str: str, results_dir: Path, period: str
     gross_usd = long_usd + short_usd
     net_usd = long_usd - short_usd
     for b in by_system.values():
-        base = (b["long_usd"] + b["short_usd"])
+        base = b["long_usd"] + b["short_usd"]
         b["pct_of_gross"] = round(base / gross_usd * 100.0, 2) if gross_usd else 0.0
 
     # equity curve
@@ -653,12 +700,27 @@ def build_snapshot(client: Any, *, date_str: str, results_dir: Path, period: str
             "last_equity": round(last_equity, 2) if last_equity is not None else None,
             "cash": round(cash, 2) if cash is not None else None,
             "buying_power": round(bp, 2) if bp is not None else None,
-            "long_market_value": round(acct_long_mv, 2) if acct_long_mv is not None else round(long_usd, 2),
-            "short_market_value": round(acct_short_mv, 2) if acct_short_mv is not None else round(short_usd, 2),
+            "long_market_value": (
+                round(acct_long_mv, 2)
+                if acct_long_mv is not None
+                else round(long_usd, 2)
+            ),
+            "short_market_value": (
+                round(acct_short_mv, 2)
+                if acct_short_mv is not None
+                else round(short_usd, 2)
+            ),
             "pnl_today_abs": pnl_today_abs,
             "pnl_today_pct": pnl_today_pct,
             "unrealized_pl_total": round(unrealized_total, 2),
-            "status": str(getattr(getattr(account, "status", None), "value", getattr(account, "status", "")) or ""),
+            "status": str(
+                getattr(
+                    getattr(account, "status", None),
+                    "value",
+                    getattr(account, "status", ""),
+                )
+                or ""
+            ),
             "trading_blocked": bool(getattr(account, "trading_blocked", False)),
             "pattern_day_trader": bool(getattr(account, "pattern_day_trader", False)),
         },
@@ -694,11 +756,17 @@ def build_snapshot(client: Any, *, date_str: str, results_dir: Path, period: str
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--date", default=None, help="対象日 YYYY-MM-DD (default: today UTC)")
+    parser.add_argument(
+        "--date", default=None, help="対象日 YYYY-MM-DD (default: today UTC)"
+    )
     parser.add_argument("--output-json", default=None)
     parser.add_argument("--results-dir", default=str(ROOT / "results_csv"))
-    parser.add_argument("--period", default="3M", help="equity curve 期間 (portfolio-history API)")
-    parser.add_argument("--no-alpaca", action="store_true", help="Alpaca に接続しない (offline test)")
+    parser.add_argument(
+        "--period", default="3M", help="equity curve 期間 (portfolio-history API)"
+    )
+    parser.add_argument(
+        "--no-alpaca", action="store_true", help="Alpaca に接続しない (offline test)"
+    )
     args = parser.parse_args(argv)
 
     date_str = args.date or _today_str()

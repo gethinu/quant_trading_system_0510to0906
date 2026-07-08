@@ -6,13 +6,12 @@ including console output formatting, UI callback integration, and file logging.
 
 from __future__ import annotations
 
-import re
-import sys
-import time
-
 # unicodedata reserved for future use
 from contextvars import ContextVar
 from datetime import datetime
+import re
+import sys
+import time
 from typing import Any
 
 # --- Constants for log filtering ---

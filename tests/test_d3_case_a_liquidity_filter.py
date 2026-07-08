@@ -29,7 +29,6 @@ import numpy as np
 import pandas as pd
 import pytest
 
-import core.system5 as s5
 from common.system_constants import (
     SYSTEM5_ATR_PCT_THRESHOLD,
     SYSTEM5_MIN_AVG_VOLUME_50,
@@ -44,12 +43,12 @@ from common.system_setup_predicates import (
     MIN_DOLLAR_VOLUME_50_SYSTEM5,
     system5_setup_predicate,
 )
+import core.system5 as s5
 from core.system5 import (
     DEFAULT_ATR_PCT_THRESHOLD,
     MIN_AVG_VOLUME_50,
     MIN_DOLLAR_VOLUME_50,
 )
-
 
 # ============================================================================
 # Fixture: spec 準拠の Case A base row (全 filter/setup 条件 pass)
@@ -59,13 +58,13 @@ from core.system5 import (
 def _case_a_row(**overrides) -> pd.DataFrame:
     row = {
         "Close": 100.0,
-        "adx7": 60.0,          # > 55 (spec)
-        "atr_pct": 0.05,       # > 4% (spec, Case A)
+        "adx7": 60.0,  # > 55 (spec)
+        "atr_pct": 0.05,  # > 4% (spec, Case A)
         "sma100": 90.0,
-        "atr10": 5.0,          # Close(100) > sma100(90) + atr10(5) = 95
-        "rsi3": 30.0,          # < 50 (spec)
+        "atr10": 5.0,  # Close(100) > sma100(90) + atr10(5) = 95
+        "rsi3": 30.0,  # < 50 (spec)
         # Case A 流動性 filter (spec)
-        "avgvolume50": 1_000_000,     # > 500k (spec)
+        "avgvolume50": 1_000_000,  # > 500k (spec)
         "dollarvolume50": 10_000_000,  # > 2.5M (spec)
     }
     row.update(overrides)
@@ -125,7 +124,7 @@ class TestAvgVolume50Filter:
     @pytest.mark.parametrize(
         ("avgvolume50", "expected"),
         [
-            (500_000, False),   # spec: > 500k (strict)
+            (500_000, False),  # spec: > 500k (strict)
             (500_001, True),
             (499_999, False),
             (1_000_000, True),
@@ -145,7 +144,7 @@ class TestDollarVolume50Filter:
     @pytest.mark.parametrize(
         ("dollarvolume50", "expected"),
         [
-            (2_500_000, False),   # spec: > 2.5M (strict)
+            (2_500_000, False),  # spec: > 2.5M (strict)
             (2_500_001, True),
             (2_499_999, False),
             (5_000_000, True),
@@ -164,10 +163,10 @@ class TestAtrPct4pctFilter:
     @pytest.mark.parametrize(
         ("atr_pct", "expected"),
         [
-            (0.04, False),      # spec: > 4% (strict)
+            (0.04, False),  # spec: > 4% (strict)
             (0.0401, True),
             (0.039, False),
-            (0.025, False),     # 旧閾値 → Case A では reject
+            (0.025, False),  # 旧閾値 → Case A では reject
             (0.05, True),
             (0.10, True),
         ],
@@ -223,12 +222,12 @@ class TestPredicateSynchronization:
         "overrides",
         [
             {},  # base pass
-            {"atr_pct": 0.039},           # ATR < 4%
-            {"avgvolume50": 400_000},     # AvgVol50 不足
+            {"atr_pct": 0.039},  # ATR < 4%
+            {"avgvolume50": 400_000},  # AvgVol50 不足
             {"dollarvolume50": 1_500_000},  # DV50 不足
-            {"adx7": 50.0},               # ADX < 55
-            {"rsi3": 55.0},               # RSI3 >= 50
-            {"Close": 4.0},               # penny stock
+            {"adx7": 50.0},  # ADX < 55
+            {"rsi3": 55.0},  # RSI3 >= 50
+            {"Close": 4.0},  # penny stock
             {"Close": 90.0, "sma100": 95.0, "atr10": 3.0},  # price band 割れ
         ],
     )
@@ -265,11 +264,7 @@ def test_case_a_is_strict_subset_of_case_b():
         }
     )
     # Case B (旧): Close>=5 & adx7>55 & atr_pct>2.5%、流動性 filter 無し
-    case_b = (
-        (df["Close"] >= 5.0)
-        & (df["adx7"] > 55.0)
-        & (df["atr_pct"] > 0.025)
-    )
+    case_b = (df["Close"] >= 5.0) & (df["adx7"] > 55.0) & (df["atr_pct"] > 0.025)
     # Case A (spec): 上記 + atr_pct>4% + avgvol50>500k + dv50>2.5M
     case_a = s5._apply_filter_conditions(df.copy())["filter"]
 

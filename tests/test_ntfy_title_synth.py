@@ -26,18 +26,34 @@ def _payload(headline: str) -> dict:
         "systems": {
             "sys1": {
                 "signals": [
-                    {"symbol": "SDOT", "side": "BUY", "entry_price": 72.0,
-                     "weight": 0.006, "rank": 1, "reason": "roc"},
-                ] * 39,
-                "n_candidates_input": 39, "n_signals_output": 39,
+                    {
+                        "symbol": "SDOT",
+                        "side": "BUY",
+                        "entry_price": 72.0,
+                        "weight": 0.006,
+                        "rank": 1,
+                        "reason": "roc",
+                    },
+                ]
+                * 39,
+                "n_candidates_input": 39,
+                "n_signals_output": 39,
                 "gate_survival_ratio": 1.0,
             },
             "sys2": {
                 "signals": [
-                    {"symbol": "LFST", "side": "SELL", "entry_price": 11.43,
-                     "weight": 0.054, "rank": 1, "reason": "overheated"},
-                ] * 10,
-                "n_candidates_input": 10, "n_signals_output": 10,
+                    {
+                        "symbol": "LFST",
+                        "side": "SELL",
+                        "entry_price": 11.43,
+                        "weight": 0.054,
+                        "rank": 1,
+                        "reason": "overheated",
+                    },
+                ]
+                * 10,
+                "n_candidates_input": 10,
+                "n_signals_output": 10,
                 "gate_survival_ratio": 1.0,
             },
         },

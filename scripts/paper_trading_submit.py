@@ -40,10 +40,7 @@ from common.alpaca_trading import (  # noqa: E402
     signals_to_orders,
     submit_paper_order,
 )
-from scripts.paper_trading_dryrun import (  # noqa: E402
-    _write_orders_json,
-    load_signals,
-)
+from scripts.paper_trading_dryrun import _write_orders_json, load_signals  # noqa: E402
 
 
 def _confirm(prompt: str) -> bool:
@@ -139,9 +136,7 @@ def _submit_from_json(args: argparse.Namespace) -> int:
     if skipped:
         from collections import Counter
 
-        kinds = Counter(
-            str(o.skip_reason).split(":", 1)[0] for o in skipped
-        )
+        kinds = Counter(str(o.skip_reason).split(":", 1)[0] for o in skipped)
         print(f"[skip] pre-submit で {len(skipped)} 件スキップ (内訳: {dict(kinds)}):")
         for o in skipped:
             print(f"    - {o.system} {o.symbol} {o.side}: {o.skip_reason}")
@@ -276,7 +271,9 @@ def main(argv: list[str] | None = None) -> int:
         orders = signals_to_orders(signals, account_equity=args.equity, dry_run=True)
         for o in orders:
             print(" ", o.to_row())
-        print(f"\n合計 {len(orders)} 注文 (dry-run)。実発注は --confirm を付けてください。")
+        print(
+            f"\n合計 {len(orders)} 注文 (dry-run)。実発注は --confirm を付けてください。"
+        )
         # dry-run 時も input>0 & orders=0 は anomaly を可視化する。
         if input_signal_count > 0 and len(orders) == 0:
             print(

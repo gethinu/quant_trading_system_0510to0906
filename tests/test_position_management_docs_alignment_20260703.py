@@ -21,12 +21,8 @@ import pandas as pd
 import pytest
 
 from common.alpaca_trading import _DEFAULT_SYSTEM_ORDER_TYPE, signals_to_orders
-from common.trade_management import OrderType, SYSTEM_TRADE_RULES
-from core.final_allocation import (
-    DEFAULT_LONG_ALLOCATIONS,
-    DEFAULT_SHORT_ALLOCATIONS,
-)
-
+from common.trade_management import SYSTEM_TRADE_RULES, OrderType
+from core.final_allocation import DEFAULT_LONG_ALLOCATIONS, DEFAULT_SHORT_ALLOCATIONS
 
 # =========================================================================
 # Cluster A: capital allocation (docs/systems/INDEX.md)

@@ -28,7 +28,6 @@ import pytest
 
 from common.publishers.ntfy import NtfyPublisher, _mask_topic
 
-
 SECRET_TOPIC = "super-secret-abcdef1234567890"
 
 
@@ -112,4 +111,4 @@ def test_publish_result_dry_run_with_no_topic_is_marked_dry_run() -> None:
     assert result.target == "dry-run"
     # Still no accidental leak of an empty-string-looking topic in detail.
     dumped = json.dumps(result.as_dict())
-    assert "://ntfy.sh/\"" not in dumped  # rough sanity — no bare endpoint
+    assert '://ntfy.sh/"' not in dumped  # rough sanity — no bare endpoint

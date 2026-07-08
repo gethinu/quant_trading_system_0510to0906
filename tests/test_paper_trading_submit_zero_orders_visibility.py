@@ -25,16 +25,13 @@ from pathlib import Path
 import sys
 from unittest import mock
 
-import pandas as pd
 import pytest
-
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts import paper_trading_submit as pts  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -114,8 +111,18 @@ def test_json_path_input_signals_but_zero_orders_returns_exit_3(
             "systems": {
                 "sys1": {
                     "signals": [
-                        {"symbol": "AAPL", "side": "BUY", "entry_price": 100.0, "weight": 0.5},
-                        {"symbol": "MSFT", "side": "BUY", "entry_price": 200.0, "weight": 0.5},
+                        {
+                            "symbol": "AAPL",
+                            "side": "BUY",
+                            "entry_price": 100.0,
+                            "weight": 0.5,
+                        },
+                        {
+                            "symbol": "MSFT",
+                            "side": "BUY",
+                            "entry_price": 200.0,
+                            "weight": 0.5,
+                        },
                     ]
                 }
             },
@@ -168,7 +175,12 @@ def test_json_path_successful_orders_returns_exit_0(tmp_path: Path) -> None:
             "systems": {
                 "sys1": {
                     "signals": [
-                        {"symbol": "AAPL", "side": "BUY", "entry_price": 100.0, "weight": 1.0},
+                        {
+                            "symbol": "AAPL",
+                            "side": "BUY",
+                            "entry_price": 100.0,
+                            "weight": 1.0,
+                        },
                     ]
                 }
             },
@@ -219,24 +231,13 @@ def test_csv_path_input_signals_but_zero_orders_returns_exit_3(
         encoding="utf-8",
     )
 
-    args = argparse.Namespace(
-        date=None,
-        signals_csv=str(csv),
-        signals_json=None,
-        tier="small",
-        output_json=None,
-        min_notional=5.0,
-        no_fractional=False,
-        equity=10_000.0,
-        demo=False,
-        confirm=False,
-        yes=False,
-    )
-
     with mock.patch.object(pts, "signals_to_orders", return_value=[]):
-        rc = pts.main([
-            "--signals-csv", str(csv),
-        ])
+        rc = pts.main(
+            [
+                "--signals-csv",
+                str(csv),
+            ]
+        )
 
     assert rc == 3, "CSV path also must surface input>0 & planned=0 as exit 3"
     captured = capsys.readouterr().out
@@ -260,21 +261,39 @@ def test_confirm_all_skipped_is_no_orders_submitted_exit_3(
         tmp_path,
         {
             "date": "2026-07-03",
-            "systems": {"sys1": {"signals": [
-                {"symbol": "TINY", "side": "BUY", "entry_price": 10.0, "weight": 0.001},
-            ]}},
+            "systems": {
+                "sys1": {
+                    "signals": [
+                        {
+                            "symbol": "TINY",
+                            "side": "BUY",
+                            "entry_price": 10.0,
+                            "weight": 0.001,
+                        },
+                    ]
+                }
+            },
         },
     )
     args = _mk_args(tmp_path, src, confirm=True)
 
     skipped_order = PreparedOrder(
-        symbol="TINY", qty=0, side="buy", order_type="market",
-        client_order_id="system1-TINY-20260703", system="system1",
-        entry_date="2026-07-03", notional_usd=1.0, tier="small", dry_run=False,
+        symbol="TINY",
+        qty=0,
+        side="buy",
+        order_type="market",
+        client_order_id="system1-TINY-20260703",
+        system="system1",
+        entry_date="2026-07-03",
+        notional_usd=1.0,
+        tier="small",
+        dry_run=False,
         skip_reason="skip:below_min_notional:$1.00<$5.00",
     )
-    with mock.patch.object(pts, "assert_paper_env", return_value=None), \
-         mock.patch.object(pts, "signals_json_to_orders", return_value=[skipped_order]):
+    with (
+        mock.patch.object(pts, "assert_paper_env", return_value=None),
+        mock.patch.object(pts, "signals_json_to_orders", return_value=[skipped_order]),
+    ):
         rc = pts._submit_from_json(args)
 
     assert rc == 3, "confirm & 全 skip は no_orders_submitted (exit 3)"

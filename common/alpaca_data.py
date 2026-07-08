@@ -167,7 +167,9 @@ def get_alpaca_data(symbol: str) -> pd.DataFrame | None:
             if adj_df is not None and not adj_df.empty and "close" in adj_df:
                 adj_close = adj_df["close"]
         except Exception as exc:  # pragma: no cover - 調整値は best-effort
-            logger.warning("%s: 調整後終値の取得に失敗 (AdjClose=Close で代替) - %s", symbol, exc)
+            logger.warning(
+                "%s: 調整後終値の取得に失敗 (AdjClose=Close で代替) - %s", symbol, exc
+            )
 
         df = pd.DataFrame(index=raw_df.index)
         df["Open"] = raw_df["open"].astype("float64")

@@ -18,7 +18,6 @@ import re
 
 from common import today_signals
 
-
 # The buggy paradigm: `_make_spy_gate` is only called from ``common/today_signals``
 # and only against the uppercase SPY frame. If any caller passes a lowercase gate
 # column the gate will fail open. Enforce uppercase at the source level.
@@ -34,8 +33,8 @@ def test_no_lowercase_column_passed_to_make_spy_gate() -> None:
         matches = re.findall(pattern, src)
         assert not matches, (
             f"F2 P0#1 regression: common/today_signals.py contains a lowercase "
-            f'`column={col!r}` passed to _make_spy_gate. SPY frame columns are '
-            f'uppercase ({col.upper()}); Series.get is case-sensitive; the SPY '
+            f"`column={col!r}` passed to _make_spy_gate. SPY frame columns are "
+            f"uppercase ({col.upper()}); Series.get is case-sensitive; the SPY "
             f"gate will silently fail open. Occurrences: {matches}"
         )
 
@@ -76,7 +75,7 @@ def test_line_980_call_site_uses_uppercase() -> None:
     # Search backward ~1500 chars — the call to _make_spy_gate lives immediately
     # above, but the G1 explanatory comment block pushes it further up.
     window = src[max(0, idx - 1500) : idx]
-    assert '_make_spy_gate(' in window, (
+    assert "_make_spy_gate(" in window, (
         "expected _make_spy_gate(...) call immediately above the System1 gate "
         "predicate. Refactor moved things? Update this test."
     )

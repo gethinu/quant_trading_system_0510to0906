@@ -21,9 +21,7 @@ import pandas as pd
 class TradeHistoryLogger:
     """Alpaca注文履歴のロガー"""
 
-    def __init__(
-        self, history_file: Path | str = Path("data/trade_history.jsonl")
-    ):
+    def __init__(self, history_file: Path | str = Path("data/trade_history.jsonl")):
         """
         Args:
             history_file: 履歴を保存するJSONLファイルのパス
@@ -62,18 +60,18 @@ class TradeHistoryLogger:
                     "symbol": str(row.get("symbol", "")),
                     "side": str(row.get("side", "")),
                     "qty": int(row.get("qty", 0)),
-                    "price": float(row.get("price", 0.0))
-                    if row.get("price") not in (None, "")
-                    else None,
+                    "price": (
+                        float(row.get("price", 0.0))
+                        if row.get("price") not in (None, "")
+                        else None
+                    ),
                     "order_id": str(row.get("order_id", "")),
                     "status": str(row.get("status", "")),
                     "system": str(row.get("system", "")),
                     "order_type": str(row.get("order_type", "")),
                     "time_in_force": str(row.get("time_in_force", "")),
                     "entry_date": str(row.get("entry_date", "")),
-                    "error": str(row.get("error", ""))
-                    if row.get("error")
-                    else None,
+                    "error": str(row.get("error", "")) if row.get("error") else None,
                 }
 
                 # メタデータの追加
@@ -115,9 +113,7 @@ class TradeHistoryLogger:
         df = pd.DataFrame(records[-limit:])
         return df
 
-    def get_stats(
-        self, days: int = 30, paper_only: bool = True
-    ) -> dict[str, Any]:
+    def get_stats(self, days: int = 30, paper_only: bool = True) -> dict[str, Any]:
         """過去N日間の統計を取得
 
         Args:
@@ -142,9 +138,7 @@ class TradeHistoryLogger:
         cutoff = datetime.now() - pd.Timedelta(days=days)
         df = df[df["timestamp"] >= cutoff]
 
-        success_df = df[
-            df["status"].str.contains("accept", case=False, na=False)
-        ]
+        success_df = df[df["status"].str.contains("accept", case=False, na=False)]
         failed_df = df[df["error"].notna()]
 
         return {

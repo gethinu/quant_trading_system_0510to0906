@@ -53,14 +53,33 @@ SUPPORTED_SUFFIXES = {".csv", ".parquet", ".feather"}
 # ``_prepare_rolling_frame`` は ``add_indicators`` 呼出前にこれらのうち全 NaN の列を
 # drop する。これで add_indicators が確実に recompute する。
 _INDICATOR_COLS_FOR_RECOMPUTE = (
-    "atr10", "atr20", "atr40", "atr50",
-    "sma25", "sma50", "sma100", "sma150", "sma200",
-    "roc200", "rsi3", "rsi4", "adx7",
-    "dollarvolume20", "dollarvolume50", "avgvolume50",
-    "atr_ratio", "atr_pct",
-    "return_3d", "return_6d", "return_pct",
-    "uptwodays", "twodayup",
-    "drop3d", "hv50", "min_50", "max_70",
+    "atr10",
+    "atr20",
+    "atr40",
+    "atr50",
+    "sma25",
+    "sma50",
+    "sma100",
+    "sma150",
+    "sma200",
+    "roc200",
+    "rsi3",
+    "rsi4",
+    "adx7",
+    "dollarvolume20",
+    "dollarvolume50",
+    "avgvolume50",
+    "atr_ratio",
+    "atr_pct",
+    "return_3d",
+    "return_6d",
+    "return_pct",
+    "uptwodays",
+    "twodayup",
+    "drop3d",
+    "hv50",
+    "min_50",
+    "max_70",
 )
 
 
@@ -458,9 +477,7 @@ def _process_symbol_worker(args: tuple) -> tuple[str, bool, str | None]:
             return (symbol, False, f"read_error:{exc}")
         if source_df is None or getattr(source_df, "empty", True):
             return (symbol, False, "no_data")
-        enriched = _prepare_rolling_frame(
-            source_df, target_days, source=source_label
-        )
+        enriched = _prepare_rolling_frame(source_df, target_days, source=source_label)
         if enriched is None or getattr(enriched, "empty", True):
             return (symbol, False, "no_data")
         if round_decimals is not None:
@@ -694,9 +711,7 @@ def extract_rolling_from_full(
             except Exception as exc:
                 message = f"{type(exc).__name__}: {exc}"
                 stats.errors[symbol] = message
-                _log_message(
-                    f"⚠️ {symbol}: base/full 読み込みに失敗 ({message})", log
-                )
+                _log_message(f"⚠️ {symbol}: base/full 読み込みに失敗 ({message})", log)
                 continue
 
             if source_df is None or getattr(source_df, "empty", True):

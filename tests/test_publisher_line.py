@@ -14,8 +14,8 @@ from unittest.mock import patch
 
 import pytest
 
-from common.publishers.line import LinePublisher
 from common.publishers.base import PublishResult
+from common.publishers.line import LinePublisher
 
 
 class TestLinePublisherConfigured:
@@ -45,12 +45,8 @@ class TestLinePublisherConfigured:
             assert p.is_configured() is True
 
     def test_custom_env_var_name(self):
-        with patch.dict(
-            "os.environ", {"MY_LINE_TOKEN": "custom_tok"}, clear=False
-        ):
-            p = LinePublisher(
-                access_token=None, to="U12345", env_var="MY_LINE_TOKEN"
-            )
+        with patch.dict("os.environ", {"MY_LINE_TOKEN": "custom_tok"}, clear=False):
+            p = LinePublisher(access_token=None, to="U12345", env_var="MY_LINE_TOKEN")
             assert p.access_token == "custom_tok"
 
     def test_explicit_token_takes_priority_over_env(self):
@@ -76,7 +72,7 @@ class TestLinePublisherSend:
         p = LinePublisher(access_token="tok", to="U12345")
         result = p.send(signals_payload, dry_run=True)
         assert isinstance(result, PublishResult)
-        assert result.ok is True    # dry_run=True → ok=True (stub)
+        assert result.ok is True  # dry_run=True → ok=True (stub)
         assert result.publisher == "line"
         assert result.target == "U12345"
 
@@ -84,7 +80,7 @@ class TestLinePublisherSend:
         """Phase 2 実装完了までは send(dry_run=False) は ok=False stub."""
         p = LinePublisher(access_token="tok", to="U12345")
         result = p.send(signals_payload, dry_run=False)
-        assert result.ok is False   # non-dry_run は Phase 2 stub
+        assert result.ok is False  # non-dry_run は Phase 2 stub
         assert "Phase 2" in result.detail
 
     def test_send_target_falls_back_to_unset(self, signals_payload):
@@ -107,6 +103,7 @@ class TestLinePublisherRegistryCompat:
 
     def test_is_publisher_subclass(self):
         from common.publishers.base import Publisher
+
         assert issubclass(LinePublisher, Publisher)
 
     def test_can_be_built_via_registry_kind(self):

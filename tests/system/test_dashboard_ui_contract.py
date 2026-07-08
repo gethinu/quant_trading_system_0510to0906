@@ -96,15 +96,15 @@ class TestNarrativeCardWrapsSymbolChips:
     def test_uses_flex_wrap_for_reasons(self, narrative_text: str):
         """per_symbol_reasons は flex-wrap で必ず折り返すこと。"""
         # flex + flex-wrap or Tailwind の `flex-wrap` クラスを含む
-        assert "flex-wrap" in narrative_text, (
-            "flex-wrap 消失. reasons が縦列 overflow で card 崩壊するリスク"
-        )
+        assert (
+            "flex-wrap" in narrative_text
+        ), "flex-wrap 消失. reasons が縦列 overflow で card 崩壊するリスク"
 
     def test_wraps_full_summary_in_details(self, narrative_text: str):
         """summary 詳細は <details> accordion で隠すこと (default で summary のみ)。"""
-        assert "<details" in narrative_text, (
-            "詳細 accordion 消失. narrator の全文が hero 高さ blowout の risk"
-        )
+        assert (
+            "<details" in narrative_text
+        ), "詳細 accordion 消失. narrator の全文が hero 高さ blowout の risk"
 
     def test_truncate_helper_present(self, narrative_text: str):
         """TL;DR 生成の truncate helper が残っていること。"""

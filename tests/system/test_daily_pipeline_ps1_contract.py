@@ -34,39 +34,49 @@ class TestDailyPipelineCliContract:
         `scripts/cache_daily_polygon.py --start {Date} --end {Date}` の形態.
         """
         # 対応 python が呼ばれている
-        assert "scripts\\cache_daily_polygon.py" in ps1_text or \
-               "scripts/cache_daily_polygon.py" in ps1_text, \
-               "step1 で cache_daily_polygon.py が呼ばれていない"
+        assert (
+            "scripts\\cache_daily_polygon.py" in ps1_text
+            or "scripts/cache_daily_polygon.py" in ps1_text
+        ), "step1 で cache_daily_polygon.py が呼ばれていない"
         # --start / --end 両方指定
         assert "--start" in ps1_text
         assert "--end" in ps1_text
         # $Date で 1 日 fetch (--start == --end 形態)
         # NOTE: これが flatten bug のトリガだが, script 側 (_merge_with_existing_full_csv)
         # で防御済み. その契約を明示的にここで固定する.
-        assert '"--start", $Date, "--end", $Date' in ps1_text, \
-            "1 日 fetch 形態 (--start == --end) が消失した. 変更が意図的なら " \
+        assert '"--start", $Date, "--end", $Date' in ps1_text, (
+            "1 日 fetch 形態 (--start == --end) が消失した. 変更が意図的なら "
             "flatten regression の再チェックが必要"
+        )
 
     def test_step2_signals_command_shape(self, ps1_text: str):
-        assert "apps\\app_today_signals.py" in ps1_text or \
-               "apps/app_today_signals.py" in ps1_text
+        assert (
+            "apps\\app_today_signals.py" in ps1_text
+            or "apps/app_today_signals.py" in ps1_text
+        )
         assert "--headless" in ps1_text
         assert "--output-json" in ps1_text
 
     def test_step3_coverage_monitor(self, ps1_text: str):
-        assert "scripts\\daily_polygon_monitor.py" in ps1_text or \
-               "scripts/daily_polygon_monitor.py" in ps1_text
+        assert (
+            "scripts\\daily_polygon_monitor.py" in ps1_text
+            or "scripts/daily_polygon_monitor.py" in ps1_text
+        )
 
     def test_step4_narrator_optional(self, ps1_text: str):
-        assert "scripts\\generate_narrative.py" in ps1_text or \
-               "scripts/generate_narrative.py" in ps1_text
+        assert (
+            "scripts\\generate_narrative.py" in ps1_text
+            or "scripts/generate_narrative.py" in ps1_text
+        )
         # narrator は fail-safe (exit!=0 でも WARN 止まり)
         assert "SkipNarrator" in ps1_text
         assert "narrative 無しで継続" in ps1_text
 
     def test_step5_publish_signals(self, ps1_text: str):
-        assert "scripts\\publish_signals.py" in ps1_text or \
-               "scripts/publish_signals.py" in ps1_text
+        assert (
+            "scripts\\publish_signals.py" in ps1_text
+            or "scripts/publish_signals.py" in ps1_text
+        )
 
     def test_exit_code_contract_documented(self, ps1_text: str):
         """Exit codes: 0=全 OK, 2=一部失敗 (WARN), 1=致命的エラー."""
@@ -93,7 +103,9 @@ class TestDailyPipelineCliContract:
         assert "$EnvFile" in ps1_text, ".env auto-load block が消失している"
         assert "Test-Path $EnvFile" in ps1_text
         # 既存 env は上書きしない (guard)
-        assert 'Test-Path "Env:$k"' in ps1_text, "既存 env 優先ガードが必要 (env 覆いを防ぐ)"
+        assert (
+            'Test-Path "Env:$k"' in ps1_text
+        ), "既存 env 優先ガードが必要 (env 覆いを防ぐ)"
         # order: .env auto-load が $ErrorActionPreference より前に位置する
         idx_env = ps1_text.find("$EnvFile = Join-Path $ProjectRoot")
         idx_eap = ps1_text.find('$ErrorActionPreference = "Continue"')
@@ -119,9 +131,9 @@ class TestPipelineScriptExistence:
     )
     def test_script_file_exists(self, relpath: str):
         target = PS1.parent.parent / relpath
-        assert target.exists(), (
-            f"{relpath} が存在しない. daily_pipeline.ps1 が起動時に失敗する."
-        )
+        assert (
+            target.exists()
+        ), f"{relpath} が存在しない. daily_pipeline.ps1 が起動時に失敗する."
 
 
 class TestCachePolygonMainAcceptsPs1Contract:
@@ -132,8 +144,10 @@ class TestCachePolygonMainAcceptsPs1Contract:
         ps1 と全く同一 CLI 引数形態を main() に渡して exit 0 で終わることを確認.
         """
         from types import SimpleNamespace
-        import scripts.cache_daily_polygon as cdp
+
         import pandas as pd
+
+        import scripts.cache_daily_polygon as cdp
 
         data_cache = tmp_path / "data_cache"
         (data_cache / "full_backup").mkdir(parents=True)
@@ -155,16 +169,29 @@ class TestCachePolygonMainAcceptsPs1Contract:
             lambda create_dirs=True: fake_settings,
         )
         monkeypatch.setattr(
-            cdp, "get_polygon_grouped_daily",
+            cdp,
+            "get_polygon_grouped_daily",
             lambda ds: pd.DataFrame(
-                {"Open": [100.0], "High": [101.0], "Low": [99.0],
-                 "Close": [100.5], "Volume": [1_000_000]},
+                {
+                    "Open": [100.0],
+                    "High": [101.0],
+                    "Low": [99.0],
+                    "Close": [100.5],
+                    "Volume": [1_000_000],
+                },
                 index=pd.Index(["AAPL"], name="symbol"),
             ),
         )
 
         # ps1 step1 と等価な呼び出し
-        rc = cdp.main([
-            "--start", "2026-07-02", "--end", "2026-07-02", "--sleep", "0",
-        ])
+        rc = cdp.main(
+            [
+                "--start",
+                "2026-07-02",
+                "--end",
+                "2026-07-02",
+                "--sleep",
+                "0",
+            ]
+        )
         assert rc == 0, "ps1 の step1 が渡す CLI 引数で main() が失敗する"

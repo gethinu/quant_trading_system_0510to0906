@@ -203,9 +203,7 @@ def main() -> None:
         positions_before = 0
 
     try:
-        res = submit_exit_orders_df(
-            df, paper=args.paper, tif="CLS", notify=False
-        )
+        res = submit_exit_orders_df(df, paper=args.paper, tif="CLS", notify=False)
         logger.info("submitted %d orders", len(res))
         for r in rows:
             mark_sent(r["symbol"], markers)

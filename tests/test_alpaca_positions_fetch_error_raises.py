@@ -37,7 +37,6 @@ from unittest import mock
 
 import pytest
 
-
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -46,7 +45,6 @@ from common import alpaca_trading as at  # noqa: E402
 from common import broker_alpaca as ba  # noqa: E402
 from common.alpaca_trading import PositionsFetchError  # noqa: E402
 
-
 # ===========================================================================
 # P0#7: _fetch_open_positions must raise, not silent {}
 # ===========================================================================
@@ -54,6 +52,7 @@ from common.alpaca_trading import PositionsFetchError  # noqa: E402
 
 def test_fetch_open_positions_raises_on_sdk_error() -> None:
     """The regression: fetch failure must NOT be masked as empty positions."""
+
     class BadClient:
         def get_all_positions(self):
             raise RuntimeError("alpaca sdk connection refused")
@@ -61,11 +60,15 @@ def test_fetch_open_positions_raises_on_sdk_error() -> None:
     with pytest.raises(PositionsFetchError) as excinfo:
         at._fetch_open_positions(BadClient())
 
-    assert "connection refused" in str(excinfo.value).lower() or "fetch failed" in str(excinfo.value).lower()
+    assert (
+        "connection refused" in str(excinfo.value).lower()
+        or "fetch failed" in str(excinfo.value).lower()
+    )
 
 
 def test_fetch_open_positions_happy_path_returns_signed_qty() -> None:
     """Sanity: successful fetch still returns a symbol→qty map."""
+
     class OkPosition:
         def __init__(self, symbol: str, qty: float) -> None:
             self.symbol = symbol
@@ -96,9 +99,11 @@ def test_signals_to_orders_propagates_positions_fetch_error() -> None:
         def get_all_positions(self):
             raise RuntimeError("network down")
 
-    signals = pd.DataFrame([
-        {"symbol": "AAPL", "side": "buy", "shares": 10, "system": "system1"},
-    ])
+    signals = pd.DataFrame(
+        [
+            {"symbol": "AAPL", "side": "buy", "shares": 10, "system": "system1"},
+        ]
+    )
 
     with mock.patch.object(at, "assert_paper_env", return_value=None):
         with pytest.raises(PositionsFetchError):
@@ -141,9 +146,9 @@ def test_retry_generates_client_order_id_when_missing() -> None:
 
     # Must have retried, AND all attempts share the SAME auto-generated coid.
     assert len(captured_ids) >= 2, "must retry on transient timeout"
-    assert all(cid is not None for cid in captured_ids), (
-        "F2 P0#8 regression: retry with no client_order_id could double-submit"
-    )
+    assert all(
+        cid is not None for cid in captured_ids
+    ), "F2 P0#8 regression: retry with no client_order_id could double-submit"
     assert len(set(captured_ids)) == 1, "all retries must use the same coid"
 
 
@@ -290,4 +295,7 @@ def test_is_transient_error_classifier_reasonable_defaults() -> None:
     assert ba._is_transient_error(RuntimeError("connection reset by peer")) is True
     assert ba._is_transient_error(RuntimeError("insufficient buying power")) is False
     assert ba._is_transient_error(RuntimeError("422 duplicate")) is False
-    assert ba._is_transient_error(RuntimeError("some new sdk error we haven't seen")) is True
+    assert (
+        ba._is_transient_error(RuntimeError("some new sdk error we haven't seen"))
+        is True
+    )

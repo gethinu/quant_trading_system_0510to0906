@@ -88,8 +88,7 @@ def test_golden_signals_default_date_matches(
         diff = _diff_snapshot(golden_snapshot, current_snapshot)
         pytest.fail(
             "golden signal snapshot mismatch: want sha256="
-            f"{want_hash[:12]} got sha256={got_hash[:12]}\n"
-            + "\n".join(diff)
+            f"{want_hash[:12]} got sha256={got_hash[:12]}\n" + "\n".join(diff)
         )
 
 
@@ -113,6 +112,6 @@ def test_golden_per_system_stable(
 
     want_h = _hashable({system_name: want})[system_name]
     got_h = _hashable({system_name: got})[system_name]
-    assert _canonical_json(want_h) == _canonical_json(got_h), (
-        f"{system_name} snapshot diverged"
-    )
+    assert _canonical_json(want_h) == _canonical_json(
+        got_h
+    ), f"{system_name} snapshot diverged"

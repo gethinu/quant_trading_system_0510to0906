@@ -20,13 +20,11 @@ from __future__ import annotations
 
 from datetime import date
 from pathlib import Path
-from unittest import mock
 
 import pandas as pd
 import pytest
 
 import scripts.cache_daily_polygon as cdp
-
 
 # ---------- fixtures ---------------------------------------------------------
 
@@ -97,7 +95,14 @@ class TestPivotToSymbolFrames:
         frames = cdp.pivot_to_symbol_frames(panel)
         assert set(frames.keys()) == {"AAPL", "MSFT"}
         for sym, df in frames.items():
-            assert list(df.columns) == ["Open", "High", "Low", "Close", "AdjClose", "Volume"]
+            assert list(df.columns) == [
+                "Open",
+                "High",
+                "Low",
+                "Close",
+                "AdjClose",
+                "Volume",
+            ]
             assert df.index.name == "Date"
             assert len(df) == 2
             # AdjClose == Close (unadjusted grouped daily)
@@ -148,8 +153,9 @@ class TestMergeWithExistingFullCsv:
         既存 500 日 CSV に翌日 1 行を append したら 501 行になる。
         旧実装 (merge 無し) はここで len==1 になる (= flatten 再現)。
         """
-        hist = _ohlcv_frame([d.strftime("%Y-%m-%d") for d in pd.bdate_range(
-            "2024-08-01", periods=500)])
+        hist = _ohlcv_frame(
+            [d.strftime("%Y-%m-%d") for d in pd.bdate_range("2024-08-01", periods=500)]
+        )
         csv_path = tmp_path / "AAPL.csv"
         hist.reset_index().to_csv(csv_path, index=False)
 
@@ -171,27 +177,48 @@ class TestMergeWithExistingFullCsv:
 
     def test_same_day_duplicate_keeps_new(self, tmp_path: Path):
         """同一 Date が既存にも new にもある場合、new (Close 200) が残る。"""
-        hist = pd.DataFrame({
-            "Date": ["2026-07-02"], "Open": [100.0], "High": [101.0],
-            "Low": [99.0], "Close": [100.0], "AdjClose": [100.0], "Volume": [1_000_000],
-        })
+        hist = pd.DataFrame(
+            {
+                "Date": ["2026-07-02"],
+                "Open": [100.0],
+                "High": [101.0],
+                "Low": [99.0],
+                "Close": [100.0],
+                "AdjClose": [100.0],
+                "Volume": [1_000_000],
+            }
+        )
         csv_path = tmp_path / "AAPL.csv"
         hist.to_csv(csv_path, index=False)
 
-        new_df = pd.DataFrame({
-            "Date": pd.to_datetime(["2026-07-02"]), "Open": [200.0], "High": [201.0],
-            "Low": [199.0], "Close": [200.0], "AdjClose": [200.0], "Volume": [2_000_000],
-        })
+        new_df = pd.DataFrame(
+            {
+                "Date": pd.to_datetime(["2026-07-02"]),
+                "Open": [200.0],
+                "High": [201.0],
+                "Low": [199.0],
+                "Close": [200.0],
+                "AdjClose": [200.0],
+                "Volume": [2_000_000],
+            }
+        )
         merged = cdp._merge_with_existing_full_csv(new_df, csv_path)
         assert len(merged) == 1
         assert float(merged["Close"].iloc[0]) == 200.0  # new 優先
 
     def test_lowercase_date_column_normalized(self, tmp_path: Path):
         """既存 CSV が 'date' 小文字列でも merge できる。"""
-        hist = pd.DataFrame({
-            "date": ["2026-07-01"], "Open": [100.0], "High": [101.0],
-            "Low": [99.0], "Close": [100.0], "AdjClose": [100.0], "Volume": [1_000_000],
-        })
+        hist = pd.DataFrame(
+            {
+                "date": ["2026-07-01"],
+                "Open": [100.0],
+                "High": [101.0],
+                "Low": [99.0],
+                "Close": [100.0],
+                "AdjClose": [100.0],
+                "Volume": [1_000_000],
+            }
+        )
         csv_path = tmp_path / "AAPL.csv"
         hist.to_csv(csv_path, index=False)
 
@@ -222,9 +249,9 @@ class TestMergeWithExistingFullCsv:
 
         # current: warning ログを出しつつ new のみ返す
         assert len(merged) == 1
-        assert any("履歴失う危険" in rec.message for rec in caplog.records), (
-            "既存 CSV 読取失敗時に WARNING が出ていない = silent path"
-        )
+        assert any(
+            "履歴失う危険" in rec.message for rec in caplog.records
+        ), "既存 CSV 読取失敗時に WARNING が出ていない = silent path"
 
 
 # ---------- write_symbol_to_cache (round-trip) ------------------------------
@@ -264,10 +291,10 @@ class TestWriteSymbolToCache:
         settings, data_cache = tmp_settings
         full_dir = data_cache / "full_backup"
 
-        df = _ohlcv_frame([d.strftime("%Y-%m-%d")
-                           for d in pd.bdate_range("2026-06-01", periods=30)])
-        ok = cdp.write_symbol_to_cache(
-            "AAPL", df, full_dir=full_dir, round_decimals=4)
+        df = _ohlcv_frame(
+            [d.strftime("%Y-%m-%d") for d in pd.bdate_range("2026-06-01", periods=30)]
+        )
+        ok = cdp.write_symbol_to_cache("AAPL", df, full_dir=full_dir, round_decimals=4)
         assert ok is True
         assert (full_dir / "AAPL.csv").exists()
         assert (data_cache / "base" / "AAPL.feather").exists()
@@ -285,11 +312,16 @@ class TestWriteSymbolToCache:
         full_dir = data_cache / "full_backup"
 
         # step 1: 200 日を write (round decimals 4)
-        hist_dates = [d.strftime("%Y-%m-%d")
-                      for d in pd.bdate_range("2025-09-01", periods=200)]
+        hist_dates = [
+            d.strftime("%Y-%m-%d") for d in pd.bdate_range("2025-09-01", periods=200)
+        ]
         hist_df = _ohlcv_frame(hist_dates)
-        assert cdp.write_symbol_to_cache(
-            "AAPL", hist_df, full_dir=full_dir, round_decimals=4) is True
+        assert (
+            cdp.write_symbol_to_cache(
+                "AAPL", hist_df, full_dir=full_dir, round_decimals=4
+            )
+            is True
+        )
 
         csv_path = full_dir / "AAPL.csv"
         after_hist = pd.read_csv(csv_path, parse_dates=["Date"])
@@ -297,11 +329,14 @@ class TestWriteSymbolToCache:
         first_date = after_hist["Date"].min()
 
         # step 2: 翌 1 営業日を write (daily_pipeline.ps1 が叩く形態)
-        next_day = pd.bdate_range(
-            hist_df.index.max() + pd.Timedelta(days=1), periods=1)
+        next_day = pd.bdate_range(hist_df.index.max() + pd.Timedelta(days=1), periods=1)
         new_day_df = _ohlcv_frame([next_day[0].strftime("%Y-%m-%d")])
-        assert cdp.write_symbol_to_cache(
-            "AAPL", new_day_df, full_dir=full_dir, round_decimals=4) is True
+        assert (
+            cdp.write_symbol_to_cache(
+                "AAPL", new_day_df, full_dir=full_dir, round_decimals=4
+            )
+            is True
+        )
 
         # step 3: 履歴が残っていることを assert (この 3 点で flatten を捕捉)
         result = pd.read_csv(csv_path, parse_dates=["Date"])
@@ -309,9 +344,9 @@ class TestWriteSymbolToCache:
             f"flatten 再発: 200日 write 後に 1日 write したら {len(result)} 行 "
             "(期待値 201)。write_symbol_to_cache 中の merge が働いていない。"
         )
-        assert result["Date"].min() == first_date, (
-            "最古日が消えた = 履歴上書き = flatten bug 再現"
-        )
+        assert (
+            result["Date"].min() == first_date
+        ), "最古日が消えた = 履歴上書き = flatten bug 再現"
         # 単調増加 + 重複 0
         assert result["Date"].is_monotonic_increasing
         assert result["Date"].is_unique
@@ -332,8 +367,12 @@ class TestWriteSymbolToCache:
 
         df = _ohlcv_frame(["2026-07-02"])
         for _ in range(3):
-            assert cdp.write_symbol_to_cache(
-                "AAPL", df, full_dir=full_dir, round_decimals=4) is True
+            assert (
+                cdp.write_symbol_to_cache(
+                    "AAPL", df, full_dir=full_dir, round_decimals=4
+                )
+                is True
+            )
         result = pd.read_csv(full_dir / "AAPL.csv", parse_dates=["Date"])
         assert len(result) == 1
 
@@ -376,14 +415,22 @@ class TestMainCliContract:
         )
         # Grouped Daily を mock
         monkeypatch.setattr(
-            cdp, "get_polygon_grouped_daily",
+            cdp,
+            "get_polygon_grouped_daily",
             lambda ds: _grouped_daily(["AAPL", "SPY"], 100.0),
         )
 
-        rc = cdp.main([
-            "--start", "2026-07-02", "--end", "2026-07-02",
-            "--sleep", "0", "--dry-run",
-        ])
+        rc = cdp.main(
+            [
+                "--start",
+                "2026-07-02",
+                "--end",
+                "2026-07-02",
+                "--sleep",
+                "0",
+                "--dry-run",
+            ]
+        )
         assert rc == 0
         # cache に何も書かれていない
         assert list((data_cache / "full_backup").glob("*.csv")) == []

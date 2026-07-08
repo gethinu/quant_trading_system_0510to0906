@@ -54,7 +54,9 @@ def _default_narrative_path(signals_path: Path) -> Path:
     return signals_path.with_name(name)
 
 
-def merge_narrative(payload: dict, narrative_path: Path | None, signals_path: Path) -> None:
+def merge_narrative(
+    payload: dict, narrative_path: Path | None, signals_path: Path
+) -> None:
     """narrative JSON を payload['narrative'] に merge (optional, best-effort)。
 
     明示 path が無ければ signals と同じ dir の narrative_YYYYMMDD.json を探す。
@@ -64,9 +66,15 @@ def merge_narrative(payload: dict, narrative_path: Path | None, signals_path: Pa
         return
     try:
         narrative = json.loads(path.read_text(encoding="utf-8"))
-        if isinstance(narrative, dict) and (narrative.get("headline") or narrative.get("summary")):
+        if isinstance(narrative, dict) and (
+            narrative.get("headline") or narrative.get("summary")
+        ):
             payload["narrative"] = narrative
-            logger.info("narrative merged: %s (headline=%r)", path, narrative.get("headline", ""))
+            logger.info(
+                "narrative merged: %s (headline=%r)",
+                path,
+                narrative.get("headline", ""),
+            )
     except Exception as exc:  # noqa: BLE001
         logger.warning("narrative 読み込み失敗 (無視して継続): %s", exc)
 
@@ -121,7 +129,9 @@ def _write_publish_status(input_path: Path, payload: dict, status: str) -> None:
         # (narrative は narrative_YYYYMMDD.json 側が single source of truth)
         to_write = {k: v for k, v in payload.items() if k != "narrative"}
         tmp = input_path.with_suffix(input_path.suffix + ".tmp")
-        tmp.write_text(json.dumps(to_write, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.write_text(
+            json.dumps(to_write, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         tmp.replace(input_path)
     except Exception as exc:  # noqa: BLE001
         logger.warning("publish_status 書き戻し失敗: %s", exc)
@@ -129,8 +139,15 @@ def _write_publish_status(input_path: Path, payload: dict, status: str) -> None:
 
 def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    p.add_argument("--date", type=str, default=None, help="対象日 (YYYY-MM-DD)。--input 未指定時に使用。")
-    p.add_argument("--input", type=str, default=None, help="signals JSON path (直接指定)。")
+    p.add_argument(
+        "--date",
+        type=str,
+        default=None,
+        help="対象日 (YYYY-MM-DD)。--input 未指定時に使用。",
+    )
+    p.add_argument(
+        "--input", type=str, default=None, help="signals JSON path (直接指定)。"
+    )
     p.add_argument(
         "--publisher",
         choices=["ntfy", "email", "all"],
@@ -148,7 +165,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=None,
         help="narrative JSON path (未指定なら signals と同じ dir の narrative_YYYYMMDD.json を自動探索)。",
     )
-    p.add_argument("--dry-run", action="store_true", help="送信せず payload を検証・表示。")
+    p.add_argument(
+        "--dry-run", action="store_true", help="送信せず payload を検証・表示。"
+    )
     p.add_argument("--log-level", default="INFO", help="ログレベル。")
     return p
 
@@ -201,7 +220,9 @@ def main(argv: list[str] | None = None) -> int:
 
     for r in result.results:
         tag = "OK" if r.ok else "FAIL"
-        logger.info("[%s] %s -> %s %s", tag, r.publisher, r.target, "" if r.ok else r.detail)
+        logger.info(
+            "[%s] %s -> %s %s", tag, r.publisher, r.target, "" if r.ok else r.detail
+        )
         if args.dry_run:
             logger.info("  payload: %s", r.detail[:600])
 

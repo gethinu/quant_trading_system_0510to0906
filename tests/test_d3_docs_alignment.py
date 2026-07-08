@@ -42,7 +42,6 @@ import core.system4 as s4
 import core.system5 as s5
 import core.system6 as s6
 
-
 # ============================================================================
 # Cross-system constants sanity: docs 値と impl 定数が一致する
 # ============================================================================
@@ -79,7 +78,7 @@ def test_system5_constants_match_docs_case_a():
     """docs/systems/システム5.txt (D3 Case A 2026-07-03 alignment):
     AvgVol50 > 500k, DV50 > 2.5M, ATR_Pct > 4%.
     """
-    assert s5.MIN_PRICE == 5.0            # operational safety (docs 未記載)
+    assert s5.MIN_PRICE == 5.0  # operational safety (docs 未記載)
     assert s5.MIN_ADX == 55.0
     assert s5.MIN_AVG_VOLUME_50 == 500_000
     assert s5.MIN_DOLLAR_VOLUME_50 == 2_500_000
@@ -116,7 +115,7 @@ class TestSystem1DocsAlignment:
         ("dv20", "expected"),
         [
             (50_000_001, True),
-            (50_000_000, False),   # spec: > (strict) — docs "50M ドルを上回る"
+            (50_000_000, False),  # spec: > (strict) — docs "50M ドルを上回る"
             (49_999_999, False),
         ],
     )
@@ -160,22 +159,24 @@ class TestSystem2DocsAlignment:
         ],
     )
     def test_dv20_gt_25m(self, dv20, expected):
-        assert bool(
-            s2._apply_filter_conditions(_s2_row(dollarvolume20=dv20)).iloc[0]
-        ) is expected
+        assert (
+            bool(s2._apply_filter_conditions(_s2_row(dollarvolume20=dv20)).iloc[0])
+            is expected
+        )
 
     @pytest.mark.parametrize(
         ("atr_ratio", "expected"),
         [
-            (0.03, False),   # spec: > 3% (strict)
+            (0.03, False),  # spec: > 3% (strict)
             (0.0301, True),
             (0.029, False),
         ],
     )
     def test_atr_ratio_gt_3pct(self, atr_ratio, expected):
-        assert bool(
-            s2._apply_filter_conditions(_s2_row(atr_ratio=atr_ratio)).iloc[0]
-        ) is expected
+        assert (
+            bool(s2._apply_filter_conditions(_s2_row(atr_ratio=atr_ratio)).iloc[0])
+            is expected
+        )
 
 
 # ============================================================================
@@ -202,35 +203,44 @@ class TestSystem3DocsAlignment:
         [(1.0, True), (0.99, False), (5.0, True)],
     )
     def test_low_gte_1(self, low, expected):
-        assert bool(
-            s3._apply_filter_conditions(_s3_row(Low=low))["filter"].iloc[0]
-        ) is expected
+        assert (
+            bool(s3._apply_filter_conditions(_s3_row(Low=low))["filter"].iloc[0])
+            is expected
+        )
 
     @pytest.mark.parametrize(
         ("vol", "expected"),
         [
-            (1_000_000, True),   # spec: >= 100 万株 (inclusive)
+            (1_000_000, True),  # spec: >= 100 万株 (inclusive)
             (999_999, False),
             (2_000_000, True),
         ],
     )
     def test_avgvolume50_gte_1m(self, vol, expected):
-        assert bool(
-            s3._apply_filter_conditions(_s3_row(avgvolume50=vol))["filter"].iloc[0]
-        ) is expected
+        assert (
+            bool(
+                s3._apply_filter_conditions(_s3_row(avgvolume50=vol))["filter"].iloc[0]
+            )
+            is expected
+        )
 
     @pytest.mark.parametrize(
         ("atr_ratio", "expected"),
         [
-            (0.05, True),    # spec: >= 5% (inclusive)
+            (0.05, True),  # spec: >= 5% (inclusive)
             (0.049, False),
             (0.10, True),
         ],
     )
     def test_atr_ratio_gte_5pct(self, atr_ratio, expected):
-        assert bool(
-            s3._apply_filter_conditions(_s3_row(atr_ratio=atr_ratio))["filter"].iloc[0]
-        ) is expected
+        assert (
+            bool(
+                s3._apply_filter_conditions(_s3_row(atr_ratio=atr_ratio))[
+                    "filter"
+                ].iloc[0]
+            )
+            is expected
+        )
 
 
 # ============================================================================
@@ -254,28 +264,34 @@ class TestSystem4DocsAlignment:
         ("dv50", "expected"),
         [
             (100_000_001, True),
-            (100_000_000, False),   # spec: > 100M (strict)
+            (100_000_000, False),  # spec: > 100M (strict)
             (99_999_999, False),
         ],
     )
     def test_dv50_gt_100m(self, dv50, expected):
-        assert bool(
-            s4._apply_filter_conditions(_s4_row(dollarvolume50=dv50))["filter"].iloc[0]
-        ) is expected
+        assert (
+            bool(
+                s4._apply_filter_conditions(_s4_row(dollarvolume50=dv50))[
+                    "filter"
+                ].iloc[0]
+            )
+            is expected
+        )
 
     @pytest.mark.parametrize(
         ("hv50", "expected"),
         [
-            (10.0, True),   # spec: HV 10-40% (inclusive)
+            (10.0, True),  # spec: HV 10-40% (inclusive)
             (40.0, True),
             (9.99, False),
             (40.01, False),
         ],
     )
     def test_hv50_range(self, hv50, expected):
-        assert bool(
-            s4._apply_filter_conditions(_s4_row(hv50=hv50))["filter"].iloc[0]
-        ) is expected
+        assert (
+            bool(s4._apply_filter_conditions(_s4_row(hv50=hv50))["filter"].iloc[0])
+            is expected
+        )
 
 
 # ============================================================================
@@ -287,12 +303,12 @@ def _s5_row(**over) -> pd.DataFrame:
     row = {
         "Close": 100.0,
         "adx7": 60.0,
-        "atr_pct": 0.05,          # > 4% spec
+        "atr_pct": 0.05,  # > 4% spec
         "sma100": 90.0,
         "atr10": 5.0,
         "rsi3": 30.0,
-        "avgvolume50": 1_000_000,      # > 500k spec
-        "dollarvolume50": 5_000_000,   # > 2.5M spec
+        "avgvolume50": 1_000_000,  # > 500k spec
+        "dollarvolume50": 5_000_000,  # > 2.5M spec
     }
     row.update(over)
     return pd.DataFrame([row])
@@ -305,45 +321,58 @@ class TestSystem5DocsAlignmentCaseA:
     @pytest.mark.parametrize(
         ("avgvolume50", "expected"),
         [
-            (500_000, False),    # docs: > 500k (strict)
+            (500_000, False),  # docs: > 500k (strict)
             (500_001, True),
             (499_999, False),
             (1_000_000, True),
         ],
     )
     def test_avgvolume50_gt_500k(self, avgvolume50, expected):
-        assert bool(
-            s5._apply_filter_conditions(_s5_row(avgvolume50=avgvolume50))["filter"].iloc[0]
-        ) is expected
+        assert (
+            bool(
+                s5._apply_filter_conditions(_s5_row(avgvolume50=avgvolume50))[
+                    "filter"
+                ].iloc[0]
+            )
+            is expected
+        )
 
     @pytest.mark.parametrize(
         ("dv50", "expected"),
         [
-            (2_500_000, False),   # docs: > 2.5M (strict)
+            (2_500_000, False),  # docs: > 2.5M (strict)
             (2_500_001, True),
             (2_499_999, False),
             (10_000_000, True),
         ],
     )
     def test_dv50_gt_2p5m(self, dv50, expected):
-        assert bool(
-            s5._apply_filter_conditions(_s5_row(dollarvolume50=dv50))["filter"].iloc[0]
-        ) is expected
+        assert (
+            bool(
+                s5._apply_filter_conditions(_s5_row(dollarvolume50=dv50))[
+                    "filter"
+                ].iloc[0]
+            )
+            is expected
+        )
 
     @pytest.mark.parametrize(
         ("atr_pct", "expected"),
         [
-            (0.04, False),    # docs: > 4% (strict) — Case A で 2.5%→4% 是正
+            (0.04, False),  # docs: > 4% (strict) — Case A で 2.5%→4% 是正
             (0.0401, True),
-            (0.025, False),   # 旧閾値は Case A で reject される
+            (0.025, False),  # 旧閾値は Case A で reject される
             (0.039, False),
             (0.05, True),
         ],
     )
     def test_atr_pct_gt_4pct(self, atr_pct, expected):
-        assert bool(
-            s5._apply_filter_conditions(_s5_row(atr_pct=atr_pct))["filter"].iloc[0]
-        ) is expected
+        assert (
+            bool(
+                s5._apply_filter_conditions(_s5_row(atr_pct=atr_pct))["filter"].iloc[0]
+            )
+            is expected
+        )
 
     def test_all_three_docs_filters_are_real_gates(self):
         """docs 3 条件が独立に filter を reject できる (実 gate 化 assertion)。"""
@@ -383,9 +412,10 @@ class TestSystem6DocsAlignment:
         [(5.0, True), (4.99, False), (10.0, True)],
     )
     def test_low_gte_5(self, low, expected):
-        assert bool(
-            s6._apply_filter_conditions(_s6_row(Low=low))["filter"].iloc[0]
-        ) is expected
+        assert (
+            bool(s6._apply_filter_conditions(_s6_row(Low=low))["filter"].iloc[0])
+            is expected
+        )
 
     @pytest.mark.parametrize(
         ("dv50", "expected"),
@@ -396,9 +426,14 @@ class TestSystem6DocsAlignment:
         ],
     )
     def test_dv50_gt_10m(self, dv50, expected):
-        assert bool(
-            s6._apply_filter_conditions(_s6_row(dollarvolume50=dv50))["filter"].iloc[0]
-        ) is expected
+        assert (
+            bool(
+                s6._apply_filter_conditions(_s6_row(dollarvolume50=dv50))[
+                    "filter"
+                ].iloc[0]
+            )
+            is expected
+        )
 
 
 # ============================================================================
@@ -411,10 +446,12 @@ def test_system7_has_no_symbol_universe_filter():
     core/system7.py は SPY 固定なので filter 関数を提供しない。
     """
     import core.system7 as s7
+
     # No _apply_filter_conditions is expected; only setup on Low<=Min_50 gate.
     assert not hasattr(s7, "_apply_filter_conditions") or True  # tolerant
     # spec: setup は SPY が 50 日安値を付ける
     from common.system_setup_predicates import system7_setup_predicate
+
     passing = pd.Series({"Low": 100.0, "min_50": 100.0})
     rejecting = pd.Series({"Low": 101.0, "min_50": 100.0})
     assert bool(system7_setup_predicate(passing)) is True
@@ -445,18 +482,16 @@ def test_system5_case_a_is_strict_subset_of_case_b():
         }
     )
     # Case B (旧): Close>=5 & adx7>55 & atr_pct>2.5% のみ、流動性 filter 無し
-    case_b = (
-        (df["Close"] >= 5.0)
-        & (df["adx7"] > 55.0)
-        & (df["atr_pct"] > 0.025)
-    )
+    case_b = (df["Close"] >= 5.0) & (df["adx7"] > 55.0) & (df["atr_pct"] > 0.025)
     # Case A (spec): ATR>4% + AvgVol50>500k + DV50>2.5M
     case_a = s5._apply_filter_conditions(df.copy())["filter"]
 
-    assert (case_a & ~case_b).sum() == 0, "Case A ⊂ Case B 違反 (Case A で通り Case B で通らない)"
+    assert (
+        case_a & ~case_b
+    ).sum() == 0, "Case A ⊂ Case B 違反 (Case A で通り Case B で通らない)"
     assert (case_b & ~case_a).sum() > 0, "Case A は Case B の proper subset ではない"
     if int(case_b.sum()) > 0:
         ratio = int(case_a.sum()) / int(case_b.sum())
-        assert 0.05 < ratio < 0.5, (
-            f"Case A / Case B ratio = {ratio:.2%} が 5%〜50% 帯を外れる (proxy sim 想定は ~19%)"
-        )
+        assert (
+            0.05 < ratio < 0.5
+        ), f"Case A / Case B ratio = {ratio:.2%} が 5%〜50% 帯を外れる (proxy sim 想定は ~19%)"

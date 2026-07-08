@@ -52,8 +52,8 @@ class _FakeResp:
         return self._p
 
 
-def _agg(t_ms, o, h, l, c, v):
-    return {"t": t_ms, "o": o, "h": h, "l": l, "c": c, "v": v, "vw": c, "n": 1}
+def _agg(t_ms, o, h, low, c, v):
+    return {"t": t_ms, "o": o, "h": h, "l": low, "c": c, "v": v, "vw": c, "n": 1}
 
 
 # 2024-01-02 / 2024-01-03 の ET 深夜を UTC ms で (05:00 UTC)
@@ -82,11 +82,15 @@ def test_get_polygon_data_live_smoke(capsys):
 def test_grouped_daily_live_smoke(capsys):
     # 直近の平日を数日遡って試す (祝日/週末を避ける)
     for back in range(1, 8):
-        date = (pd.Timestamp.utcnow().normalize() - pd.Timedelta(days=back)).strftime("%Y-%m-%d")
+        date = (pd.Timestamp.utcnow().normalize() - pd.Timedelta(days=back)).strftime(
+            "%Y-%m-%d"
+        )
         gd = get_polygon_grouped_daily(date)
         if not gd.empty:
             with capsys.disabled():
-                print(f"\n===== Polygon Grouped Daily {date}: 1 request で {len(gd)} 銘柄 =====")
+                print(
+                    f"\n===== Polygon Grouped Daily {date}: 1 request で {len(gd)} 銘柄 ====="
+                )
                 print(gd.head(3).to_string())
             assert gd.index.name == "symbol"
             assert list(gd.columns) == ["Open", "High", "Low", "Close", "Volume"]
@@ -98,9 +102,15 @@ def test_grouped_daily_live_smoke(capsys):
 def test_get_polygon_data_schema_offline(monkeypatch):
     monkeypatch.setenv("POLYGON_API_KEY", "dummy")
     # raw と adjusted で同一 payload を返す (簡略)
-    payload = {"ticker": "AAPL", "status": "OK", "resultsCount": 2,
-               "results": [_agg(_T1, 100.0, 102.0, 99.0, 101.5, 1234567),
-                           _agg(_T2, 101.0, 103.0, 100.0, 102.5, 2345678)]}
+    payload = {
+        "ticker": "AAPL",
+        "status": "OK",
+        "resultsCount": 2,
+        "results": [
+            _agg(_T1, 100.0, 102.0, 99.0, 101.5, 1234567),
+            _agg(_T2, 101.0, 103.0, 100.0, 102.5, 2345678),
+        ],
+    }
     monkeypatch.setattr(pg.requests, "get", lambda *a, **k: _FakeResp(payload))
     monkeypatch.setattr(pg, "_throttle", lambda: None)
 
@@ -115,10 +125,30 @@ def test_get_polygon_data_schema_offline(monkeypatch):
 
 def test_grouped_daily_schema_offline(monkeypatch):
     monkeypatch.setenv("POLYGON_API_KEY", "dummy")
-    payload = {"status": "OK", "resultsCount": 2, "results": [
-        {"T": "AAPL", "o": 100.0, "h": 102.0, "l": 99.0, "c": 101.5, "v": 1234567, "t": _T1},
-        {"T": "MSFT", "o": 200.0, "h": 205.0, "l": 199.0, "c": 203.0, "v": 987654, "t": _T1},
-    ]}
+    payload = {
+        "status": "OK",
+        "resultsCount": 2,
+        "results": [
+            {
+                "T": "AAPL",
+                "o": 100.0,
+                "h": 102.0,
+                "l": 99.0,
+                "c": 101.5,
+                "v": 1234567,
+                "t": _T1,
+            },
+            {
+                "T": "MSFT",
+                "o": 200.0,
+                "h": 205.0,
+                "l": 199.0,
+                "c": 203.0,
+                "v": 987654,
+                "t": _T1,
+            },
+        ],
+    }
     monkeypatch.setattr(pg.requests, "get", lambda *a, **k: _FakeResp(payload))
     monkeypatch.setattr(pg, "_throttle", lambda: None)
 

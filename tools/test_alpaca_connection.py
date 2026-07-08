@@ -9,8 +9,8 @@ Usage:
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
+import sys
 
 # プロジェクトルートをパスに追加
 PROJECT_ROOT = Path(__file__).parent.parent

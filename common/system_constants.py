@@ -59,9 +59,13 @@ SYSTEM4_SMA_PERIOD = 200
 #   旧値: SYSTEM5_MIN_DOLLAR_VOLUME=25_000_000 は spec の桁違い かつ 未使用 (dead)、
 #         SYSTEM5_ATR_PCT_THRESHOLD=0.025 は spec の 4% を下回る緩め設定。
 #   Case A では spec 値に是正 + 実 gate として core/system5.py の filter に接続。
-SYSTEM5_MIN_PRICE = 5.0  # docs 未記載だが penny stock 除外の operational safety として維持
+SYSTEM5_MIN_PRICE = (
+    5.0  # docs 未記載だが penny stock 除外の operational safety として維持
+)
 SYSTEM5_MIN_AVG_VOLUME_50 = 500_000  # spec: 過去50日の平均出来高 > 500k 株
-SYSTEM5_MIN_DOLLAR_VOLUME = 2_500_000  # spec: 過去50日の平均売買代金 > 2.5M $ (旧 25M dead から是正)
+SYSTEM5_MIN_DOLLAR_VOLUME = (
+    2_500_000  # spec: 過去50日の平均売買代金 > 2.5M $ (旧 25M dead から是正)
+)
 SYSTEM5_ATR_PCT_THRESHOLD = 0.04  # spec: ATR > 4% (旧 2.5% から是正)
 SYSTEM5_ADX_THRESHOLD = 55  # ADX7 > 55
 SYSTEM5_ADX_PERIOD = 7
@@ -274,12 +278,42 @@ _PIPELINE_TRDLIST_COND: dict[str, str] = {
 
 def _build_pipeline_phases(sysname: str) -> list[dict[str, object]]:
     return [
-        {"name": "Tgt", "label": "Tgt", "condition": "ユニバース対象銘柄数", "measurable_from_grouped_daily": True},
-        {"name": "FILpass", "label": "FILpass", "condition": _PIPELINE_FILPASS_COND[sysname], "measurable_from_grouped_daily": True},
-        {"name": "STUpass", "label": "STUpass", "condition": _PIPELINE_STUPASS_COND[sysname], "measurable_from_grouped_daily": False},
-        {"name": "TRDlist", "label": "TRDlist", "condition": _PIPELINE_TRDLIST_COND[sysname], "measurable_from_grouped_daily": False},
-        {"name": "Entry", "label": "Entry", "condition": "allocation 後エントリ発火", "measurable_from_grouped_daily": False},
-        {"name": "Exit", "label": "Exit", "condition": "本日手仕舞い発火", "measurable_from_grouped_daily": False},
+        {
+            "name": "Tgt",
+            "label": "Tgt",
+            "condition": "ユニバース対象銘柄数",
+            "measurable_from_grouped_daily": True,
+        },
+        {
+            "name": "FILpass",
+            "label": "FILpass",
+            "condition": _PIPELINE_FILPASS_COND[sysname],
+            "measurable_from_grouped_daily": True,
+        },
+        {
+            "name": "STUpass",
+            "label": "STUpass",
+            "condition": _PIPELINE_STUPASS_COND[sysname],
+            "measurable_from_grouped_daily": False,
+        },
+        {
+            "name": "TRDlist",
+            "label": "TRDlist",
+            "condition": _PIPELINE_TRDLIST_COND[sysname],
+            "measurable_from_grouped_daily": False,
+        },
+        {
+            "name": "Entry",
+            "label": "Entry",
+            "condition": "allocation 後エントリ発火",
+            "measurable_from_grouped_daily": False,
+        },
+        {
+            "name": "Exit",
+            "label": "Exit",
+            "condition": "本日手仕舞い発火",
+            "measurable_from_grouped_daily": False,
+        },
     ]
 
 

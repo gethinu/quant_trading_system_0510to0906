@@ -22,7 +22,11 @@ import pytest
 
 LOADSIGNALS = (
     Path(__file__).resolve().parents[2]
-    / "apps" / "dashboards" / "alpaca-next" / "lib" / "loadSignals.ts"
+    / "apps"
+    / "dashboards"
+    / "alpaca-next"
+    / "lib"
+    / "loadSignals.ts"
 )
 
 
@@ -37,8 +41,9 @@ class TestLoadSignalsSelectionContract:
 
     def test_date_extract_helper_present(self, ts_text: str):
         """YYYYMMDD 8 桁を filename から数値化する helper が存在."""
-        assert "extractSignalDate" in ts_text, \
-            "date 抽出 helper が消失. lexical string sort 復活のリスク"
+        assert (
+            "extractSignalDate" in ts_text
+        ), "date 抽出 helper が消失. lexical string sort 復活のリスク"
         # regex は today_signals_(\d{8})\.json を捉える
         assert r"today_signals_(\d{8})\.json" in ts_text
 
@@ -48,9 +53,9 @@ class TestLoadSignalsSelectionContract:
         naive 実装が復活していないこと.
         """
         # sort に comparator を渡している行がある (numeric 降順)
-        assert "b.d - a.d" in ts_text or "b.date - a.date" in ts_text, (
-            "date 数値降順 comparator が消失. lexical sort 復活の疑い"
-        )
+        assert (
+            "b.d - a.d" in ts_text or "b.date - a.date" in ts_text
+        ), "date 数値降順 comparator が消失. lexical sort 復活の疑い"
         # 末尾拾い (files[files.length - 1]) が復活していない
         assert "files[files.length - 1]" not in ts_text, (
             "末尾拾い (lexically 最後) 実装は復活禁止. "
@@ -59,8 +64,9 @@ class TestLoadSignalsSelectionContract:
 
     def test_empty_stub_filter_present(self, ts_text: str):
         """空 stub file を弾く filter (MIN_USABLE_BYTES / total_signals guard)."""
-        assert "isUsableSignalFile" in ts_text, \
-            "stub file guard が消失. stale stub が real data を上書きするリスク"
+        assert (
+            "isUsableSignalFile" in ts_text
+        ), "stub file guard が消失. stale stub が real data を上書きするリスク"
         assert "MIN_USABLE_BYTES" in ts_text
         # portfolio.total_signals もしくは signals 配列を見ている
         assert "total_signals" in ts_text or "signals" in ts_text

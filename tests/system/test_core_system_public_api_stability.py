@@ -37,7 +37,6 @@ import inspect
 
 import pytest
 
-
 # Mapping: system_name -> { function_name -> expected_parameter_names }.
 # Ground truth captured from ``inspect.signature`` on ``claude/monitor-webapp
 # @ b7ffad1``. ``*args`` / ``**kwargs`` sinks are stored with their sentinel

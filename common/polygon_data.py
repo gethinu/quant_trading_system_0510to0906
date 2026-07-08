@@ -29,10 +29,10 @@ Bulk の強み:
 
 from __future__ import annotations
 
+from datetime import datetime
 import logging
 import os
 import time
-from datetime import datetime
 
 import pandas as pd
 import requests
@@ -120,7 +120,9 @@ def _request(url: str, params: dict, api_key: str) -> dict | None:
         try:
             r = requests.get(url, params=params, timeout=_REQUEST_TIMEOUT)
         except Exception as exc:  # pragma: no cover - network error は None 扱い
-            logger.warning("Polygon リクエスト失敗 (%s/%s): %s", attempt + 1, _MAX_RETRIES, exc)
+            logger.warning(
+                "Polygon リクエスト失敗 (%s/%s): %s", attempt + 1, _MAX_RETRIES, exc
+            )
             continue
         if r.status_code == 200:
             return r.json()
@@ -128,7 +130,12 @@ def _request(url: str, params: dict, api_key: str) -> dict | None:
             return None  # symbol 不在 → EODHD と同じく None
         if r.status_code == 429:
             backoff = _MIN_REQUEST_INTERVAL * (attempt + 1)
-            logger.warning("Polygon 429 rate limit, %.0fs 待機 (%s/%s)", backoff, attempt + 1, _MAX_RETRIES)
+            logger.warning(
+                "Polygon 429 rate limit, %.0fs 待機 (%s/%s)",
+                backoff,
+                attempt + 1,
+                _MAX_RETRIES,
+            )
             time.sleep(backoff)
             continue
         logger.warning("Polygon ステータス %s - %s", r.status_code, url)
@@ -168,7 +175,9 @@ def get_polygon_data(symbol: str) -> pd.DataFrame | None:
     base_params = {"sort": "asc", "limit": 50000}
 
     def _fetch(adjusted: bool) -> pd.DataFrame | None:
-        data = _request(url, {**base_params, "adjusted": str(adjusted).lower()}, api_key)
+        data = _request(
+            url, {**base_params, "adjusted": str(adjusted).lower()}, api_key
+        )
         if not data:
             return None
         results = data.get("results")
@@ -198,10 +207,18 @@ def get_polygon_data(symbol: str) -> pd.DataFrame | None:
             adj = _fetch(adjusted=True)
             if adj is not None and not adj.empty and "c" in adj:
                 adj_idx = pd.to_datetime(adj["t"], unit="ms", utc=True)
-                adj_idx = adj_idx.dt.tz_convert("America/New_York").dt.tz_localize(None).dt.normalize()
-                adj_close = pd.Series(adj["c"].astype("float64").values, index=pd.DatetimeIndex(adj_idx))
+                adj_idx = (
+                    adj_idx.dt.tz_convert("America/New_York")
+                    .dt.tz_localize(None)
+                    .dt.normalize()
+                )
+                adj_close = pd.Series(
+                    adj["c"].astype("float64").values, index=pd.DatetimeIndex(adj_idx)
+                )
         except Exception as exc:  # pragma: no cover - 調整値は best-effort
-            logger.warning("%s: 調整後終値の取得に失敗 (AdjClose=Close で代替) - %s", symbol, exc)
+            logger.warning(
+                "%s: 調整後終値の取得に失敗 (AdjClose=Close で代替) - %s", symbol, exc
+            )
 
         if adj_close is not None:
             df["AdjClose"] = adj_close.reindex(df.index).astype("float64")

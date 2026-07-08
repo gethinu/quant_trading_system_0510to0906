@@ -29,7 +29,6 @@ from common.alpaca_trading import (
     submit_paper_exit_order,
 )
 
-
 # -------------------------------------------------------------------------
 # client_order_id parsing
 # -------------------------------------------------------------------------
@@ -41,12 +40,23 @@ class TestClientOrderIdParsing:
         assert parse_system_from_client_order_id("system7-SPY-20260702") == "system7"
 
     def test_entry_date_extracted(self):
-        assert parse_entry_date_from_client_order_id("system1-AAPL-20260702") == "2026-07-02"
+        assert (
+            parse_entry_date_from_client_order_id("system1-AAPL-20260702")
+            == "2026-07-02"
+        )
 
     def test_reject_protect_and_exit_prefix(self):
         # exit_check 側で生成した coid を entry と誤認しない
-        assert parse_system_from_client_order_id("protect-system1-AAPL-20260702-protect-stop") is None
-        assert parse_system_from_client_order_id("exit-system2-TSLA-20260702-exit-time") is None
+        assert (
+            parse_system_from_client_order_id(
+                "protect-system1-AAPL-20260702-protect-stop"
+            )
+            is None
+        )
+        assert (
+            parse_system_from_client_order_id("exit-system2-TSLA-20260702-exit-time")
+            is None
+        )
 
     def test_reject_garbage(self):
         assert parse_system_from_client_order_id(None) is None
@@ -62,17 +72,23 @@ class TestClientOrderIdParsing:
 
 class TestHydrateSystemTags:
     def test_entry_orders_index_wins_over_tracker(self):
-        snap = PositionSnapshot(symbol="AAPL", qty=10, side="long", avg_entry_price=100.0)
+        snap = PositionSnapshot(
+            symbol="AAPL", qty=10, side="long", avg_entry_price=100.0
+        )
         hydrate_system_tags(
             [snap],
             tracker={"AAPL": {"system": "system3", "entry_date": "2026-06-01"}},
-            entry_orders_index={"AAPL": {"system": "system1", "entry_date": "2026-07-01"}},
+            entry_orders_index={
+                "AAPL": {"system": "system1", "entry_date": "2026-07-01"}
+            },
         )
         assert snap.system == "system1"
         assert snap.entry_date == "2026-07-01"
 
     def test_tracker_fallback_when_index_empty(self):
-        snap = PositionSnapshot(symbol="MSFT", qty=5, side="long", avg_entry_price=400.0)
+        snap = PositionSnapshot(
+            symbol="MSFT", qty=5, side="long", avg_entry_price=400.0
+        )
         hydrate_system_tags(
             [snap],
             tracker={"MSFT": {"system": "system4", "entry_date": "2026-06-15"}},
@@ -112,9 +128,12 @@ class TestHoldingDays:
 def _snap(symbol, system, side, qty, entry_price, entry_date) -> PositionSnapshot:
     signed_qty = qty if side == "long" else -qty
     return PositionSnapshot(
-        symbol=symbol, qty=signed_qty, side=side,
+        symbol=symbol,
+        qty=signed_qty,
+        side=side,
         avg_entry_price=entry_price,
-        system=system, entry_date=entry_date,
+        system=system,
+        entry_date=entry_date,
     )
 
 
@@ -123,7 +142,8 @@ class TestBuildExitOrders:
         # S2: max_holding_days=2 → holding=2 で成行 close (sell)
         snap = _snap("TSLA", "system2", "short", 8, 250.0, "2026-06-30")
         exits = build_exit_orders_from_positions(
-            [snap], today="2026-07-02",
+            [snap],
+            today="2026-07-02",
             atr_by_symbol={"TSLA": {10: 5.0}},
         )
         time_exits = [e for e in exits if e.reason == ExitReasonCode.TIME]
@@ -135,12 +155,15 @@ class TestBuildExitOrders:
         assert te.qty == 8
         assert te.holding_days == 2
         assert te.max_holding_days == 2
-        assert te.client_order_id and te.client_order_id.startswith("exit-system2-TSLA-")
+        assert te.client_order_id and te.client_order_id.startswith(
+            "exit-system2-TSLA-"
+        )
 
     def test_system2_time_based_not_triggered_before_max(self):
         snap = _snap("TSLA", "system2", "short", 8, 250.0, "2026-07-01")
         exits = build_exit_orders_from_positions(
-            [snap], today="2026-07-02",
+            [snap],
+            today="2026-07-02",
             atr_by_symbol={"TSLA": {10: 5.0}},
         )
         time_exits = [e for e in exits if e.reason == ExitReasonCode.TIME]
@@ -149,7 +172,8 @@ class TestBuildExitOrders:
     def test_system3_time_based_at_3_days(self):
         snap = _snap("MSFT", "system3", "long", 5, 420.0, "2026-06-29")
         exits = build_exit_orders_from_positions(
-            [snap], today="2026-07-02",
+            [snap],
+            today="2026-07-02",
             atr_by_symbol={"MSFT": {10: 4.0}},
         )
         assert any(e.reason == ExitReasonCode.TIME and e.side == "sell" for e in exits)
@@ -157,7 +181,8 @@ class TestBuildExitOrders:
     def test_system5_time_based_at_6_days(self):
         snap = _snap("NVDA", "system5", "long", 3, 120.0, "2026-06-26")
         exits = build_exit_orders_from_positions(
-            [snap], today="2026-07-02",
+            [snap],
+            today="2026-07-02",
             atr_by_symbol={"NVDA": {10: 2.0}},
         )
         te = [e for e in exits if e.reason == ExitReasonCode.TIME]
@@ -167,7 +192,8 @@ class TestBuildExitOrders:
     def test_system6_time_based_at_3_days_short(self):
         snap = _snap("GME", "system6", "short", 4, 30.0, "2026-06-29")
         exits = build_exit_orders_from_positions(
-            [snap], today="2026-07-02",
+            [snap],
+            today="2026-07-02",
             atr_by_symbol={"GME": {10: 1.0}},
         )
         te = [e for e in exits if e.reason == ExitReasonCode.TIME]
@@ -178,8 +204,10 @@ class TestBuildExitOrders:
         # S7: SPY short hedge, breakout (high >= max_70) → 成行 close (buy = short cover)
         snap = _snap("SPY", "system7", "short", 3, 540.0, "2026-06-15")
         exits = build_exit_orders_from_positions(
-            [snap], today="2026-07-02",
-            spy_high=560.0, spy_max70=555.0,
+            [snap],
+            today="2026-07-02",
+            spy_high=560.0,
+            spy_max70=555.0,
         )
         breakouts = [e for e in exits if e.reason == ExitReasonCode.BREAKOUT]
         assert len(breakouts) == 1
@@ -189,8 +217,10 @@ class TestBuildExitOrders:
     def test_system7_no_breakout_when_below_max70(self):
         snap = _snap("SPY", "system7", "short", 3, 540.0, "2026-06-15")
         exits = build_exit_orders_from_positions(
-            [snap], today="2026-07-02",
-            spy_high=550.0, spy_max70=555.0,
+            [snap],
+            today="2026-07-02",
+            spy_high=550.0,
+            spy_max70=555.0,
         )
         assert not any(e.reason == ExitReasonCode.BREAKOUT for e in exits)
 
@@ -198,7 +228,8 @@ class TestBuildExitOrders:
         # S1 long: trailing 25% + stop 5×ATR20 protection
         snap = _snap("AAPL", "system1", "long", 10, 195.0, "2026-07-01")
         exits = build_exit_orders_from_positions(
-            [snap], today="2026-07-02",
+            [snap],
+            today="2026-07-02",
             atr_by_symbol={"AAPL": {20: 3.0}},
         )
         # 1) trailing_stop
@@ -217,7 +248,8 @@ class TestBuildExitOrders:
     def test_system4_generates_trailing_20_pct(self):
         snap = _snap("JPM", "system4", "long", 5, 200.0, "2026-07-01")
         exits = build_exit_orders_from_positions(
-            [snap], today="2026-07-02",
+            [snap],
+            today="2026-07-02",
             atr_by_symbol={"JPM": {40: 2.0}},
         )
         trail = [e for e in exits if e.reason == ExitReasonCode.PROTECT_TRAIL]
@@ -228,7 +260,8 @@ class TestBuildExitOrders:
         # S2 short entry_price=250, target=250/(1.04)≈240.38, stop=250+3×5=265
         snap = _snap("TSLA", "system2", "short", 8, 250.0, "2026-07-02")
         exits = build_exit_orders_from_positions(
-            [snap], today="2026-07-02",
+            [snap],
+            today="2026-07-02",
             atr_by_symbol={"TSLA": {10: 5.0}},
         )
         target = [e for e in exits if e.reason == ExitReasonCode.PROTECT_TARGET]
@@ -243,7 +276,8 @@ class TestBuildExitOrders:
         # S5 long entry=120, ATR10=2 → target = 120 + 1×2 = 122
         snap = _snap("NVDA", "system5", "long", 3, 120.0, "2026-07-02")
         exits = build_exit_orders_from_positions(
-            [snap], today="2026-07-02",
+            [snap],
+            today="2026-07-02",
             atr_by_symbol={"NVDA": {10: 2.0}},
         )
         target = [e for e in exits if e.reason == ExitReasonCode.PROTECT_TARGET]
@@ -257,7 +291,8 @@ class TestBuildExitOrders:
             "protect-system1-AAPL-20260701-protect-stop",
         }
         exits = build_exit_orders_from_positions(
-            [snap], today="2026-07-02",
+            [snap],
+            today="2026-07-02",
             atr_by_symbol={"AAPL": {20: 3.0}},
             existing_protect_coids=existing,
         )
@@ -268,7 +303,8 @@ class TestBuildExitOrders:
         # time-based が発火した日は protection は追加発注しない (優先順位テスト)
         snap = _snap("TSLA", "system2", "short", 8, 250.0, "2026-06-30")
         exits = build_exit_orders_from_positions(
-            [snap], today="2026-07-02",
+            [snap],
+            today="2026-07-02",
             atr_by_symbol={"TSLA": {10: 5.0}},
         )
         assert any(e.reason == ExitReasonCode.TIME for e in exits)
@@ -293,8 +329,12 @@ class TestBuildExitOrders:
 class TestSubmitPaperExitOrder:
     def _sample(self) -> PreparedExit:
         return PreparedExit(
-            symbol="AAPL", system="system1", qty=10, side="sell",
-            order_type="market", reason=ExitReasonCode.TIME,
+            symbol="AAPL",
+            system="system1",
+            qty=10,
+            side="sell",
+            order_type="market",
+            reason=ExitReasonCode.TIME,
             client_order_id="exit-system1-AAPL-20260702-exit-time",
         )
 
@@ -336,6 +376,7 @@ class TestSubmitPaperExitOrder:
 
         # broker_alpaca.submit_order_with_retry を差し替え
         import common.alpaca_trading as at
+
         monkeypatch.setattr(at.ba, "submit_order_with_retry", fake_submit)
 
         po = self._sample()

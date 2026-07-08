@@ -15,13 +15,11 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock
 
 import pandas as pd
 import pytest
 
 from common.cache_manager import CacheManager
-
 
 # ---------- fixtures ---------------------------------------------------------
 
@@ -58,14 +56,16 @@ def cache_manager(tmp_path):
 def _df_with_ohlc(n_rows: int) -> pd.DataFrame:
     """date + OHLCV のみで指標列が全く無い df."""
     dates = pd.bdate_range("2026-01-01", periods=n_rows)
-    return pd.DataFrame({
-        "date": dates,
-        "open": [100.0 + i * 0.1 for i in range(n_rows)],
-        "high": [101.0 + i * 0.1 for i in range(n_rows)],
-        "low": [99.0 + i * 0.1 for i in range(n_rows)],
-        "close": [100.5 + i * 0.1 for i in range(n_rows)],
-        "volume": [1_000_000 + i * 1000 for i in range(n_rows)],
-    })
+    return pd.DataFrame(
+        {
+            "date": dates,
+            "open": [100.0 + i * 0.1 for i in range(n_rows)],
+            "high": [101.0 + i * 0.1 for i in range(n_rows)],
+            "low": [99.0 + i * 0.1 for i in range(n_rows)],
+            "close": [100.5 + i * 0.1 for i in range(n_rows)],
+            "volume": [1_000_000 + i * 1000 for i in range(n_rows)],
+        }
+    )
 
 
 # ---------- missing rolling → base+tail fallback -----------------------------
@@ -120,7 +120,8 @@ class TestRecomputeBranch:
                 "AAPL", df, tmp_path / "AAPL.feather"
             )
         assert any(
-            "missing indicators" in rec.message and "attempting recompute" in rec.message
+            "missing indicators" in rec.message
+            and "attempting recompute" in rec.message
             for rec in caplog.records
         ), (
             "OHLCV のみの df を渡したのに 'attempting recompute' が出ていない。"
@@ -184,9 +185,12 @@ class TestRecomputeFailBranch:
         assert result is not None
 
         # (2) WARN が出ている ← ここが decisive assertion
-        warns = [rec for rec in caplog.records
-                 if rec.levelno >= logging.WARNING
-                 and "Recompute did not produce required indicators" in rec.message]
+        warns = [
+            rec
+            for rec in caplog.records
+            if rec.levelno >= logging.WARNING
+            and "Recompute did not produce required indicators" in rec.message
+        ]
         assert warns, (
             "'Recompute did not produce required indicators' WARN が出ていない。"
             "silent degradation の入口が消えているか、branch が変わった可能性。"
@@ -195,9 +199,7 @@ class TestRecomputeFailBranch:
         # ticker 名がログに含まれる
         assert any("AAPL" in r.message for r in warns)
 
-    def test_recompute_fail_returns_df_without_required_indicators(
-        self, cache_manager
-    ):
+    def test_recompute_fail_returns_df_without_required_indicators(self, cache_manager):
         """★ silent degradation の decisive 検知.
 
         ok=False 経路では df がそのまま返る → 下流が「指標が無い」ことに

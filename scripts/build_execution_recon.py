@@ -241,7 +241,8 @@ def build_recon(
     return {
         "version": "1.0",
         "date": date_str or (signals or {}).get("date") or "",
-        "generated_at": generated_at or datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "generated_at": generated_at
+        or datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "inputs": {
             "signals": signals is not None,
             "paper_orders": paper_orders is not None,
@@ -258,24 +259,47 @@ def _default_path(results_dir: Path, stem: str, date_str: str) -> Path:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--date", help="対象日 (YYYY-MM-DD)。default paths の解決に使う。")
+    parser.add_argument(
+        "--date", help="対象日 (YYYY-MM-DD)。default paths の解決に使う。"
+    )
     parser.add_argument("--signals-json", help="today_signals JSON path。")
     parser.add_argument("--paper-orders-json", help="paper_orders JSON path。")
     parser.add_argument("--exit-orders-json", help="exit_orders JSON path。")
-    parser.add_argument("--output-json", help="recon 出力先 (default: results_csv/recon_YYYYMMDD.json)。")
-    parser.add_argument("--results-dir", default="results_csv", help="default path 解決の基準 dir。")
-    parser.add_argument("--account-equity", type=float, default=None, help="口座残高 (通知表示用)。")
+    parser.add_argument(
+        "--output-json",
+        help="recon 出力先 (default: results_csv/recon_YYYYMMDD.json)。",
+    )
+    parser.add_argument(
+        "--results-dir", default="results_csv", help="default path 解決の基準 dir。"
+    )
+    parser.add_argument(
+        "--account-equity", type=float, default=None, help="口座残高 (通知表示用)。"
+    )
     parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args(argv)
 
-    logging.basicConfig(level=str(args.log_level).upper(), format="%(levelname)s: %(message)s")
+    logging.basicConfig(
+        level=str(args.log_level).upper(), format="%(levelname)s: %(message)s"
+    )
 
     results_dir = Path(args.results_dir)
     date_str = args.date or datetime.now().strftime("%Y-%m-%d")
 
-    signals_path = Path(args.signals_json) if args.signals_json else _default_path(results_dir, "today_signals", date_str)
-    paper_path = Path(args.paper_orders_json) if args.paper_orders_json else _default_path(results_dir, "paper_orders", date_str)
-    exit_path = Path(args.exit_orders_json) if args.exit_orders_json else _default_path(results_dir, "exit_orders", date_str)
+    signals_path = (
+        Path(args.signals_json)
+        if args.signals_json
+        else _default_path(results_dir, "today_signals", date_str)
+    )
+    paper_path = (
+        Path(args.paper_orders_json)
+        if args.paper_orders_json
+        else _default_path(results_dir, "paper_orders", date_str)
+    )
+    exit_path = (
+        Path(args.exit_orders_json)
+        if args.exit_orders_json
+        else _default_path(results_dir, "exit_orders", date_str)
+    )
 
     signals = _load_json(signals_path)
     paper_orders = _load_json(paper_path)
@@ -298,7 +322,11 @@ def main(argv: list[str] | None = None) -> int:
         account_equity=args.account_equity,
     )
 
-    out_path = Path(args.output_json) if args.output_json else _default_path(results_dir, "recon", date_str)
+    out_path = (
+        Path(args.output_json)
+        if args.output_json
+        else _default_path(results_dir, "recon", date_str)
+    )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     tmp = out_path.with_suffix(out_path.suffix + ".tmp")
     tmp.write_text(json.dumps(recon, ensure_ascii=False, indent=2), encoding="utf-8")

@@ -29,17 +29,36 @@ _NOOP_CAPS = {
 def _df(n_long: int, n_short: int, pv: float = 1000.0) -> pd.DataFrame:
     rows = []
     for i in range(n_long):
-        rows.append({"symbol": f"L{i}", "system": "system1", "side": "long", "position_value": pv})
+        rows.append(
+            {
+                "symbol": f"L{i}",
+                "system": "system1",
+                "side": "long",
+                "position_value": pv,
+            }
+        )
     for i in range(n_short):
-        rows.append({"symbol": f"S{i}", "system": "system2", "side": "short", "position_value": pv})
+        rows.append(
+            {
+                "symbol": f"S{i}",
+                "system": "system2",
+                "side": "short",
+                "position_value": pv,
+            }
+        )
     return pd.DataFrame(rows)
 
 
 def test_default_caps_are_noop():
     df = _df(5, 5)
     out, report = _apply_portfolio_caps(
-        df, caps=_NOOP_CAPS, active_positions=None, symbol_system_map=None,
-        long_systems=["system1"], short_systems=["system2"], equity=100000.0,
+        df,
+        caps=_NOOP_CAPS,
+        active_positions=None,
+        symbol_system_map=None,
+        long_systems=["system1"],
+        short_systems=["system2"],
+        equity=100000.0,
     )
     assert len(out) == 10
     assert report["applied"] is True
@@ -50,8 +69,13 @@ def test_total_count_cap_trims_tail():
     caps = {**_NOOP_CAPS, "max_total_positions": 6}
     df = _df(5, 5)
     out, report = _apply_portfolio_caps(
-        df, caps=caps, active_positions=None, symbol_system_map=None,
-        long_systems=["system1"], short_systems=["system2"], equity=100000.0,
+        df,
+        caps=caps,
+        active_positions=None,
+        symbol_system_map=None,
+        long_systems=["system1"],
+        short_systems=["system2"],
+        equity=100000.0,
     )
     assert len(out) == 6
     assert report["kept"]["total"] == 6
@@ -62,8 +86,13 @@ def test_long_count_cap():
     caps = {**_NOOP_CAPS, "max_long_positions": 2}
     df = _df(5, 3)
     out, report = _apply_portfolio_caps(
-        df, caps=caps, active_positions=None, symbol_system_map=None,
-        long_systems=["system1"], short_systems=["system2"], equity=100000.0,
+        df,
+        caps=caps,
+        active_positions=None,
+        symbol_system_map=None,
+        long_systems=["system1"],
+        short_systems=["system2"],
+        equity=100000.0,
     )
     kept_long = (out["side"] == "long").sum()
     assert kept_long == 2
@@ -76,8 +105,13 @@ def test_gross_exposure_cap_trims():
     caps = {**_NOOP_CAPS, "max_gross_exposure_pct": 0.6}
     df = _df(5, 5, pv=1000.0)
     out, report = _apply_portfolio_caps(
-        df, caps=caps, active_positions=None, symbol_system_map=None,
-        long_systems=["system1"], short_systems=["system2"], equity=10000.0,
+        df,
+        caps=caps,
+        active_positions=None,
+        symbol_system_map=None,
+        long_systems=["system1"],
+        short_systems=["system2"],
+        equity=10000.0,
     )
     assert len(out) == 6  # $6000 分だけ通る
     assert report["trimmed"].get("gross_exposure", 0) == 4
@@ -85,6 +119,7 @@ def test_gross_exposure_cap_trims():
 
 def test_held_positions_reduce_long_allowance():
     """既に system1 (long) を 8 保有 → max_long 10 でも新規 long は 2 まで。"""
+
     class _Pos:
         def __init__(self, symbol):
             self.symbol = symbol
@@ -96,8 +131,13 @@ def test_held_positions_reduce_long_allowance():
     sym_map = {f"H{i}": "system1" for i in range(8)}
     df = _df(5, 0)
     out, report = _apply_portfolio_caps(
-        df, caps=caps, active_positions=positions, symbol_system_map=sym_map,
-        long_systems=["system1"], short_systems=["system2"], equity=100000.0,
+        df,
+        caps=caps,
+        active_positions=positions,
+        symbol_system_map=sym_map,
+        long_systems=["system1"],
+        short_systems=["system2"],
+        equity=100000.0,
     )
     assert report["held"]["long"] == 8
     assert report["allow"]["long"] == 2
@@ -106,8 +146,13 @@ def test_held_positions_reduce_long_allowance():
 
 def test_empty_df_returns_noop():
     out, report = _apply_portfolio_caps(
-        pd.DataFrame(), caps=_NOOP_CAPS, active_positions=None, symbol_system_map=None,
-        long_systems=["system1"], short_systems=["system2"], equity=100000.0,
+        pd.DataFrame(),
+        caps=_NOOP_CAPS,
+        active_positions=None,
+        symbol_system_map=None,
+        long_systems=["system1"],
+        short_systems=["system2"],
+        equity=100000.0,
     )
     assert out.empty
     assert report["applied"] is False

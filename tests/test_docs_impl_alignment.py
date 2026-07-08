@@ -20,8 +20,8 @@
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
+import re
 
 import pytest
 
@@ -113,9 +113,9 @@ class TestSystem4RSI4Alignment:
 
     def test_docs_mentions_rsi4_exclusion(self, system4_doc_text: str) -> None:
         """docs に RSI4 除外条件が明記されていること。"""
-        assert ("RSI4" in system4_doc_text) or ("4日RSI" in system4_doc_text), (
-            "docs に RSI4 / 4日RSI の記述が見当たりません"
-        )
+        assert ("RSI4" in system4_doc_text) or (
+            "4日RSI" in system4_doc_text
+        ), "docs に RSI4 / 4日RSI の記述が見当たりません"
         exclusion_pattern = re.compile(r"(RSI4|4日RSI).{0,80}30", re.DOTALL)
         assert exclusion_pattern.search(system4_doc_text), (
             "docs/systems/システム4.txt に RSI4 と閾値 30 の関連記述が"
@@ -207,11 +207,11 @@ class TestChangeLogPresence:
     """変更履歴の明示的な marker が docs 末尾に残っていることを保証。"""
 
     def test_system4_change_log(self, system4_doc_text: str) -> None:
-        assert "2026-07-02 impl-alignment update" in system4_doc_text, (
-            "docs/systems/システム4.txt に change log marker が見当たりません。"
-        )
+        assert (
+            "2026-07-02 impl-alignment update" in system4_doc_text
+        ), "docs/systems/システム4.txt に change log marker が見当たりません。"
 
     def test_system6_change_log(self, system6_doc_text: str) -> None:
-        assert "2026-07-02 impl-alignment update" in system6_doc_text, (
-            "docs/systems/システム6.txt に change log marker が見当たりません。"
-        )
+        assert (
+            "2026-07-02 impl-alignment update" in system6_doc_text
+        ), "docs/systems/システム6.txt に change log marker が見当たりません。"

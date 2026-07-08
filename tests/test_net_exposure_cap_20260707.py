@@ -30,9 +30,23 @@ _CAPS_NET_HALF = {
 def _df(n_long: int, n_short: int, pv: float = 1000.0) -> pd.DataFrame:
     rows = []
     for i in range(n_long):
-        rows.append({"symbol": f"L{i}", "system": "system1", "side": "long", "position_value": pv})
+        rows.append(
+            {
+                "symbol": f"L{i}",
+                "system": "system1",
+                "side": "long",
+                "position_value": pv,
+            }
+        )
     for i in range(n_short):
-        rows.append({"symbol": f"S{i}", "system": "system2", "side": "short", "position_value": pv})
+        rows.append(
+            {
+                "symbol": f"S{i}",
+                "system": "system2",
+                "side": "short",
+                "position_value": pv,
+            }
+        )
     return pd.DataFrame(rows)
 
 
@@ -46,8 +60,13 @@ def test_one_sided_long_trimmed_at_net_cap():
     # equity 10k, net cap 0.5 = $5000。$1000×8 の long のみ → net が $5000 超で trim。
     df = _df(8, 0, pv=1000.0)
     out, report = _apply_portfolio_caps(
-        df, caps=_CAPS_NET_HALF, active_positions=None, symbol_system_map=None,
-        long_systems=["system1"], short_systems=["system2"], equity=10000.0,
+        df,
+        caps=_CAPS_NET_HALF,
+        active_positions=None,
+        symbol_system_map=None,
+        long_systems=["system1"],
+        short_systems=["system2"],
+        equity=10000.0,
     )
     assert len(out) == 5  # $5000 分 (5 件) まで
     assert report["trimmed"].get("net_exposure", 0) == 3
@@ -57,8 +76,13 @@ def test_balanced_book_is_noop_under_net_cap():
     # long4 + short4 = 各 $4000。net = |4000-4000| = 0 <= $5000 → 全通過。
     df = _df(4, 4, pv=1000.0)
     out, report = _apply_portfolio_caps(
-        df, caps=_CAPS_NET_HALF, active_positions=None, symbol_system_map=None,
-        long_systems=["system1"], short_systems=["system2"], equity=10000.0,
+        df,
+        caps=_CAPS_NET_HALF,
+        active_positions=None,
+        symbol_system_map=None,
+        long_systems=["system1"],
+        short_systems=["system2"],
+        equity=10000.0,
     )
     assert len(out) == 8
     assert report["trimmed"] == {}

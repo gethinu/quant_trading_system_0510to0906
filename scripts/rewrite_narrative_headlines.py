@@ -38,8 +38,8 @@ import datetime as dt
 import json
 import logging
 import os
-import re
 from pathlib import Path
+import re
 import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -84,7 +84,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="既存 headline が新 format 準拠でも上書きする。",
     )
-    p.add_argument("--model", default=None, help="narrator model 上書き (--regenerate 時のみ有効)。")
+    p.add_argument(
+        "--model",
+        default=None,
+        help="narrator model 上書き (--regenerate 時のみ有効)。",
+    )
     p.add_argument("--log-level", default="INFO", help="ログレベル。")
     return p
 
@@ -150,7 +154,9 @@ def _rewrite_one(
             return False, "narrator が空 dict を返した (API failure?)"
         # summary/per_symbol_reasons ごと入れ替え。cost もメモ。
         narrative["headline"] = new_narrative.get("headline", "")
-        narrative["summary"] = new_narrative.get("summary", narrative.get("summary", ""))
+        narrative["summary"] = new_narrative.get(
+            "summary", narrative.get("summary", "")
+        )
         narrative["per_symbol_reasons"] = new_narrative.get(
             "per_symbol_reasons", narrative.get("per_symbol_reasons", {})
         )
@@ -166,7 +172,9 @@ def _rewrite_one(
         narrative["headline_synth"] = True
 
     # audit 用の marker
-    narrative["headline_rewritten_at"] = dt.datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    narrative["headline_rewritten_at"] = (
+        dt.datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    )
     narrative["headline_prev"] = old_headline
 
     note = f"{old_headline!r} -> {narrative['headline']!r}"

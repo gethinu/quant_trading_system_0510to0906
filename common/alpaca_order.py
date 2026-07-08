@@ -15,10 +15,7 @@ import pandas as pd
 from common import broker_alpaca as ba
 from common.notifier import Notifier
 from common.position_age import load_entry_dates, save_entry_dates
-from common.position_tracker import (
-    remove_position,
-    update_positions_from_signals,
-)
+from common.position_tracker import remove_position, update_positions_from_signals
 from common.symbol_map import (
     dump_symbol_system_map,
     load_symbol_system_map,

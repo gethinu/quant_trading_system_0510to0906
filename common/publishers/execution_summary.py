@@ -60,12 +60,8 @@ def build_body(recon: dict[str, Any]) -> str:
     exit_protect = _n(p.get("exit_protect"))
 
     # 1 行目: 全体 funnel
-    lines.append(
-        f"Tgt {tgt_s} → sig {sig} → gen {gen} → entry {entry} → fill {fill}"
-    )
-    lines.append(
-        f"exit {exit_sub} (close {exit_close} / protect {exit_protect})"
-    )
+    lines.append(f"Tgt {tgt_s} → sig {sig} → gen {gen} → entry {entry} → fill {fill}")
+    lines.append(f"exit {exit_sub} (close {exit_close} / protect {exit_protect})")
 
     # long/short 充足 + 残高
     le = _n(p.get("long_entry_submitted"))
@@ -115,7 +111,9 @@ def build_body(recon: dict[str, Any]) -> str:
 
     # 入力欠損の注記 (dry-run 等で paper_orders/exit_orders が無い場合)
     inputs = recon.get("inputs", {}) or {}
-    missing = [k for k in ("signals", "paper_orders", "exit_orders") if not inputs.get(k)]
+    missing = [
+        k for k in ("signals", "paper_orders", "exit_orders") if not inputs.get(k)
+    ]
     if missing:
         lines.append(f"※ 入力欠損: {', '.join(missing)} (部分 recon)")
 

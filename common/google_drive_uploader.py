@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -184,7 +183,7 @@ if __name__ == "__main__":
     if test_file.exists():
         try:
             url = upload_to_drive(test_file)
-            print(f"✅ Upload successful!")
+            print("✅ Upload successful!")
             print(f"URL: {url}")
         except Exception as e:
             print(f"❌ Upload failed: {e}")

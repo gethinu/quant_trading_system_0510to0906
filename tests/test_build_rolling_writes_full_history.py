@@ -37,7 +37,6 @@ from __future__ import annotations
 from pathlib import Path
 import sys
 from types import SimpleNamespace
-from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -85,13 +84,31 @@ def _stale_full_backup_csv(rows: int = 501) -> pd.DataFrame:
     """
     df = _make_ohlcv(rows)
     for col in (
-        "atr10", "atr20", "atr40", "atr50",
-        "sma25", "sma50", "sma100", "sma150", "sma200",
-        "roc200", "rsi3", "rsi4", "adx7",
-        "dollarvolume20", "dollarvolume50", "avgvolume50",
-        "atr_ratio", "atr_pct",
-        "return_3d", "return_6d", "return_pct",
-        "drop3d", "hv50", "min_50", "max_70",
+        "atr10",
+        "atr20",
+        "atr40",
+        "atr50",
+        "sma25",
+        "sma50",
+        "sma100",
+        "sma150",
+        "sma200",
+        "roc200",
+        "rsi3",
+        "rsi4",
+        "adx7",
+        "dollarvolume20",
+        "dollarvolume50",
+        "avgvolume50",
+        "atr_ratio",
+        "atr_pct",
+        "return_3d",
+        "return_6d",
+        "return_pct",
+        "drop3d",
+        "hv50",
+        "min_50",
+        "max_70",
     ):
         df[col] = np.nan
     df["uptwodays"] = False
@@ -146,9 +163,7 @@ def _install_fake_settings(monkeypatch: pytest.MonkeyPatch, data_cache: Path) ->
         adaptive_min_workers=1,
         adaptive_max_workers=None,
         adaptive_report_seconds=10,
-        csv=SimpleNamespace(
-            decimal_point=".", thousands_sep=None, field_sep=","
-        ),
+        csv=SimpleNamespace(decimal_point=".", thousands_sep=None, field_sep=","),
         load_max_workers=None,
     )
     cache_cfg = SimpleNamespace(
@@ -181,6 +196,7 @@ def _install_fake_settings(monkeypatch: pytest.MonkeyPatch, data_cache: Path) ->
     # get_settings`, so we also need to patch the reference in the module
     # if it was already imported. Use setattr; safe when not imported.
     import scripts.build_rolling_with_indicators as bri
+
     monkeypatch.setattr(bri, "get_settings", lambda create_dirs=True: fake_settings)
 
 
@@ -213,20 +229,20 @@ def test_prepare_rolling_frame_recomputes_when_full_has_stale_nan_placeholders(
     result = _prepare_rolling_frame(stale, target_days=330, source="full")
 
     assert result is not None, "expected non-null result"
-    assert len(result) == 330, (
-        f"full source is tail-capped at target_days=330, got {len(result)}"
-    )
+    assert (
+        len(result) == 330
+    ), f"full source is tail-capped at target_days=330, got {len(result)}"
     # ★ core assertion — indicators must be numeric, not NaN.
     assert result["sma25"].notna().sum() >= 300, (
         "sma25 should be recomputed (>= 300 non-null in a 330-row window). "
         "If this fails the stale-NaN skip bug has regressed."
     )
-    assert result["drop3d"].notna().sum() >= 320, (
-        "drop3d should be numeric after recompute."
-    )
-    assert result["atr_ratio"].notna().sum() >= 310, (
-        "atr_ratio should be numeric after recompute."
-    )
+    assert (
+        result["drop3d"].notna().sum() >= 320
+    ), "drop3d should be numeric after recompute."
+    assert (
+        result["atr_ratio"].notna().sum() >= 310
+    ), "atr_ratio should be numeric after recompute."
     assert result["roc200"].notna().sum() > 0, "roc200 should be numeric."
 
 
@@ -252,12 +268,12 @@ def test_prepare_rolling_frame_mirrors_base_row_count(
         f"base=501 → rolling should be 501, got {len(result)}. "
         "1-row rolling bug regression."
     )
-    assert result["sma25"].notna().sum() >= 476, (
-        "sma25 from base should stay numeric (>=476 non-null in 501 rows)."
-    )
-    assert result["sma25"].iloc[-1] == pytest.approx(base["sma25"].iloc[-1]), (
-        "base's sma25 value on the last date must be preserved in rolling."
-    )
+    assert (
+        result["sma25"].notna().sum() >= 476
+    ), "sma25 from base should stay numeric (>=476 non-null in 501 rows)."
+    assert result["sma25"].iloc[-1] == pytest.approx(
+        base["sma25"].iloc[-1]
+    ), "base's sma25 value on the last date must be preserved in rolling."
 
 
 def test_read_symbol_source_prefers_base_over_full(
@@ -382,9 +398,7 @@ def test_drop_all_nan_indicator_columns_removes_only_empty_placeholders(
     * keep non-indicator columns untouched.
     """
     _install_fake_settings(monkeypatch, tmp_cache)
-    from scripts.build_rolling_with_indicators import (
-        _drop_all_nan_indicator_columns,
-    )
+    from scripts.build_rolling_with_indicators import _drop_all_nan_indicator_columns
 
     df = pd.DataFrame(
         {
@@ -402,6 +416,6 @@ def test_drop_all_nan_indicator_columns_removes_only_empty_placeholders(
     assert "sma50" in result.columns, "populated indicator must stay"
     assert "Close" in result.columns, "OHLCV must stay"
     assert "unrelated_col" in result.columns, "non-indicator column must stay"
-    assert "uptwodays" not in result.columns, (
-        "all-False boolean placeholder should be dropped so add_indicators recomputes"
-    )
+    assert (
+        "uptwodays" not in result.columns
+    ), "all-False boolean placeholder should be dropped so add_indicators recomputes"

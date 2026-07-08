@@ -14,12 +14,12 @@ Ranking: adx7 descending, top_n=20 per day.
       trade proxy として ATR10 ベースの forward-return R multiple (次日 open→next-day close) を
       利用可能なら計算。
 """
+
 from __future__ import annotations
 
 import os
-import random
-import sys
 from pathlib import Path
+import random
 
 import numpy as np
 import pandas as pd
@@ -35,15 +35,27 @@ TOP_N = 20
 WINDOW_YEARS = int(os.environ.get("D3_YEARS", "3"))
 
 REQUIRED_COLS = [
-    "date", "Open", "High", "Low", "Close", "Volume",
-    "adx7", "atr_pct", "sma100", "atr10", "rsi3",
-    "avgvolume50", "dollarvolume50",
+    "date",
+    "Open",
+    "High",
+    "Low",
+    "Close",
+    "Volume",
+    "adx7",
+    "atr_pct",
+    "sma100",
+    "atr10",
+    "rsi3",
+    "avgvolume50",
+    "dollarvolume50",
 ]
 
 
 def load_symbol(sym_path: Path) -> pd.DataFrame | None:
     try:
-        df = pd.read_csv(sym_path, usecols=lambda c: c in REQUIRED_COLS or c == "Unnamed: 0")
+        df = pd.read_csv(
+            sym_path, usecols=lambda c: c in REQUIRED_COLS or c == "Unnamed: 0"
+        )
     except Exception:
         return None
     if "date" not in df.columns:
@@ -69,8 +81,12 @@ def apply_filters(df: pd.DataFrame) -> pd.DataFrame:
 
     base = (close >= 5.0) & (adx7 > 55.0)
     fB = (base & (atr_pct > 0.025)).fillna(False)
-    fA = (base & (atr_pct > 0.04) & (avgvol > 500_000) & (dv50 > 2_500_000)).fillna(False)
-    fC = (base & (atr_pct > 0.025) & (avgvol > 500_000) & (dv50 > 2_500_000)).fillna(False)
+    fA = (base & (atr_pct > 0.04) & (avgvol > 500_000) & (dv50 > 2_500_000)).fillna(
+        False
+    )
+    fC = (base & (atr_pct > 0.025) & (avgvol > 500_000) & (dv50 > 2_500_000)).fillna(
+        False
+    )
 
     setup_common = ((close > (sma100 + atr10)) & (rsi3 < 50)).fillna(False)
     sB = fB & setup_common
@@ -86,8 +102,12 @@ def apply_filters(df: pd.DataFrame) -> pd.DataFrame:
             "High": pd.to_numeric(df["High"], errors="coerce"),
             "Low": pd.to_numeric(df["Low"], errors="coerce"),
             "atr10": atr10,
-            "fB": fB, "fA": fA, "fC": fC,
-            "sB": sB, "sA": sA, "sC": sC,
+            "fB": fB,
+            "fA": fA,
+            "fC": fC,
+            "sB": sB,
+            "sA": sA,
+            "sC": sC,
         }
     )
     return out
@@ -97,7 +117,10 @@ def main() -> None:
     all_files = sorted(ROLLING.glob("*.csv"))
     n = min(SAMPLE_N, len(all_files))
     sample = random.sample(all_files, n)
-    print(f"[D3] sampling {n}/{len(all_files)} symbols; window={WINDOW_YEARS}y", flush=True)
+    print(
+        f"[D3] sampling {n}/{len(all_files)} symbols; window={WINDOW_YEARS}y",
+        flush=True,
+    )
 
     cutoff = pd.Timestamp.now() - pd.DateOffset(years=WINDOW_YEARS)
     frames = []
@@ -128,8 +151,12 @@ def main() -> None:
     # --------- Filter-level counts ---------
     print("\n=== FILTER PASS COUNTS (row-days) ===")
     print(f"  Case B (impl):   {int(all_['fB'].sum()):,}")
-    print(f"  Case A (docs):   {int(all_['fA'].sum()):,}  ({all_['fA'].sum()/max(all_['fB'].sum(),1):.1%} of impl)")
-    print(f"  Case C (hybrid): {int(all_['fC'].sum()):,}  ({all_['fC'].sum()/max(all_['fB'].sum(),1):.1%} of impl)")
+    print(
+        f"  Case A (docs):   {int(all_['fA'].sum()):,}  ({all_['fA'].sum()/max(all_['fB'].sum(),1):.1%} of impl)"
+    )
+    print(
+        f"  Case C (hybrid): {int(all_['fC'].sum()):,}  ({all_['fC'].sum()/max(all_['fB'].sum(),1):.1%} of impl)"
+    )
 
     # --------- Setup-level counts ---------
     print("\n=== SETUP PASS COUNTS (row-days) ===")
@@ -155,14 +182,18 @@ def main() -> None:
         rows = len(t)
         avg = (rows / days) if days else 0.0
         syms = t["symbol"].nunique() if not t.empty else 0
-        print(f"  Case {lbl}: total_candidates={rows:,}  days_with_signal={days}  avg/day={avg:.2f}  unique_symbols={syms}")
+        print(
+            f"  Case {lbl}: total_candidates={rows:,}  days_with_signal={days}  avg/day={avg:.2f}  unique_symbols={syms}"
+        )
 
     # --------- Daily distribution of setup counts ---------
     print("\n=== DAILY SETUP-COUNT DISTRIBUTION ===")
     daily = all_.groupby("date")[["sB", "sA", "sC"]].sum()
     for lbl, col in [("B", "sB"), ("A", "sA"), ("C", "sC")]:
         s = daily[col]
-        print(f"  Case {lbl}: median={int(s.median())}  mean={s.mean():.1f}  p90={int(s.quantile(0.9))}  p99={int(s.quantile(0.99))}  max={int(s.max())}  zero_days={(s==0).sum()}/{len(s)}")
+        print(
+            f"  Case {lbl}: median={int(s.median())}  mean={s.mean():.1f}  p90={int(s.quantile(0.9))}  p99={int(s.quantile(0.99))}  max={int(s.max())}  zero_days={(s==0).sum()}/{len(s)}"
+        )
 
     # --------- ATR-scaled forward return (proxy trade P/L) ---------
     # System5 entry rule (spec): buy at 3% below prev close (limit order).
@@ -215,7 +246,9 @@ def main() -> None:
                     # Spec: 利食い = open of next day when target reached the previous day
                     # We approximate: if High >= target on day k, exit at open of day k+1
                     if k + 1 < n and highs[k] >= target:
-                        exit_R = (opens[k + 1] - entry) / atr10[i] if atr10[i] > 0 else 1.0
+                        exit_R = (
+                            (opens[k + 1] - entry) / atr10[i] if atr10[i] > 0 else 1.0
+                        )
                         break
                 if exit_R is None:
                     # Time exit: open of day j+7 (or last available)
@@ -225,7 +258,15 @@ def main() -> None:
                 if exit_R > 0:
                     sim_hits += 1
         if not sim_cash_R:
-            return {"n": 0, "avg_R": 0.0, "median_R": 0.0, "win": 0.0, "expectancy": 0.0, "fills": 0, "signals": sim_signals}
+            return {
+                "n": 0,
+                "avg_R": 0.0,
+                "median_R": 0.0,
+                "win": 0.0,
+                "expectancy": 0.0,
+                "fills": 0,
+                "signals": sim_signals,
+            }
         arr = np.array(sim_cash_R)
         return {
             "n": len(arr),
@@ -235,7 +276,11 @@ def main() -> None:
             "expectancy": float(arr.sum() / max(len(arr), 1)),
             "fills": sim_fills,
             "signals": sim_signals,
-            "sharpe": float(arr.mean() / arr.std() * np.sqrt(252 / 4)) if arr.std() > 0 else 0.0,  # rough
+            "sharpe": (
+                float(arr.mean() / arr.std() * np.sqrt(252 / 4))
+                if arr.std() > 0
+                else 0.0
+            ),  # rough
         }
 
     for lbl, col in [("B (impl)", "sB"), ("A (docs)", "sA"), ("C (hybrid)", "sC")]:

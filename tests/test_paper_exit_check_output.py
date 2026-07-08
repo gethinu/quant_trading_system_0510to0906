@@ -15,7 +15,6 @@ from pathlib import Path
 import subprocess
 import sys
 
-
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "paper_exit_check.py"
 
@@ -26,9 +25,12 @@ def _run(tmp_path: Path, *extra_args: str) -> tuple[int, dict]:
         sys.executable,
         str(SCRIPT),
         "--no-alpaca",
-        "--date", "2026-07-03",
-        "--output-json", str(out),
-        "--results-dir", str(tmp_path),
+        "--date",
+        "2026-07-03",
+        "--output-json",
+        str(out),
+        "--results-dir",
+        str(tmp_path),
     ]
     args.extend(extra_args)
     proc = subprocess.run(args, capture_output=True, text=True, cwd=str(ROOT))

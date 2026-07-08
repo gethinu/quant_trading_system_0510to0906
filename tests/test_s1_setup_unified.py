@@ -88,9 +88,7 @@ class TestS1SetupThreePathUnification:
         filter_mask = with_filter["filter"].astype(bool).to_numpy()
 
         batch_setup_full = (
-            _apply_setup_conditions(with_filter.copy())["setup"]
-            .astype(bool)
-            .to_numpy()
+            _apply_setup_conditions(with_filter.copy())["setup"].astype(bool).to_numpy()
         )
 
         row_setup: list[bool] = []
@@ -133,8 +131,7 @@ class TestS1SetupThreePathUnification:
         row_set = set(
             idx
             for idx, row in with_filter.iterrows()
-            if bool(row["filter"])
-            and system1_row_passes_setup(row)[0]
+            if bool(row["filter"]) and system1_row_passes_setup(row)[0]
         )
 
         assert batch_set == predicate_set, (
@@ -155,7 +152,7 @@ class TestS1SetupDocsCompliance:
         ("sma25", "sma50", "expected"),
         [
             (100.01, 100.0, True),
-            (100.0, 100.0, False),   # strict >
+            (100.0, 100.0, False),  # strict >
             (99.99, 100.0, False),
         ],
     )
@@ -184,12 +181,12 @@ class TestS1SetupDocsCompliance:
             "sma50": 100.0,
             "roc200": 0.05,
         }
-        df_lo = pd.DataFrame([{**base_row, "sma200": 50.0}])   # Close >> SMA200
+        df_lo = pd.DataFrame([{**base_row, "sma200": 50.0}])  # Close >> SMA200
         df_hi = pd.DataFrame([{**base_row, "sma200": 200.0}])  # Close << SMA200
 
         result_lo = _apply_setup_conditions(_apply_filter_conditions(df_lo))
         result_hi = _apply_setup_conditions(_apply_filter_conditions(df_hi))
         assert bool(result_lo["setup"].iloc[0]) is True
-        assert bool(result_hi["setup"].iloc[0]) is True, (
-            "SMA200 の値が setup 判定に影響してはならない (D1 修正後)"
-        )
+        assert (
+            bool(result_hi["setup"].iloc[0]) is True
+        ), "SMA200 の値が setup 判定に影響してはならない (D1 修正後)"

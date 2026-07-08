@@ -156,8 +156,7 @@ def apply_symbol_config(df: pd.DataFrame, config: dict[str, Any]) -> pd.DataFram
     enriched.columns = [c.lower() for c in enriched.columns]
 
     col_map = {
-        col.lower(): col for col in enriched.columns
-        if col.lower() not in {"date"}
+        col.lower(): col for col in enriched.columns if col.lower() not in {"date"}
     }
 
     skip_keys = {"base_price", "volatility"}
@@ -401,8 +400,7 @@ def generate_test_symbols() -> None:
         df = create_base_ohlcv(
             dates=dates,
             base_price=float(config["base_price"]),
-            volatility=float(config.get("volatility",
-                                        DEFAULT_VOLATILITY)),
+            volatility=float(config.get("volatility", DEFAULT_VOLATILITY)),
             seed=DEFAULT_RANDOM_SEED + idx,
         )
 
@@ -411,13 +409,8 @@ def generate_test_symbols() -> None:
         # upsert_both に備えて Date インデックスを date カラムに戻す
         # （apply_symbol_config で小文字に統一しているため date カラムあり）
         is_indexed = (
-            (
-                df.index.name
-                and isinstance(df.index.name, str)
-                and "Date" in df.index.name
-            )
-            or isinstance(df.index, pd.DatetimeIndex)
-        )
+            df.index.name and isinstance(df.index.name, str) and "Date" in df.index.name
+        ) or isinstance(df.index, pd.DatetimeIndex)
         if is_indexed:
             # インデックスが Date の場合、date カラムに変換
             df = df.reset_index()
@@ -491,12 +484,8 @@ def generate_test_symbols() -> None:
 
     # date カラムへの統一
     is_indexed = (
-        (
-            isinstance(spy_df.index.name, str)
-            and "Date" in spy_df.index.name
-        )
-        or isinstance(spy_df.index, pd.DatetimeIndex)
-    )
+        isinstance(spy_df.index.name, str) and "Date" in spy_df.index.name
+    ) or isinstance(spy_df.index, pd.DatetimeIndex)
     if is_indexed:
         spy_df = spy_df.reset_index()
         if "index" in spy_df.columns:

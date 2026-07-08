@@ -132,14 +132,28 @@ def test_min_notional_skips_tiny_allocations():
         "systems": {
             "sys1": {
                 "signals": [
-                    {"symbol": "BIG", "side": "BUY", "entry_price": 100.0, "weight": 0.999, "rank": 1},
-                    {"symbol": "TINY", "side": "BUY", "entry_price": 10.0, "weight": 0.001, "rank": 2},
+                    {
+                        "symbol": "BIG",
+                        "side": "BUY",
+                        "entry_price": 100.0,
+                        "weight": 0.999,
+                        "rank": 1,
+                    },
+                    {
+                        "symbol": "TINY",
+                        "side": "BUY",
+                        "entry_price": 10.0,
+                        "weight": 0.001,
+                        "rank": 2,
+                    },
                 ]
             }
         },
     }
     # tier=small ($1000), min_notional=$5 → TINY は $1 で skip_reason 付き、BIG は素通り
-    orders = signals_json_to_orders(data, tier="small", dry_run=True, min_notional_usd=5.0)
+    orders = signals_json_to_orders(
+        data, tier="small", dry_run=True, min_notional_usd=5.0
+    )
     by_sym = {o.symbol: o for o in orders}
     assert "BIG" in by_sym
     assert "TINY" in by_sym  # silent drop せず残す
@@ -165,8 +179,16 @@ def test_multi_system_flatten():
     data = {
         "date": "2026-07-01",
         "systems": {
-            "sys1": {"signals": [{"symbol": "A", "side": "BUY", "entry_price": 10.0, "weight": 1.0}]},
-            "sys2": {"signals": [{"symbol": "B", "side": "SELL", "entry_price": 20.0, "weight": 1.0}]},
+            "sys1": {
+                "signals": [
+                    {"symbol": "A", "side": "BUY", "entry_price": 10.0, "weight": 1.0}
+                ]
+            },
+            "sys2": {
+                "signals": [
+                    {"symbol": "B", "side": "SELL", "entry_price": 20.0, "weight": 1.0}
+                ]
+            },
         },
     }
     orders = signals_json_to_orders(data, tier="small", dry_run=True)
@@ -179,7 +201,9 @@ def test_multi_system_flatten():
 
 
 def test_empty_signals_returns_empty_list():
-    orders = signals_json_to_orders({"date": "2026-07-01", "systems": {}}, tier="small", dry_run=True)
+    orders = signals_json_to_orders(
+        {"date": "2026-07-01", "systems": {}}, tier="small", dry_run=True
+    )
     assert orders == []
 
 

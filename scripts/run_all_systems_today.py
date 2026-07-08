@@ -48,7 +48,6 @@ import argparse
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextvars import ContextVar
-from dataclasses import dataclass, field
 from datetime import datetime
 import io
 import json
@@ -57,7 +56,6 @@ import multiprocessing
 import os
 from pathlib import Path
 import sys
-import threading
 from threading import Lock
 from typing import Any, cast, no_type_check
 from zoneinfo import ZoneInfo
@@ -98,7 +96,7 @@ import pandas as pd
 
 from common import broker_alpaca as ba
 from common.alpaca_order import submit_orders_df
-from common.cache_manager import CacheManager, load_base_cache
+from common.cache_manager import CacheManager
 from common.dataframe_utils import round_dataframe  # noqa: E402
 from common.indicator_access import get_indicator, is_true, to_float
 from common.latest_day_validator import (
@@ -146,6 +144,23 @@ from core.final_allocation import finalize_allocation, load_symbol_system_map
 from core.system1 import summarize_system1_diagnostics
 from core.system5 import DEFAULT_ATR_PCT_THRESHOLD
 
+# --- Refactored modules (Phase 2) ---
+# These classes/functions were extracted to scripts/pipeline/ for better maintainability
+from scripts.pipeline.benchmark import LightweightBenchmark
+from scripts.pipeline.context import TodayRunContext
+from scripts.pipeline.logging_utils import (
+    console_supports_utf8 as _console_supports_utf8_util,
+)
+from scripts.pipeline.logging_utils import (
+    format_log_prefix,
+    safe_print,
+    should_skip_log,
+    should_skip_ui_log,
+)
+from scripts.pipeline.logging_utils import build_structured_log_object
+from scripts.pipeline.logging_utils import strip_emojis as _strip_emojis_util
+from scripts.pipeline.stage_reporter import StageReporter
+
 # strategies
 from strategies.system1_strategy import System1Strategy
 from strategies.system2_strategy import System2Strategy
@@ -155,33 +170,6 @@ from strategies.system5_strategy import System5Strategy
 from strategies.system6_strategy import System6Strategy
 from strategies.system7_strategy import System7Strategy
 from tools.notify_metrics import send_metrics_notification  # noqa: E402
-
-# --- Refactored modules (Phase 2) ---
-# These classes/functions were extracted to scripts/pipeline/ for better maintainability
-from scripts.pipeline.benchmark import LightweightBenchmark
-from scripts.pipeline.context import TodayRunContext
-from scripts.pipeline.cache_pool import BaseCachePool
-from scripts.pipeline.stage_reporter import (
-    StageReporter,
-    register_stage_callback,
-    register_stage_exit_callback,
-    register_universe_target_callback,
-    _drain_stage_event_queue,
-    _ensure_stage_event_pump,
-    _stop_stage_event_pump,
-)
-from scripts.pipeline.logging_utils import (
-    GLOBAL_SKIP_KEYWORDS as _GLOBAL_SKIP_KEYWORDS_UTIL,
-    UI_ONLY_SKIP_KEYWORDS as _UI_ONLY_SKIP_KEYWORDS_UTIL,
-    INDICATOR_SKIP_KEYWORDS as _INDICATOR_SKIP_KEYWORDS,
-    format_log_prefix,
-    safe_print,
-    should_skip_log,
-    should_skip_ui_log,
-    strip_emojis as _strip_emojis_util,
-    console_supports_utf8 as _console_supports_utf8_util,
-    build_structured_log_object,
-)
 
 # --- Console encoding helpers ---
 # NOTE: _console_supports_utf8 and _strip_emojis are imported from logging_utils
@@ -4310,9 +4298,8 @@ def compute_today_signals(  # noqa: C901  # type: ignore[reportGeneralTypeIssues
         # 本番では常に 5.0% を表示し、ロジックは変更しない
         _atr_label_pct = 5.0
         try:
-            from config.environment import (
-                get_env_config as _get_env,
-            )  # 遅延import（安全）
+            # 遅延import（安全）
+            from config.environment import get_env_config as _get_env
 
             _env_label = _get_env()
             if hasattr(_env_label, "is_test_mode") and bool(_env_label.is_test_mode()):
@@ -5159,6 +5146,7 @@ def compute_today_signals(  # noqa: C901  # type: ignore[reportGeneralTypeIssues
     # 引き直し「確定値」を再度 log に出す。他 system (1/2/4/6/7) は事前確定して
     # いるため差分表示のみでよい。
     try:
+
         def _get_setup(name: str) -> int | None:
             snap = _get_stage_snapshot(name)
             if snap is None:

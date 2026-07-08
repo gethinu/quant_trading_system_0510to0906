@@ -59,10 +59,16 @@ def test_real_submit_passes_client_order_id():
     fake_order.status = "accepted"
     fake_client = mock.Mock()
 
-    with mock.patch.object(at.ba, "get_client", return_value=fake_client), \
-         mock.patch.object(at.ba, "submit_order_with_retry", return_value=fake_order) as m_submit:
+    with (
+        mock.patch.object(at.ba, "get_client", return_value=fake_client),
+        mock.patch.object(
+            at.ba, "submit_order_with_retry", return_value=fake_order
+        ) as m_submit,
+    ):
         po = submit_paper_order(
-            "AAPL", 5, "buy",
+            "AAPL",
+            5,
+            "buy",
             client_order_id="system1-AAPL-20260630",
             dry_run=False,
         )
@@ -91,8 +97,10 @@ def test_insufficient_buying_power_raises_order_submit_error():
     def _raise(*a, **k):
         raise RuntimeError("insufficient buying power for this order")
 
-    with mock.patch.object(at.ba, "get_client", return_value=fake_client), \
-         mock.patch.object(at.ba, "submit_order_with_retry", side_effect=_raise):
+    with (
+        mock.patch.object(at.ba, "get_client", return_value=fake_client),
+        mock.patch.object(at.ba, "submit_order_with_retry", side_effect=_raise),
+    ):
         with pytest.raises(OrderSubmitError, match="資金不足"):
             submit_paper_order("AAPL", 1000000, "buy", dry_run=False)
 

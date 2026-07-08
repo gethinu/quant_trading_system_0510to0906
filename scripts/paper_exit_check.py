@@ -52,7 +52,6 @@ from common.alpaca_trading import (  # noqa: E402
 from common.position_tracker import load_tracker  # noqa: E402
 from common.trade_management import SYSTEM_TRADE_RULES  # noqa: E402
 
-
 ROOT = Path(__file__).resolve().parents[1]
 SPY_ROLLING = ROOT / "data_cache" / "rolling" / "SPY.csv"
 
@@ -64,7 +63,9 @@ SPY_ROLLING = ROOT / "data_cache" / "rolling" / "SPY.csv"
 # -------------------------------------------------------------------------
 
 
-def _collect_entry_orders_index(results_dir: Path, lookback_days: int = 30) -> dict[str, dict[str, Any]]:
+def _collect_entry_orders_index(
+    results_dir: Path, lookback_days: int = 30
+) -> dict[str, dict[str, Any]]:
     idx: dict[str, dict[str, Any]] = {}
     if not results_dir.exists():
         return idx
@@ -100,9 +101,12 @@ def _hydrate_from_alpaca_coids(snapshots: list[PositionSnapshot], client: Any) -
     # broker_alpaca の get_open_orders は open だけなので、全 order は client 直呼び。
     try:
         # QueryOrderStatus.ALL で最近の orders 取得
-        from alpaca.trading.requests import GetOrdersRequest
         from alpaca.trading.enums import QueryOrderStatus
-        raw = client.get_orders(GetOrdersRequest(status=QueryOrderStatus.ALL, limit=500))
+        from alpaca.trading.requests import GetOrdersRequest
+
+        raw = client.get_orders(
+            GetOrdersRequest(status=QueryOrderStatus.ALL, limit=500)
+        )
     except Exception:
         return
     coid_by_symbol: dict[str, str] = {}
@@ -206,7 +210,12 @@ def _today_str() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
-def _write_output(exits: list[PreparedExit], snapshots: list[PositionSnapshot], meta: dict, output_path: Path) -> None:
+def _write_output(
+    exits: list[PreparedExit],
+    snapshots: list[PositionSnapshot],
+    meta: dict,
+    output_path: Path,
+) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "version": "1.0",
@@ -232,7 +241,9 @@ def _write_output(exits: list[PreparedExit], snapshots: list[PositionSnapshot], 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--date", default=None, help="対象日 YYYY-MM-DD (default: today)")
+    parser.add_argument(
+        "--date", default=None, help="対象日 YYYY-MM-DD (default: today)"
+    )
     parser.add_argument(
         "--output-json",
         default=None,
@@ -264,7 +275,11 @@ def main(argv: list[str] | None = None) -> int:
     date_compact = date_str.replace("-", "")
 
     results_dir = Path(args.results_dir)
-    output_path = Path(args.output_json) if args.output_json else results_dir / f"exit_orders_{date_compact}.json"
+    output_path = (
+        Path(args.output_json)
+        if args.output_json
+        else results_dir / f"exit_orders_{date_compact}.json"
+    )
 
     # --- 1) Alpaca client + positions -----------------------------------
     client: Any | None = None

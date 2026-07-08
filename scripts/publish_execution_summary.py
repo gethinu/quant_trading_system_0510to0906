@@ -33,7 +33,11 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from common.publishers.execution_summary import format_execution_summary  # noqa: E402
 from common.publishers.ntfy import NtfyPublisher  # noqa: E402
-from scripts.build_execution_recon import _default_path, _load_json, build_recon  # noqa: E402
+from scripts.build_execution_recon import (  # noqa: E402
+    _default_path,
+    _load_json,
+    build_recon,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,13 +59,19 @@ def _resolve_recon(args: argparse.Namespace) -> dict | None:
 
     # 無ければ 3 JSON から build
     signals = _load_json(
-        Path(args.signals_json) if args.signals_json else _default_path(results_dir, "today_signals", date_str)
+        Path(args.signals_json)
+        if args.signals_json
+        else _default_path(results_dir, "today_signals", date_str)
     )
     paper = _load_json(
-        Path(args.paper_orders_json) if args.paper_orders_json else _default_path(results_dir, "paper_orders", date_str)
+        Path(args.paper_orders_json)
+        if args.paper_orders_json
+        else _default_path(results_dir, "paper_orders", date_str)
     )
     exits = _load_json(
-        Path(args.exit_orders_json) if args.exit_orders_json else _default_path(results_dir, "exit_orders", date_str)
+        Path(args.exit_orders_json)
+        if args.exit_orders_json
+        else _default_path(results_dir, "exit_orders", date_str)
     )
     if signals is None and paper is None and exits is None:
         return None
@@ -81,17 +91,27 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--signals-json", help="today_signals JSON path。")
     parser.add_argument("--paper-orders-json", help="paper_orders JSON path。")
     parser.add_argument("--exit-orders-json", help="exit_orders JSON path。")
-    parser.add_argument("--results-dir", default="results_csv", help="default path 基準 dir。")
-    parser.add_argument("--account-equity", type=float, default=None, help="口座残高 (通知表示用)。")
-    parser.add_argument("--dry-run", action="store_true", help="送信せず title/body を表示。")
+    parser.add_argument(
+        "--results-dir", default="results_csv", help="default path 基準 dir。"
+    )
+    parser.add_argument(
+        "--account-equity", type=float, default=None, help="口座残高 (通知表示用)。"
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true", help="送信せず title/body を表示。"
+    )
     parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args(argv)
 
-    logging.basicConfig(level=str(args.log_level).upper(), format="%(levelname)s: %(message)s")
+    logging.basicConfig(
+        level=str(args.log_level).upper(), format="%(levelname)s: %(message)s"
+    )
 
     recon = _resolve_recon(args)
     if recon is None:
-        logger.error("recon を解決できません (入力 JSON が見つからない)。通知をスキップ。")
+        logger.error(
+            "recon を解決できません (入力 JSON が見つからない)。通知をスキップ。"
+        )
         return 1
 
     title, body = format_execution_summary(recon)
@@ -99,11 +119,15 @@ def main(argv: list[str] | None = None) -> int:
     # 副産物として recon を書き戻す (build した場合、dashboard が execution funnel を
     # 参照できるよう)。dry-run でも書く = dry-run 実行でもダッシュにサマリが出る。
     if not args.recon_json:
-        date_str = args.date or (recon.get("date") or datetime.now().strftime("%Y-%m-%d"))
+        date_str = args.date or (
+            recon.get("date") or datetime.now().strftime("%Y-%m-%d")
+        )
         out = _default_path(Path(args.results_dir), "recon", str(date_str))
         try:
             out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_text(json.dumps(recon, ensure_ascii=False, indent=2), encoding="utf-8")
+            out.write_text(
+                json.dumps(recon, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
             logger.info("recon 書き出し: %s", out)
         except Exception as exc:  # noqa: BLE001
             logger.warning("recon 書き戻し失敗 (無視): %s", exc)

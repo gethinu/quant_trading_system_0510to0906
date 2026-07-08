@@ -37,12 +37,12 @@ except Exception:  # pragma: no cover - tests may stub cache_manager
                 return df
 
 
+from common.system_constants import HEDGE_INDEX_SYMBOLS
 from common.utils_spy import (
     get_latest_nyse_trading_day,
     get_signal_target_trading_day,
     get_spy_with_indicators,
 )
-from common.system_constants import HEDGE_INDEX_SYMBOLS
 from config.settings import get_settings
 from core.system1 import system1_row_passes_setup
 from core.system5 import DEFAULT_ATR_PCT_THRESHOLD, format_atr_pct_threshold_label
