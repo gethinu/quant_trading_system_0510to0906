@@ -26,7 +26,8 @@ daily_pipeline.ps1 への配線は Phase 2 (別セッションと競合回避の
                    gross_cap_pct, net_cap_pct, by_system:{...}},
       "summary": {n_positions, n_long, n_short, n_winning, n_losing, win_rate_pct,
                   unrealized_pl_total, exit_soon_count, biggest_winner, biggest_loser},
-      "positions": [ {symbol, system, side, qty, avg_entry_price, current_price,
+      "positions": [ {symbol, system, side, qty, ledger_qty, ledger_consistent,
+                      avg_entry_price, current_price,
                       lastday_price, market_value, cost_basis, unrealized_pl,
                       unrealized_pl_pct, intraday_pl, intraday_pl_pct, entry_date,
                       holding_days, max_holding_days, days_remaining, exit_date,
@@ -34,8 +35,18 @@ daily_pipeline.ps1 への配線は Phase 2 (別セッションと競合回避の
                       distance_to_stop_pct, distance_to_target_pct} ],
       "reconciliation": {signals_date, signals_total, signals_buy, signals_sell,
                          orders_date, orders_submitted, held_now,
-                         held_from_signals, note}
+                         held_from_signals, note},
+      "ledger_reconciliation": {source, available, n_symbols, n_consistent,
+                         n_mismatch, n_desync, desync_free, mismatches:[{symbol,
+                         ledger_net, position_qty, diff, class, likely_symbol_migration}],
+                         note}
     }
+
+``ledger_reconciliation`` は現 position を口座開設来の fill 台帳ネット(GET
+/v2/account/activities, buy+/sell-)と突合する authoritative check。broker が決済
+直後などに返す過渡的に壊れた position 台帳を silent 描画せず、``n_desync`` /
+per-position ``ledger_consistent`` で flag する（2026-07-08 の paper 台帳デシンク
+調査で追加）。
 """
 
 from __future__ import annotations
@@ -492,8 +503,125 @@ def _build_reconciliation(results_dir: Path, held_symbols: set[str]) -> dict[str
     rec["note"] = (
         "signals=最新 today_signals の配信数 / orders=最新 paper_orders の送信数 / "
         "held_now=現在の実保有数 (過去日ぶんの累積)。held_from_signals は最新シグナル銘柄のうち現在保有中の数。"
+        " ※これは日次シグナルと累積保有の弱い突合。position の正当性検証は ledger_reconciliation を参照。"
     )
     return rec
+
+
+# --------------------------------------------------------------------------
+# ledger reconciliation: 現 position を「口座開設来 fill 台帳ネット」と突合する
+# authoritative check。broker が決済直後などに返す過渡的に壊れた position 台帳を
+# silent 描画せず flag するための核心（2026-07-08 の paper 台帳デシンク調査で追加）。
+# --------------------------------------------------------------------------
+_LEDGER_EPS = 1e-4
+
+
+def _fetch_fill_ledger() -> dict[str, dict[str, Any]]:
+    """GET /v2/account/activities (FILL 全ページ) から symbol -> {net, n_fills}。
+
+    net = Σ(buy:+qty, sell/sell_short:-qty)。口座開設来の全 fill が対象。
+    **GET only**（read-only 契約）。失敗時は取得できたぶんだけ返す（空でも可）。
+    """
+    import requests
+
+    headers = {
+        "APCA-API-KEY-ID": os.getenv("APCA_API_KEY_ID", ""),
+        "APCA-API-SECRET-KEY": os.getenv("APCA_API_SECRET_KEY", ""),
+    }
+    ledger: dict[str, dict[str, Any]] = {}
+    page_token: str | None = None
+    try:
+        for _ in range(100):  # 安全弁: 最大 100 ページ (=10k fills)
+            params: dict[str, Any] = {"activity_types": "FILL", "page_size": 100}
+            if page_token:
+                params["page_token"] = page_token
+            r = requests.get(
+                f"{PAPER_BASE}/v2/account/activities",
+                headers=headers,
+                params=params,
+                timeout=20,
+            )
+            batch = r.json() if r.content else []
+            if not isinstance(batch, list) or not batch:
+                break
+            for f in batch:
+                sym = str(f.get("symbol", "") or "").upper()
+                if not sym:
+                    continue
+                side = str(f.get("side", "") or "").lower()
+                q = _f(f.get("qty")) or 0.0
+                signed = q if side == "buy" else -q
+                d = ledger.setdefault(sym, {"net": 0.0, "n_fills": 0})
+                d["net"] += signed
+                d["n_fills"] += 1
+            if len(batch) < 100:
+                break
+            page_token = batch[-1].get("id")
+    except Exception:  # pragma: no cover - network
+        pass
+    for d in ledger.values():
+        d["net"] = round(d["net"], 6)
+    return ledger
+
+
+def _build_ledger_reconciliation(
+    fill_ledger: dict[str, dict[str, Any]],
+    pos_qty_by_sym: dict[str, float],
+) -> dict[str, Any]:
+    """現 position を口座開設来の fill 台帳ネットと突合する authoritative recon (pure)。
+
+    - |position − ledger_net| <= eps → consistent。
+    - position=0 かつ ledger_net≠0 → 良性差分 (class=ledger_only_flat)。旧/新シンボルで
+      buy/sell が割れた ticker 改称等。実エクスポージャー無し。
+    - position≠0 かつ qty 乖離 → **本物のデシンク** (class=position_vs_ledger)。broker
+      過渡不整合を検出する核心指標。n_desync==0 なら position は台帳整合で信頼できる。
+    """
+    if not fill_ledger:
+        return {
+            "source": "account_activities_fill",
+            "available": False,
+            "n_desync": None,
+            "desync_free": None,
+            "mismatches": [],
+            "note": "fill activities 取得不可 — 台帳突合をスキップ (positions は broker 直値)。",
+        }
+    syms = set(fill_ledger) | set(pos_qty_by_sym)
+    n_consistent = 0
+    mismatches: list[dict[str, Any]] = []
+    for sym in sorted(syms):
+        led = float((fill_ledger.get(sym) or {}).get("net", 0.0) or 0.0)
+        pos = float(pos_qty_by_sym.get(sym, 0.0) or 0.0)
+        diff = round(pos - led, 6)
+        if abs(diff) <= _LEDGER_EPS:
+            n_consistent += 1
+            continue
+        cls = "ledger_only_flat" if abs(pos) <= _LEDGER_EPS else "position_vs_ledger"
+        mismatches.append(
+            {
+                "symbol": sym,
+                "ledger_net": round(led, 6),
+                "position_qty": round(pos, 6),
+                "diff": diff,
+                "class": cls,
+                "likely_symbol_migration": cls == "ledger_only_flat",
+            }
+        )
+    n_desync = sum(1 for m in mismatches if m["class"] == "position_vs_ledger")
+    return {
+        "source": "account_activities_fill",
+        "available": True,
+        "n_symbols": len(syms),
+        "n_consistent": n_consistent,
+        "n_mismatch": len(mismatches),
+        "n_desync": n_desync,
+        "desync_free": n_desync == 0,
+        "mismatches": mismatches,
+        "note": (
+            "position を口座開設来 fill 台帳ネット(buy+/sell-)と突合。"
+            "class=position_vs_ledger は保有 qty が台帳と乖離した本物のデシンク(要調査)。"
+            "class=ledger_only_flat は position=0 の良性差分(ticker 改称等)。"
+        ),
+    }
 
 
 # --------------------------------------------------------------------------
@@ -523,6 +651,7 @@ def build_snapshot(
 ) -> dict[str, Any]:
     account = client.get_account()
     raw_positions = list(client.get_all_positions())
+    fill_ledger = _fetch_fill_ledger()  # GET only; {} on failure (recon degrades)
 
     orders_index = _fetch_orders_index(client)
     tracker = load_tracker() or {}
@@ -540,6 +669,7 @@ def build_snapshot(
     biggest_win: dict[str, Any] | None = None
     biggest_loss: dict[str, Any] | None = None
     held_symbols: set[str] = set()
+    pos_qty_by_sym: dict[str, float] = {}  # signed qty for ledger reconciliation
 
     for p in raw_positions:
         sym = str(getattr(p, "symbol", "") or "").upper()
@@ -547,6 +677,8 @@ def build_snapshot(
             continue
         held_symbols.add(sym)
         qty = _f(getattr(p, "qty", 0)) or 0.0
+        pos_qty_by_sym[sym] = qty
+        led_net = float((fill_ledger.get(sym) or {}).get("net", 0.0) or 0.0)
         side = _side_of(p, qty)
         avg = _f(getattr(p, "avg_entry_price", 0)) or 0.0
         cur = _f(getattr(p, "current_price", None))
@@ -600,6 +732,10 @@ def build_snapshot(
             "system": system or "unknown",
             "side": side,
             "qty": round(qty, 6),
+            "ledger_qty": round(led_net, 6) if fill_ledger else None,
+            "ledger_consistent": (
+                (abs(qty - led_net) <= _LEDGER_EPS) if fill_ledger else None
+            ),
             "avg_entry_price": round(avg, 4),
             "current_price": round(cur, 4) if cur else None,
             "lastday_price": _f(getattr(p, "lastday_price", None)),
@@ -750,6 +886,9 @@ def build_snapshot(
         },
         "positions": positions,
         "reconciliation": _build_reconciliation(results_dir, held_symbols),
+        "ledger_reconciliation": _build_ledger_reconciliation(
+            fill_ledger, pos_qty_by_sym
+        ),
     }
     return snapshot
 
@@ -817,6 +956,22 @@ def main(argv: list[str] | None = None) -> int:
         f"curve_points={len(snapshot['equity_curve'].get('points', []))} "
         f"max_dd={snapshot['equity_curve'].get('max_drawdown_pct')}%"
     )
+    lr = snapshot.get("ledger_reconciliation", {})
+    if lr.get("available"):
+        desync = lr.get("n_desync")
+        print(
+            f"[ledger_recon] consistent={lr.get('n_consistent')}/{lr.get('n_symbols')} "
+            f"desync={desync} "
+            + ("OK(台帳整合)" if lr.get("desync_free") else "⚠️ POSITION≠LEDGER 要調査")
+        )
+        for m in lr.get("mismatches", []):
+            if m.get("class") == "position_vs_ledger":
+                print(
+                    f"    DESYNC {m['symbol']}: pos={m['position_qty']} "
+                    f"ledger={m['ledger_net']} diff={m['diff']}"
+                )
+    else:
+        print("[ledger_recon] fill activities 取得不可 — 突合スキップ")
     print(f"[write] {output_path}")
     return 0
 
