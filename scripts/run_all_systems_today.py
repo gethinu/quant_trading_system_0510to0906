@@ -1376,8 +1376,24 @@ def _recent_trading_days(
 # 403 等で rolling が単独で古くなり得る (2026-07-08: SPY rolling=07-01 に対し普通株
 # ユニバースは 07-06 で確定済み) ため、市場基準アンカーを SPY 単独で決めてはならない。
 _UNIVERSE_FRESHNESS_PROBE_SYMBOLS: tuple[str, ...] = (
-    "AAPL", "MSFT", "AMZN", "GOOGL", "META", "NVDA", "JPM", "JNJ",
-    "XOM", "WMT", "PG", "V", "MA", "HD", "KO", "TSLA", "AVGO", "COST",
+    "AAPL",
+    "MSFT",
+    "AMZN",
+    "GOOGL",
+    "META",
+    "NVDA",
+    "JPM",
+    "JNJ",
+    "XOM",
+    "WMT",
+    "PG",
+    "V",
+    "MA",
+    "HD",
+    "KO",
+    "TSLA",
+    "AVGO",
+    "COST",
 )
 
 
@@ -5304,6 +5320,7 @@ def compute_today_signals(  # noqa: C901  # type: ignore[reportGeneralTypeIssues
     # 引き直し「確定値」を再度 log に出す。他 system (1/2/4/6/7) は事前確定して
     # いるため差分表示のみでよい。
     try:
+
         def _get_setup(name: str) -> int | None:
             snap = _get_stage_snapshot(name)
             if snap is None:
