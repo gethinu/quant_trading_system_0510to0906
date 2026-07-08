@@ -17,9 +17,9 @@ test 対象:
 from __future__ import annotations
 
 from common.narrator import (
-    SignalNarrator,
     _HEADLINE_MAX_LEN,
     _SYSTEM_PROMPT,
+    SignalNarrator,
     _is_valid_headline,
     _synth_headline,
 )
@@ -34,20 +34,34 @@ def _payload_2026_07_02() -> dict:
         "systems": {
             "sys1": {
                 "signals": [
-                    {"symbol": "AAPL", "side": "BUY", "entry_price": 289.2,
-                     "weight": 0.18, "rank": i, "reason": "roc"}
+                    {
+                        "symbol": "AAPL",
+                        "side": "BUY",
+                        "entry_price": 289.2,
+                        "weight": 0.18,
+                        "rank": i,
+                        "reason": "roc",
+                    }
                     for i in range(39)
                 ],
-                "n_candidates_input": 39, "n_signals_output": 39,
+                "n_candidates_input": 39,
+                "n_signals_output": 39,
                 "gate_survival_ratio": 1.0,
             },
             "sys2": {
                 "signals": [
-                    {"symbol": "LFST", "side": "SELL", "entry_price": 11.43,
-                     "weight": 0.054, "rank": i, "reason": "overheat"}
+                    {
+                        "symbol": "LFST",
+                        "side": "SELL",
+                        "entry_price": 11.43,
+                        "weight": 0.054,
+                        "rank": i,
+                        "reason": "overheat",
+                    }
                     for i in range(10)
                 ],
-                "n_candidates_input": 10, "n_signals_output": 10,
+                "n_candidates_input": 10,
+                "n_signals_output": 10,
                 "gate_survival_ratio": 1.0,
             },
         },
@@ -121,6 +135,7 @@ class TestSynthHeadline:
     def test_synth_slash_separator_with_spaces(self):
         """区切り ' / ' (前後 space) が最低 2 個ある。"""
         import re
+
         h = _synth_headline(_payload_2026_07_02())
         assert " / " in h
         # 数値と label の間に必ず space or ':' (cram を禁止)
@@ -154,7 +169,11 @@ class TestSystemPromptCarriesFormatRules:
 
     def test_prompt_shows_bad_example(self):
         # 誤例 (gibberish) を示して LLM に負の学習をさせている
-        assert "mangled" in _SYSTEM_PROMPT or "749BUYSELL" in _SYSTEM_PROMPT or "潰れる" in _SYSTEM_PROMPT
+        assert (
+            "mangled" in _SYSTEM_PROMPT
+            or "749BUYSELL" in _SYSTEM_PROMPT
+            or "潰れる" in _SYSTEM_PROMPT
+        )
 
 
 # --- user prompt (_build_user_prompt) -------------------------------------

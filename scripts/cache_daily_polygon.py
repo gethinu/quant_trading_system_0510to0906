@@ -15,10 +15,7 @@ import pandas as pd
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from common.cache_format import round_dataframe, safe_filename  # noqa: E402
-from common.cache_manager import (  # noqa: E402
-    compute_base_indicators,
-    save_base_cache,
-)
+from common.cache_manager import compute_base_indicators, save_base_cache  # noqa: E402
 from common.indicators_common import add_indicators  # noqa: E402
 from common.polygon_data import get_polygon_grouped_daily  # noqa: E402
 
@@ -64,15 +61,23 @@ def fetch_grouped_panel(
         else:
             panel[ds] = df
         if i % progress_every == 0 or i == n:
-            logger.info("  %d/%d days (fetched %d / empty %d)",
-                        i, n, len(panel), len(empty_days))
+            logger.info(
+                "  %d/%d days (fetched %d / empty %d)",
+                i,
+                n,
+                len(panel),
+                len(empty_days),
+            )
         if sleep_seconds > 0 and i < n:
             time.sleep(sleep_seconds)
 
     if empty_days:
-        logger.info("empty %d days: %s%s",
-                    len(empty_days), ", ".join(empty_days[:10]),
-                    " ..." if len(empty_days) > 10 else "")
+        logger.info(
+            "empty %d days: %s%s",
+            len(empty_days),
+            ", ".join(empty_days[:10]),
+            " ..." if len(empty_days) > 10 else "",
+        )
     return panel
 
 
@@ -157,8 +162,11 @@ def write_symbol_to_cache(
                 work["Date"] = pd.to_datetime(work["Date"], errors="coerce")
                 work = work.dropna(subset=["Date"]).sort_values("Date")
                 work = work.set_index("Date")
-            ohlcv_cols = [c for c in ("Open", "High", "Low", "Close", "AdjClose", "Volume")
-                          if c in work.columns]
+            ohlcv_cols = [
+                c
+                for c in ("Open", "High", "Low", "Close", "AdjClose", "Volume")
+                if c in work.columns
+            ]
             if ohlcv_cols:
                 recomputed = add_indicators(work[ohlcv_cols].copy())
                 merged_full = recomputed.reset_index()
@@ -173,7 +181,9 @@ def write_symbol_to_cache(
         try:
             base_source = merged_full.copy()
             if "Date" in base_source.columns:
-                base_source["Date"] = pd.to_datetime(base_source["Date"], errors="coerce")
+                base_source["Date"] = pd.to_datetime(
+                    base_source["Date"], errors="coerce"
+                )
                 base_source = base_source.dropna(subset=["Date"]).sort_values("Date")
                 base_source = base_source.set_index("Date")
             base_df = compute_base_indicators(base_source)
@@ -217,13 +227,16 @@ def run_backfill(
     # 2026-07-02 hygiene: 普通株のみに絞る (default True)
     if common_only:
         from common.symbol_universe import is_common_stock_symbol
+
         pre = len(all_syms)
         all_syms = [s for s in all_syms if is_common_stock_symbol(s)]
         dropped = pre - len(all_syms)
         if dropped:
             logger.info(
                 "universe filter: %d -> %d (%d dropped: non-common)",
-                pre, len(all_syms), dropped,
+                pre,
+                len(all_syms),
+                dropped,
             )
     if max_symbols is not None:
         all_syms = all_syms[:max_symbols]
@@ -236,19 +249,24 @@ def run_backfill(
     written = failed = 0
     for i, sym in enumerate(all_syms, 1):
         ok = write_symbol_to_cache(
-            sym, frames[sym],
-            full_dir=full_dir, round_decimals=round_decimals,
+            sym,
+            frames[sym],
+            full_dir=full_dir,
+            round_decimals=round_decimals,
             settings=settings,
         )
         written += int(ok)
         failed += int(not ok)
         if i % 500 == 0 or i == len(all_syms):
-            logger.info("  wrote %d/%d (ok %d / fail %d)",
-                        i, len(all_syms), written, failed)
+            logger.info(
+                "  wrote %d/%d (ok %d / fail %d)", i, len(all_syms), written, failed
+            )
 
     return {
-        "days": len(panel), "symbols": len(all_syms),
-        "written": written, "failed": failed,
+        "days": len(panel),
+        "symbols": len(all_syms),
+        "written": written,
+        "failed": failed,
     }
 
 
@@ -261,16 +279,32 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--start", required=True, type=_parse_date, help="start YYYY-MM-DD")
     p.add_argument("--end", required=True, type=_parse_date, help="end YYYY-MM-DD")
     p.add_argument("--symbols", default=None, help="comma-separated symbol filter")
-    p.add_argument("--max-symbols", type=int, default=None, help="upper bound for symbols")
-    p.add_argument("--sleep", type=float, default=13.0, help="sleep between Grouped Daily calls")
-    p.add_argument("--strict-history", action="store_true", help="fail-fast on empty weekdays")
-    p.add_argument("--dry-run", action="store_true", help="fetch/pivot only, skip writes")
+    p.add_argument(
+        "--max-symbols", type=int, default=None, help="upper bound for symbols"
+    )
+    p.add_argument(
+        "--sleep", type=float, default=13.0, help="sleep between Grouped Daily calls"
+    )
+    p.add_argument(
+        "--strict-history", action="store_true", help="fail-fast on empty weekdays"
+    )
+    p.add_argument(
+        "--dry-run", action="store_true", help="fetch/pivot only, skip writes"
+    )
     # 2026-07-02 hygiene: 普通株以外 (preferred/warrant/unit/rights/notes) を除外
-    p.add_argument("--common-only", dest="common_only", action="store_true",
-                   default=True,
-                   help="restrict to US common stocks (default; ~44% faster).")
-    p.add_argument("--no-common-only", dest="common_only", action="store_false",
-                   help="disable pattern filter (keep full Polygon universe).")
+    p.add_argument(
+        "--common-only",
+        dest="common_only",
+        action="store_true",
+        default=True,
+        help="restrict to US common stocks (default; ~44% faster).",
+    )
+    p.add_argument(
+        "--no-common-only",
+        dest="common_only",
+        action="store_false",
+        help="disable pattern filter (keep full Polygon universe).",
+    )
     p.add_argument("--log-level", default="INFO")
     return p
 
@@ -295,9 +329,12 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         stats = run_backfill(
-            args.start, args.end,
-            symbols=symbols, max_symbols=args.max_symbols,
-            sleep_seconds=args.sleep, strict_history=args.strict_history,
+            args.start,
+            args.end,
+            symbols=symbols,
+            max_symbols=args.max_symbols,
+            sleep_seconds=args.sleep,
+            strict_history=args.strict_history,
             dry_run=args.dry_run,
             common_only=getattr(args, "common_only", True),
         )
@@ -310,7 +347,10 @@ def main(argv: list[str] | None = None) -> int:
 
     logger.info(
         "done: days=%d symbols=%d written=%d failed=%d",
-        stats["days"], stats["symbols"], stats["written"], stats["failed"],
+        stats["days"],
+        stats["symbols"],
+        stats["written"],
+        stats["failed"],
     )
     return 0
 

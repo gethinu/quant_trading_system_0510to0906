@@ -79,10 +79,7 @@ def _to_safe_ascii_title(title: str, message: SignalMessage) -> str:
         parts.append(f"BUY {buy} / SELL {sell}")
 
     notional = float(
-        (message.payload.get("portfolio", {}) or {}).get(
-            "total_notional_usd", 0
-        )
-        or 0
+        (message.payload.get("portfolio", {}) or {}).get("total_notional_usd", 0) or 0
     )
     if notional > 0:
         if notional >= 1_000_000:
@@ -250,7 +247,9 @@ class NtfyPublisher(Publisher):
         return self._transport(body, headers, dry_run=dry_run)
 
     # -- transport ------------------------------------------------------
-    def send(self, signals_json: dict[str, Any], *, dry_run: bool = False) -> PublishResult:
+    def send(
+        self, signals_json: dict[str, Any], *, dry_run: bool = False
+    ) -> PublishResult:
         body, headers = self._build(signals_json)
         return self._transport(body, headers, dry_run=dry_run)
 
@@ -268,7 +267,10 @@ class NtfyPublisher(Publisher):
 
         if not self.is_configured():
             return PublishResult(
-                publisher=self.name, ok=False, detail="NTFY_TOPIC 未設定", target="unset"
+                publisher=self.name,
+                ok=False,
+                detail="NTFY_TOPIC 未設定",
+                target="unset",
             )
 
         import requests

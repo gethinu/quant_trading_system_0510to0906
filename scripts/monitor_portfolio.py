@@ -12,7 +12,6 @@ from __future__ import annotations
 import argparse
 from datetime import datetime
 import logging
-import os
 from pathlib import Path
 import sys
 
@@ -293,7 +292,7 @@ def main() -> None:
             gain_threshold=args.gain_threshold,
             force_notify=args.force,
         )
-        print(f"✅ Check complete")
+        print("✅ Check complete")
         print(f"   Equity: ${state.get('last_equity', 0):,.2f}")
         print(f"   High Watermark: ${state.get('high_watermark', 0):,.2f}")
         print(f"   Unrealized PnL: ${state.get('unrealized_pnl', 0):,.2f}")

@@ -247,9 +247,7 @@ class TestEntryExitIntegration:
         assert r is not None
         entry_price, stop_price = r
         assert stop_price < entry_price
-        exit_price, exit_date = strategy.compute_exit(
-            df, 1, entry_price, stop_price
-        )
+        exit_price, exit_date = strategy.compute_exit(df, 1, entry_price, stop_price)
         assert exit_price > 0
         assert exit_date >= dates[1]
 
@@ -273,9 +271,7 @@ class TestEntryExitIntegration:
         assert r is not None
         entry_price, stop_price = r
         # 目標到達 → 翌日の寄付で決済
-        exit_price, exit_date = strategy.compute_exit(
-            df, 1, entry_price, stop_price
-        )
+        exit_price, exit_date = strategy.compute_exit(df, 1, entry_price, stop_price)
         assert exit_date >= dates[2] or exit_price > 0
 
     def test_system6_entry_to_exit_flow(self):
@@ -298,9 +294,7 @@ class TestEntryExitIntegration:
         r = strategy.compute_entry(df, candidate, 10000.0)
         assert r is not None
         entry_price, stop_price = r
-        exit_price, exit_date = strategy.compute_exit(
-            df, 1, entry_price, stop_price
-        )
+        exit_price, exit_date = strategy.compute_exit(df, 1, entry_price, stop_price)
         assert exit_price > 0
         assert exit_date >= dates[1]
 

@@ -33,9 +33,20 @@ ALLOWED_HITS: set[str] = {
 
 # 除外ディレクトリ
 EXCLUDED_DIRS = {
-    ".git", ".venv", "venv", "node_modules", "__pycache__", ".pytest_cache",
-    ".mypy_cache", "dist", "build", "logs", "data_cache", "data_cache_recent",
-    ".ipynb_checkpoints", "memory",
+    ".git",
+    ".venv",
+    "venv",
+    "node_modules",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    "dist",
+    "build",
+    "logs",
+    "data_cache",
+    "data_cache_recent",
+    ".ipynb_checkpoints",
+    "memory",
 }
 
 # scan 対象拡張子

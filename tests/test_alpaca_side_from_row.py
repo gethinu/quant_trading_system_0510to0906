@@ -24,12 +24,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from common.alpaca_trading import (
-    InvalidSideError,
-    _side_from_row,
-    signals_to_orders,
-)
-
+from common.alpaca_trading import InvalidSideError, _side_from_row, signals_to_orders
 
 # ---------------------------------------------------------------------------
 # Known aliases

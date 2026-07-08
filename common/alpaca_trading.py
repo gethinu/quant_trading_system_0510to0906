@@ -240,8 +240,11 @@ def submit_paper_order(
     _audit_log({"event": "submitted", **prepared.to_row()})
     logger.info(
         "Paper order submitted: %s %s x%d id=%s status=%s",
-        prepared.side, prepared.symbol, prepared.qty,
-        prepared.order_id, prepared.status,
+        prepared.side,
+        prepared.symbol,
+        prepared.qty,
+        prepared.order_id,
+        prepared.status,
     )
     return prepared
 
@@ -389,7 +392,9 @@ def signals_to_orders(
 
     logger.info(
         "signals_to_orders: %d 注文を生成 (equity=$%.0f, dry_run=%s)",
-        len(prepared), account_equity, dry_run,
+        len(prepared),
+        account_equity,
+        dry_run,
     )
 
     if dry_run:
@@ -400,7 +405,9 @@ def signals_to_orders(
     submitted: list[PreparedOrder] = []
     for po in prepared:
         result = submit_paper_order(
-            po.symbol, po.qty, po.side,
+            po.symbol,
+            po.qty,
+            po.side,
             order_type=po.order_type,
             limit_price=po.limit_price,
             time_in_force=po.time_in_force,
@@ -432,9 +439,7 @@ def _fetch_open_positions(client: Any) -> dict[str, float]:
         positions = client.get_all_positions()
     except Exception as exc:
         logger.error("open positions 取得失敗、safe abort: %s", exc)
-        raise PositionsFetchError(
-            f"Alpaca open positions fetch failed: {exc}"
-        ) from exc
+        raise PositionsFetchError(f"Alpaca open positions fetch failed: {exc}") from exc
     for p in positions:
         try:
             sym = str(getattr(p, "symbol", "")).upper()
@@ -482,10 +487,15 @@ def _flatten_json_signals(json_data: dict[str, Any]) -> list[dict[str, Any]]:
                 weight = float(s.get("weight") or 0.0)
             except (TypeError, ValueError):
                 weight = 0.0
-            out.append({
-                "symbol": sym, "side": side, "entry_price": price,
-                "weight": weight, "system": norm_sys,
-            })
+            out.append(
+                {
+                    "symbol": sym,
+                    "side": side,
+                    "entry_price": price,
+                    "weight": weight,
+                    "system": norm_sys,
+                }
+            )
     return out
 
 
@@ -603,7 +613,9 @@ def fetch_open_order_state(client: Any) -> tuple[dict[str, set[str]], set[str]]:
     for o in orders:
         sym = str(getattr(o, "symbol", "")).upper()
         raw_side = str(getattr(o, "side", "")).lower()
-        side = "buy" if "buy" in raw_side else ("sell" if "sell" in raw_side else raw_side)
+        side = (
+            "buy" if "buy" in raw_side else ("sell" if "sell" in raw_side else raw_side)
+        )
         coid = getattr(o, "client_order_id", None)
         if sym:
             open_sides.setdefault(sym, set()).add(side)
@@ -708,7 +720,11 @@ def signals_json_to_orders(
 
     logger.info(
         "signals_json_to_orders: %d 注文 tier=%s tier_notional=$%.0f dry_run=%s equity=$%.0f",
-        len(prepared), tier, tier_notional, dry_run, account_equity,
+        len(prepared),
+        tier,
+        tier_notional,
+        dry_run,
+        account_equity,
     )
 
     if dry_run:
@@ -757,9 +773,13 @@ def signals_json_to_orders(
         # (2) wash-trade 回避: 反対側の open order がある銘柄は skip。
         #     ユーザーの既存注文 (exit 注文等) は絶対にキャンセルしない。
         if opp_side in open_sides.get(po.symbol, set()):
-            po.skip_reason = f"wash_trade_conflict:existing_{opp_side}_order (既存注文は保持)"
+            po.skip_reason = (
+                f"wash_trade_conflict:existing_{opp_side}_order (既存注文は保持)"
+            )
             _audit_log({"event": "skip_wash_conflict", **po.to_row()})
-            logger.info("skip (wash 回避): %s %s vs 既存 %s", po.symbol, po.side, opp_side)
+            logger.info(
+                "skip (wash 回避): %s %s vs 既存 %s", po.symbol, po.side, opp_side
+            )
             submitted.append(po)
             continue
 
@@ -801,7 +821,9 @@ def signals_json_to_orders(
             else:  # EXEC_QTY — 整数株 (short / 非fractionable)
                 po.qty = qty
                 result = submit_paper_order(
-                    po.symbol, qty, po.side,
+                    po.symbol,
+                    qty,
+                    po.side,
                     order_type=po.order_type,
                     time_in_force=po.time_in_force,
                     client_order_id=po.client_order_id,
@@ -1038,7 +1060,9 @@ def hydrate_system_tags(
 # -----------------------------------------------------------------------
 
 
-def compute_holding_days(entry_date: str | None, today: str | None = None) -> int | None:
+def compute_holding_days(
+    entry_date: str | None, today: str | None = None
+) -> int | None:
     """entry_date (ISO 'YYYY-MM-DD') と today から holding days を計算。
 
     parse 失敗時は None。
@@ -1366,8 +1390,13 @@ def submit_paper_exit_order(
     _audit_log({"event": "exit_submitted", **po.to_row()})
     logger.info(
         "Paper exit submitted: %s %s x%d %s id=%s status=%s reason=%s",
-        po.side, po.symbol, po.qty, po.order_type,
-        po.order_id, po.status, po.reason,
+        po.side,
+        po.symbol,
+        po.qty,
+        po.order_type,
+        po.order_id,
+        po.status,
+        po.reason,
     )
     return po
 

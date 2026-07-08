@@ -72,9 +72,13 @@ class _FakeClient:
 def test_bracket_market_entry_carries_take_profit_and_stop_loss(patched_sdk):
     client = _FakeClient()
     ba.submit_order(
-        client, "AAPL", 10,
-        side="buy", order_type="bracket",
-        take_profit=210.0, stop_loss=180.0,
+        client,
+        "AAPL",
+        10,
+        side="buy",
+        order_type="bracket",
+        take_profit=210.0,
+        stop_loss=180.0,
         time_in_force="gtc",
         client_order_id="system2-AAPL-20260702",
     )
@@ -93,10 +97,14 @@ def test_bracket_market_entry_carries_take_profit_and_stop_loss(patched_sdk):
 def test_bracket_limit_entry_carries_limit_price(patched_sdk):
     client = _FakeClient()
     ba.submit_order(
-        client, "TSLA", 8,
-        side="sell", order_type="bracket",
+        client,
+        "TSLA",
+        8,
+        side="sell",
+        order_type="bracket",
         limit_price=260.0,
-        take_profit=240.0, stop_loss=275.0,
+        take_profit=240.0,
+        stop_loss=275.0,
     )
     req = client.submitted[0]
     assert req.kwargs["limit_price"] == 260.0
@@ -112,11 +120,16 @@ def test_bracket_requires_take_profit_and_stop_loss(patched_sdk):
 def test_trailing_stop_passes_client_order_id(patched_sdk):
     client = _FakeClient()
     ba.submit_order(
-        client, "AAPL", 10,
-        side="sell", order_type="trailing_stop",
+        client,
+        "AAPL",
+        10,
+        side="sell",
+        order_type="trailing_stop",
         trail_percent=25.0,
         client_order_id="protect-system1-AAPL-20260702-protect-trail",
     )
     req = client.submitted[0]
     assert req.kwargs["trail_percent"] == 25.0
-    assert req.kwargs["client_order_id"] == "protect-system1-AAPL-20260702-protect-trail"
+    assert (
+        req.kwargs["client_order_id"] == "protect-system1-AAPL-20260702-protect-trail"
+    )

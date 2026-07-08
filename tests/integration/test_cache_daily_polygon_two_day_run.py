@@ -14,7 +14,6 @@ append され続けることを assert する。
 
 from __future__ import annotations
 
-from pathlib import Path
 from types import SimpleNamespace
 
 import pandas as pd
@@ -80,23 +79,38 @@ def test_two_consecutive_daily_runs_grow_full_csv(tmp_cache, monkeypatch):
         "2026-07-01": _grouped_daily(["AAPL", "SPY"], 101.0),
     }
     monkeypatch.setattr(
-        cdp, "get_polygon_grouped_daily",
+        cdp,
+        "get_polygon_grouped_daily",
         lambda ds: responses.get(ds, pd.DataFrame()),
     )
 
     # Day1 実行
-    rc = cdp.main([
-        "--start", "2026-06-30", "--end", "2026-06-30", "--sleep", "0",
-    ])
+    rc = cdp.main(
+        [
+            "--start",
+            "2026-06-30",
+            "--end",
+            "2026-06-30",
+            "--sleep",
+            "0",
+        ]
+    )
     assert rc == 0
     aapl_after_d1 = pd.read_csv(full_dir / "AAPL.csv", parse_dates=["Date"])
     assert len(aapl_after_d1) == 1
     d1_date = aapl_after_d1["Date"].iloc[0]
 
     # Day2 実行 (daily_pipeline.ps1 と同形態)
-    rc = cdp.main([
-        "--start", "2026-07-01", "--end", "2026-07-01", "--sleep", "0",
-    ])
+    rc = cdp.main(
+        [
+            "--start",
+            "2026-07-01",
+            "--end",
+            "2026-07-01",
+            "--sleep",
+            "0",
+        ]
+    )
     assert rc == 0
 
     aapl_after_d2 = pd.read_csv(full_dir / "AAPL.csv", parse_dates=["Date"])
@@ -122,14 +136,23 @@ def test_symbols_filter_only_affects_targets(tmp_cache, monkeypatch):
         "2026-06-30": _grouped_daily(["AAPL", "MSFT", "SPY"], 100.0),
     }
     monkeypatch.setattr(
-        cdp, "get_polygon_grouped_daily",
+        cdp,
+        "get_polygon_grouped_daily",
         lambda ds: responses.get(ds, pd.DataFrame()),
     )
 
-    rc = cdp.main([
-        "--start", "2026-06-30", "--end", "2026-06-30",
-        "--sleep", "0", "--symbols", "AAPL,SPY",
-    ])
+    rc = cdp.main(
+        [
+            "--start",
+            "2026-06-30",
+            "--end",
+            "2026-06-30",
+            "--sleep",
+            "0",
+            "--symbols",
+            "AAPL,SPY",
+        ]
+    )
     assert rc == 0
     written = {p.stem for p in full_dir.glob("*.csv")}
     assert written == {"AAPL", "SPY"}
@@ -144,7 +167,8 @@ def test_holiday_empty_response_does_not_touch_cache(tmp_cache, monkeypatch):
     # step1: 有効日 1 日ぶん書き込む
     responses = {"2026-06-30": _grouped_daily(["AAPL"], 100.0)}
     monkeypatch.setattr(
-        cdp, "get_polygon_grouped_daily",
+        cdp,
+        "get_polygon_grouped_daily",
         lambda ds: responses.get(ds, pd.DataFrame()),
     )
     cdp.main(["--start", "2026-06-30", "--end", "2026-06-30", "--sleep", "0"])
@@ -153,7 +177,8 @@ def test_holiday_empty_response_does_not_touch_cache(tmp_cache, monkeypatch):
 
     # step2: 空応答の日 (=祝日想定) を fetch → cache は触らない
     monkeypatch.setattr(
-        cdp, "get_polygon_grouped_daily",
+        cdp,
+        "get_polygon_grouped_daily",
         lambda ds: pd.DataFrame(),
     )
     # 平日だが空応答の日 (2026-07-03 は金曜)。history_cutoff は今日から 730 日前
@@ -175,13 +200,22 @@ def test_max_symbols_caps_written_count(tmp_cache, monkeypatch):
         "2026-06-30": _grouped_daily(["A", "B", "C", "D", "E"], 100.0),
     }
     monkeypatch.setattr(
-        cdp, "get_polygon_grouped_daily",
+        cdp,
+        "get_polygon_grouped_daily",
         lambda ds: responses.get(ds, pd.DataFrame()),
     )
-    rc = cdp.main([
-        "--start", "2026-06-30", "--end", "2026-06-30",
-        "--sleep", "0", "--max-symbols", "3",
-    ])
+    rc = cdp.main(
+        [
+            "--start",
+            "2026-06-30",
+            "--end",
+            "2026-06-30",
+            "--sleep",
+            "0",
+            "--max-symbols",
+            "3",
+        ]
+    )
     assert rc == 0
     written = {p.stem for p in full_dir.glob("*.csv")}
     assert len(written) == 3

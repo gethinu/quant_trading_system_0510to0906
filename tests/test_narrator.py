@@ -75,20 +75,40 @@ def _sample_signals() -> dict:
         "systems": {
             "sys1": {
                 "signals": [
-                    {"symbol": "AAPL", "side": "BUY", "entry_price": 289.2,
-                     "weight": 0.18, "rank": 1, "reason": "SMA200 breakout"},
-                    {"symbol": "MSFT", "side": "BUY", "entry_price": 512.6,
-                     "weight": 0.15, "rank": 2, "reason": "ROC200 momentum"},
+                    {
+                        "symbol": "AAPL",
+                        "side": "BUY",
+                        "entry_price": 289.2,
+                        "weight": 0.18,
+                        "rank": 1,
+                        "reason": "SMA200 breakout",
+                    },
+                    {
+                        "symbol": "MSFT",
+                        "side": "BUY",
+                        "entry_price": 512.6,
+                        "weight": 0.15,
+                        "rank": 2,
+                        "reason": "ROC200 momentum",
+                    },
                 ],
-                "n_candidates_input": 21, "n_signals_output": 2,
+                "n_candidates_input": 21,
+                "n_signals_output": 2,
                 "gate_survival_ratio": 0.143,
             },
             "sys7": {
                 "signals": [
-                    {"symbol": "SPY", "side": "SELL", "entry_price": 641.8,
-                     "weight": 0.06, "rank": 1, "reason": "Catastrophe hedge"},
+                    {
+                        "symbol": "SPY",
+                        "side": "SELL",
+                        "entry_price": 641.8,
+                        "weight": 0.06,
+                        "rank": 1,
+                        "reason": "Catastrophe hedge",
+                    },
                 ],
-                "n_candidates_input": 1, "n_signals_output": 1,
+                "n_candidates_input": 1,
+                "n_signals_output": 1,
                 "gate_survival_ratio": 1.0,
             },
         },
@@ -242,7 +262,11 @@ def test_narrate_hallucination_falls_back(monkeypatch, caplog):
 def test_hallucination_ratio_direct():
     narrator = SignalNarrator()
     signals = _sample_signals()
-    clean = {"headline": "AAPL MSFT strong", "summary": "SPY hedge", "per_symbol_reasons": {}}
+    clean = {
+        "headline": "AAPL MSFT strong",
+        "summary": "SPY hedge",
+        "per_symbol_reasons": {},
+    }
     assert narrator._hallucination_ratio(clean, signals) == 0.0
     dirty = {"headline": "TSLA COIN NFLX", "summary": "", "per_symbol_reasons": {}}
     assert narrator._hallucination_ratio(dirty, signals) > 0.30

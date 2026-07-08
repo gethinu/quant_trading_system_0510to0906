@@ -27,13 +27,13 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta
 import json
 import logging
 import os
-import sys
-from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
 from pathlib import Path
+import sys
 from typing import Any
 
 # スクリプトを直接 (python scripts/daily_polygon_monitor.py / .ps1 経由) 実行しても
@@ -45,12 +45,38 @@ logger = logging.getLogger(__name__)
 # --- System 別 gate 定義 (core/system*.py を grep で実測) ---------------
 # 詳細は docs/HUMAN_TASK_polygon_daily_monitor_20260701.md §2.2 を参照。
 SYSTEM_GATES: dict[str, dict[str, Any]] = {
-    "sys1": {"min_price": 5.0, "dv_col": "DollarVolume20", "dv_min": 50_000_000, "warn_ratio": 0.05},
-    "sys2": {"min_price": 5.0, "dv_col": "DollarVolume20", "dv_min": 25_000_000, "warn_ratio": 0.06},
-    "sys3": {"min_price": 5.0, "dv_col": "DollarVolume20", "dv_min": 25_000_000, "warn_ratio": 0.06},
-    "sys4": {"min_price": None, "dv_col": "DollarVolume50", "dv_min": 100_000_000, "warn_ratio": 0.04},
+    "sys1": {
+        "min_price": 5.0,
+        "dv_col": "DollarVolume20",
+        "dv_min": 50_000_000,
+        "warn_ratio": 0.05,
+    },
+    "sys2": {
+        "min_price": 5.0,
+        "dv_col": "DollarVolume20",
+        "dv_min": 25_000_000,
+        "warn_ratio": 0.06,
+    },
+    "sys3": {
+        "min_price": 5.0,
+        "dv_col": "DollarVolume20",
+        "dv_min": 25_000_000,
+        "warn_ratio": 0.06,
+    },
+    "sys4": {
+        "min_price": None,
+        "dv_col": "DollarVolume50",
+        "dv_min": 100_000_000,
+        "warn_ratio": 0.04,
+    },
     "sys5": {"min_price": 5.0, "dv_col": None, "dv_min": None, "warn_ratio": 0.15},
-    "sys6": {"min_price": 5.0, "dv_col": "DollarVolume50", "dv_min": 10_000_000, "warn_ratio": 0.10, "min_col": "Low"},
+    "sys6": {
+        "min_price": 5.0,
+        "dv_col": "DollarVolume50",
+        "dv_min": 10_000_000,
+        "warn_ratio": 0.10,
+        "min_col": "Low",
+    },
     "sys7": {"spy_only": True, "warn_ratio": 1.0},
 }
 
@@ -107,6 +133,7 @@ def previous_business_day(anchor: date | None = None) -> date:
 def fetch_grouped_daily(target_date: str) -> Any:
     """Polygon Grouped Daily を fetch する thin wrapper。"""
     from common.polygon_data import get_polygon_grouped_daily
+
     return get_polygon_grouped_daily(target_date)
 
 
@@ -120,6 +147,7 @@ def apply_common_stock_filter(grouped_df: Any) -> Any:
     if grouped_df is None or getattr(grouped_df, "empty", True):
         return grouped_df
     from common.symbol_universe import is_common_stock_symbol
+
     try:
         raw_n = int(getattr(grouped_df, "shape", [0])[0])
         mask = [is_common_stock_symbol(sym) for sym in grouped_df.index]
@@ -127,7 +155,9 @@ def apply_common_stock_filter(grouped_df: Any) -> Any:
         kept = int(getattr(filtered, "shape", [0])[0])
         logger.info(
             "universe filter: %d -> %d (common stock only, %d dropped)",
-            raw_n, kept, raw_n - kept,
+            raw_n,
+            kept,
+            raw_n - kept,
         )
         return filtered
     except Exception as exc:  # noqa: BLE001
@@ -179,7 +209,9 @@ def _compute_dv_from_grouped(
 ) -> dict[str, dict[str, float]]:
     """Grouped Daily を過去 ``lookback_days`` 営業日分 fetch し DV20/50 を on-the-fly 計算。"""
     import time
+
     import pandas as pd
+
     from common.polygon_data import get_polygon_grouped_daily
 
     end = datetime.strptime(target_date, "%Y-%m-%d").date()
@@ -232,6 +264,7 @@ def load_dv_cache(
     if cache_dir is None:
         try:
             from config.settings import get_settings
+
             cache_dir = Path(get_settings(create_dirs=False).DATA_CACHE_DIR)
         except Exception:
             cache_dir = Path("data_cache")
@@ -405,7 +438,11 @@ def build_pipeline_report(
 
     systems_out: dict[str, Any] = {}
     for sysname, phase_defs in SYSTEM_PIPELINE_PHASES.items():
-        measured = {} if empty else _measurable_counts_for_system(sysname, grouped_df, dv_cache)
+        measured = (
+            {}
+            if empty
+            else _measurable_counts_for_system(sysname, grouped_df, dv_cache)
+        )
         universe_count = measured.get("Tgt", 0)
 
         phases_out: list[dict[str, Any]] = []
@@ -477,7 +514,9 @@ def compute_delta(current: CoverageReport, previous_path: Path | None) -> None:
         delta = round(cur_ratio - prev_ratio, 4)
         current.delta_vs_previous[sysname] = delta
         if delta < 0:
-            current.consecutive_drops[sysname] = int(prev_drops.get(sysname, 0) or 0) + 1
+            current.consecutive_drops[sysname] = (
+                int(prev_drops.get(sysname, 0) or 0) + 1
+            )
         else:
             current.consecutive_drops[sysname] = 0
 
@@ -486,7 +525,8 @@ def compute_delta(current: CoverageReport, previous_path: Path | None) -> None:
         current.notes.append(f"consecutive_declines_3d: {dropping}")
     logger.info(
         "compute_delta: vs %s done (delta=%s)",
-        previous_path.name, current.delta_vs_previous,
+        previous_path.name,
+        current.delta_vs_previous,
     )
 
 
@@ -500,10 +540,12 @@ def _build_rejected_top10(
         return []
     import math
 
-    sys1_survived = set(survivals.get("sys1", SystemSurvival(system="sys1")).survived_tickers)
+    sys1_survived = set(
+        survivals.get("sys1", SystemSurvival(system="sys1")).survived_tickers
+    )
     close = grouped_df["Close"].astype("float64")
     vol = grouped_df["Volume"].astype("float64")
-    dollar_vol = (close * vol)
+    dollar_vol = close * vol
     order = dollar_vol.sort_values(ascending=False)
 
     rejected: list[dict[str, str]] = []
@@ -545,11 +587,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--dv-lookback", type=int, default=0)
     # 2026-07-02 hygiene: coverage の n_total は普通株のみに絞る
     p.add_argument(
-        "--common-only", dest="common_only", action="store_true", default=True,
+        "--common-only",
+        dest="common_only",
+        action="store_true",
+        default=True,
         help="preferred/warrant/unit/rights を除外し普通株のみで集計 (default)。",
     )
     p.add_argument(
-        "--no-common-only", dest="common_only", action="store_false",
+        "--no-common-only",
+        dest="common_only",
+        action="store_false",
         help="pattern filter を無効化 (debug 用)。",
     )
     p.add_argument("--dv-sleep", type=float, default=13.0)
@@ -573,24 +620,38 @@ def main(argv: list[str] | None = None) -> int:
     target_date = _parse_target_date(args.date)
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
-    output_path = args.output_dir / f"polygon_daily_coverage_{target_date.replace('-', '')}.json"
+    output_path = (
+        args.output_dir / f"polygon_daily_coverage_{target_date.replace('-', '')}.json"
+    )
     pipeline_path = args.output_dir / f"pipeline_{target_date.replace('-', '')}.json"
-    previous_path = args.output_dir / f"polygon_daily_coverage_{previous_business_day(datetime.strptime(target_date, '%Y-%m-%d').date()).strftime('%Y%m%d')}.json"
+    previous_path = (
+        args.output_dir
+        / f"polygon_daily_coverage_{previous_business_day(datetime.strptime(target_date, '%Y-%m-%d').date()).strftime('%Y%m%d')}.json"
+    )
 
-    logger.info("target_date=%s  output=%s  pipeline=%s  dry_run=%s",
-                target_date, output_path, pipeline_path, args.dry_run)
+    logger.info(
+        "target_date=%s  output=%s  pipeline=%s  dry_run=%s",
+        target_date,
+        output_path,
+        pipeline_path,
+        args.dry_run,
+    )
 
     report = CoverageReport(date=target_date)
 
     if args.dry_run:
         report.notes.append("dry_run: skeleton only (fetch skipped)")
         output_path.write_text(report.to_json(), encoding="utf-8")
-        pipeline = build_pipeline_report(None, {}, target_date, signals_dir=args.output_dir)
+        pipeline = build_pipeline_report(
+            None, {}, target_date, signals_dir=args.output_dir
+        )
         pipeline["notes"].append("dry_run: skeleton only (counts unmeasured)")
         pipeline_path.write_text(
             json.dumps(pipeline, ensure_ascii=False, indent=2), encoding="utf-8"
         )
-        logger.info("[dry-run] wrote skeleton reports -> %s , %s", output_path, pipeline_path)
+        logger.info(
+            "[dry-run] wrote skeleton reports -> %s , %s", output_path, pipeline_path
+        )
         return 0
 
     try:
@@ -622,7 +683,12 @@ def main(argv: list[str] | None = None) -> int:
     pipeline_path.write_text(
         json.dumps(pipeline, ensure_ascii=False, indent=2), encoding="utf-8"
     )
-    logger.info("wrote %s and %s (n_total=%d)", output_path, pipeline_path, report.n_candidates_total)
+    logger.info(
+        "wrote %s and %s (n_total=%d)",
+        output_path,
+        pipeline_path,
+        report.n_candidates_total,
+    )
     return notify_warnings(report)
 
 

@@ -17,7 +17,7 @@ drawdown flatten と sector cap を **純関数** として提供する。config
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Any
 
@@ -103,9 +103,7 @@ def load_guard_config() -> dict[str, float]:
         pf = get_settings().risk.portfolio
         return {
             "drawdown_flatten_pct": float(getattr(pf, "drawdown_flatten_pct", 0.0)),
-            "max_positions_per_sector": int(
-                getattr(pf, "max_positions_per_sector", 0)
-            ),
+            "max_positions_per_sector": int(getattr(pf, "max_positions_per_sector", 0)),
         }
     except Exception:
         return {"drawdown_flatten_pct": 0.0, "max_positions_per_sector": 0}

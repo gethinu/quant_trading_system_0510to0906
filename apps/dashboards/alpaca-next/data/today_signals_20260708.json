@@ -1,0 +1,129 @@
+{
+  "version": "1.0",
+  "date": "2026-07-08",
+  "generated_at": "2026-07-08T06:03:59+09:00",
+  "provider": "polygon",
+  "systems": {
+    "sys1": {
+      "signals": [
+        {
+          "symbol": "SPY",
+          "side": "BUY",
+          "entry_price": 745.76,
+          "weight": 1.0,
+          "rank": 1,
+          "reason": "ROC200が1位（全1銘柄中）のため"
+        }
+      ],
+      "n_candidates_input": 1,
+      "n_signals_output": 1,
+      "gate_survival_ratio": 1.0,
+      "funnel": {
+        "target": 290,
+        "filter_pass": 2,
+        "setup_pass": 1,
+        "candidate_count": 1,
+        "entry_count": 1,
+        "exit_count": null
+      }
+    },
+    "sys2": {
+      "signals": [],
+      "n_candidates_input": 0,
+      "n_signals_output": 0,
+      "gate_survival_ratio": 0.0,
+      "funnel": {
+        "target": 290,
+        "filter_pass": 0,
+        "setup_pass": 0,
+        "candidate_count": 0,
+        "entry_count": 0,
+        "exit_count": null
+      }
+    },
+    "sys3": {
+      "signals": [],
+      "n_candidates_input": 0,
+      "n_signals_output": 0,
+      "gate_survival_ratio": 0.0,
+      "funnel": {
+        "target": 290,
+        "filter_pass": 0,
+        "setup_pass": 0,
+        "candidate_count": 0,
+        "entry_count": 0,
+        "exit_count": null
+      }
+    },
+    "sys4": {
+      "signals": [],
+      "n_candidates_input": 1,
+      "n_signals_output": 0,
+      "gate_survival_ratio": 0.0,
+      "funnel": {
+        "target": 290,
+        "filter_pass": 1,
+        "setup_pass": 1,
+        "candidate_count": 1,
+        "entry_count": 0,
+        "exit_count": null
+      }
+    },
+    "sys5": {
+      "signals": [],
+      "n_candidates_input": 0,
+      "n_signals_output": 0,
+      "gate_survival_ratio": 0.0,
+      "funnel": {
+        "target": 290,
+        "filter_pass": 0,
+        "setup_pass": 0,
+        "candidate_count": 0,
+        "entry_count": 0,
+        "exit_count": null
+      }
+    },
+    "sys6": {
+      "signals": [],
+      "n_candidates_input": 0,
+      "n_signals_output": 0,
+      "gate_survival_ratio": 0.0,
+      "funnel": {
+        "target": 290,
+        "filter_pass": 1,
+        "setup_pass": 0,
+        "candidate_count": 0,
+        "entry_count": 0,
+        "exit_count": null
+      }
+    },
+    "sys7": {
+      "signals": [],
+      "n_candidates_input": 0,
+      "n_signals_output": 0,
+      "gate_survival_ratio": 0.0,
+      "funnel": {
+        "target": 290,
+        "filter_pass": 1,
+        "setup_pass": 0,
+        "candidate_count": 0,
+        "entry_count": 0,
+        "exit_count": null
+      }
+    }
+  },
+  "portfolio": {
+    "total_signals": 1,
+    "total_notional_usd": 745.76,
+    "hedge": null,
+    "universe_target": 290
+  },
+  "meta": {
+    "cli_version": "0.1.0",
+    "run_id": "20260708_060309_b1d78c",
+    "elapsed_seconds": 50.2,
+    "status": "ok",
+    "abort_reason": null,
+    "publish_status": "ok"
+  }
+}

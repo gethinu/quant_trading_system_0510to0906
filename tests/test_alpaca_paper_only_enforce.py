@@ -36,7 +36,7 @@ def test_paper_false_raises(monkeypatch):
 
 
 def test_paper_zero_raises(monkeypatch):
-    """"0" も false 相当として例外化 (bool 文字列の幅広カバー)。"""
+    """ "0" も false 相当として例外化 (bool 文字列の幅広カバー)。"""
     monkeypatch.setenv("ALPACA_PAPER", "0")
     with pytest.raises(LiveAccountGuardError):
         assert_paper_env()

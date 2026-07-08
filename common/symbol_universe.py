@@ -322,10 +322,15 @@ def build_symbol_universe_from_settings(
 # trading universe と一致 (build_rolling が使う `_symbols.json` と揃う)。
 
 _NON_COMMON_SUFFIXES = (
-    ".W", ".WS", ".WI",
-    ".U", ".UN",
-    ".R", ".RT",
-    ".N", ".NT",
+    ".W",
+    ".WS",
+    ".WI",
+    ".U",
+    ".UN",
+    ".R",
+    ".RT",
+    ".N",
+    ".NT",
 )
 
 

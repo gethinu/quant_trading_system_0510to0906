@@ -14,10 +14,10 @@ from __future__ import annotations
 from typing import Any
 
 from common.publishers.base import (
+    WARN_SURVIVAL_THRESHOLD,
     Publisher,
     PublishResult,
     SignalMessage,
-    WARN_SURVIVAL_THRESHOLD,
 )
 from common.publishers.email import EmailPublisher
 from common.publishers.line import LinePublisher

@@ -174,10 +174,10 @@ def task_precompute_shared_indicators():
 def task_run_auto_rule():
     """自動ルールに基づいてポジションをエグジット"""
     try:
-        from scripts.run_auto_rule import main as run_auto_rule_main
-
         # paper=True でペーパートレーディング、dry_run=False で実際に注文送信
         import sys
+
+        from scripts.run_auto_rule import main as run_auto_rule_main
 
         sys.argv = ["run_auto_rule", "--paper"]  # 本番の場合は --paper を削除
         run_auto_rule_main()
@@ -211,8 +211,9 @@ def task_sync_positions():
 def _notify_task_error(task_name: str):
     """タスク失敗をSlack通知"""
     try:
-        from common.error_notifier import notify_error
         import traceback
+
+        from common.error_notifier import notify_error
 
         notify_error(
             task_name, f"タスク {task_name} が失敗しました", traceback.format_exc()
@@ -235,8 +236,10 @@ def task_weekly_summary_report():
 def task_monthly_detailed_report():
     """月次詳細レポートをExcel/CSVで生成"""
     try:
-        from scripts.monthly_detailed_report import generate_monthly_report
-        from scripts.monthly_detailed_report import send_notification
+        from scripts.monthly_detailed_report import (
+            generate_monthly_report,
+            send_notification,
+        )
 
         report_files = generate_monthly_report(paper=True)
         send_notification(report_files, paper=True)

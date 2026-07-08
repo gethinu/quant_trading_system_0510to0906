@@ -50,12 +50,13 @@ from common.alpaca_trading import (  # noqa: E402
 from common.position_tracker import load_tracker  # noqa: E402
 from common.trade_management import SYSTEM_TRADE_RULES  # noqa: E402
 
-
 ROOT = Path(__file__).resolve().parents[1]
 SPY_ROLLING = ROOT / "data_cache" / "rolling" / "SPY.csv"
 
 
-def _collect_entry_orders_index(results_dir: Path, lookback_days: int = 30) -> dict[str, dict[str, Any]]:
+def _collect_entry_orders_index(
+    results_dir: Path, lookback_days: int = 30
+) -> dict[str, dict[str, Any]]:
     idx: dict[str, dict[str, Any]] = {}
     if not results_dir.exists():
         return idx
@@ -177,9 +178,13 @@ def _build_status_row(
         "holding_days": holding_days,
         "max_holding_days": int(getattr(rules, "max_holding_days", 0)) if rules else 0,
         "trailing_stop_pct": (
-            float(rules.trailing_stop_pct) if rules and rules.use_trailing_stop else None
+            float(rules.trailing_stop_pct)
+            if rules and rules.use_trailing_stop
+            else None
         ),
-        "profit_target_type": getattr(rules, "profit_target_type", None) if rules else None,
+        "profit_target_type": (
+            getattr(rules, "profit_target_type", None) if rules else None
+        ),
         "stop_price_est": None,
         "target_price_est": None,
         "distance_to_stop_pct": None,
@@ -206,7 +211,9 @@ def _build_status_row(
     if atr_stop:
         stop_dist = atr_stop * rules.stop_atr_multiplier
         if snap.side == "long":
-            row["stop_price_est"] = round(max(0.01, snap.avg_entry_price - stop_dist), 4)
+            row["stop_price_est"] = round(
+                max(0.01, snap.avg_entry_price - stop_dist), 4
+            )
         else:
             row["stop_price_est"] = round(snap.avg_entry_price + stop_dist, 4)
         if current_price and row["stop_price_est"]:
@@ -263,7 +270,11 @@ def main(argv: list[str] | None = None) -> int:
     date_str = args.date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
     date_compact = date_str.replace("-", "")
     results_dir = Path(args.results_dir)
-    output_path = Path(args.output_json) if args.output_json else results_dir / f"paper_status_{date_compact}.json"
+    output_path = (
+        Path(args.output_json)
+        if args.output_json
+        else results_dir / f"paper_status_{date_compact}.json"
+    )
 
     snapshots: list[PositionSnapshot] = []
     client: Any | None = None
@@ -281,7 +292,9 @@ def main(argv: list[str] | None = None) -> int:
 
     tracker = load_tracker()
     entry_orders_index = _collect_entry_orders_index(results_dir)
-    hydrate_system_tags(snapshots, tracker=tracker, entry_orders_index=entry_orders_index)
+    hydrate_system_tags(
+        snapshots, tracker=tracker, entry_orders_index=entry_orders_index
+    )
 
     spy_high, spy_max70 = _load_spy_context()
     atr_by_symbol = _load_atr_by_symbol([s.symbol for s in snapshots])

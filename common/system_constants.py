@@ -59,9 +59,13 @@ SYSTEM4_SMA_PERIOD = 200
 #   旧値: SYSTEM5_MIN_DOLLAR_VOLUME=25_000_000 は spec の桁違い かつ 未使用 (dead)、
 #         SYSTEM5_ATR_PCT_THRESHOLD=0.025 は spec の 4% を下回る緩め設定。
 #   Case A では spec 値に是正 + 実 gate として core/system5.py の filter に接続。
-SYSTEM5_MIN_PRICE = 5.0  # docs 未記載だが penny stock 除外の operational safety として維持
+SYSTEM5_MIN_PRICE = (
+    5.0  # docs 未記載だが penny stock 除外の operational safety として維持
+)
 SYSTEM5_MIN_AVG_VOLUME_50 = 500_000  # spec: 過去50日の平均出来高 > 500k 株
-SYSTEM5_MIN_DOLLAR_VOLUME = 2_500_000  # spec: 過去50日の平均売買代金 > 2.5M $ (旧 25M dead から是正)
+SYSTEM5_MIN_DOLLAR_VOLUME = (
+    2_500_000  # spec: 過去50日の平均売買代金 > 2.5M $ (旧 25M dead から是正)
+)
 SYSTEM5_ATR_PCT_THRESHOLD = 0.04  # spec: ATR > 4% (旧 2.5% から是正)
 SYSTEM5_ADX_THRESHOLD = 55  # ADX7 > 55
 SYSTEM5_ADX_PERIOD = 7
@@ -76,6 +80,20 @@ SYSTEM6_DOLLAR_VOLUME_PERIOD = 50
 # === System7 (SPY short catastrophe hedge) 定数 ===
 SYSTEM7_SYMBOL = "SPY"  # 固定シンボル
 SYSTEM7_MIN_ROWS = 150
+
+# === エントリー対象から除外するヘッジ/インデックス銘柄 (systems 1-6) ===
+# docs/systems/INDEX.md: システム7 は「SPY 固定のヘッジ戦略（変更禁止）」、
+# システム1-6 は普通株が対象。SPY はマーケットレジーム判定 (SPY>SMA100/SMA200 ゲート)
+# と System7 ヘッジのために毎日ロードされるが、システム1-6 の *エントリー候補*
+# には決して含めてはならない。
+#
+# 背景 (2026-07-08 run_id 20260708_060309): EODHD 由来の common-stock フィルタが
+# 401 Unauthorized で失敗した日、universe が NASDAQ Trader 素通し (SPY を先頭に
+# 強制挿入) に degrade。さらに rolling が 290/7475 銘柄しか整備されず、常時鮮度
+# 維持される SPY (rolling anchor) だけが sys1 の ROC200 ランキングに残り「SPY BUY
+# rank1」を誤出力した。SYSTEM7_SYMBOL を唯一の要素とし、必要なら他インデックス
+# ETF (QQQ/DIA/IWM 等) を将来追加できる集合として定義する。
+HEDGE_INDEX_SYMBOLS: frozenset[str] = frozenset({SYSTEM7_SYMBOL})
 
 # === 共通フィルター閾値 ===
 DEFAULT_MIN_PRICE = 5.0
@@ -260,12 +278,42 @@ _PIPELINE_TRDLIST_COND: dict[str, str] = {
 
 def _build_pipeline_phases(sysname: str) -> list[dict[str, object]]:
     return [
-        {"name": "Tgt", "label": "Tgt", "condition": "ユニバース対象銘柄数", "measurable_from_grouped_daily": True},
-        {"name": "FILpass", "label": "FILpass", "condition": _PIPELINE_FILPASS_COND[sysname], "measurable_from_grouped_daily": True},
-        {"name": "STUpass", "label": "STUpass", "condition": _PIPELINE_STUPASS_COND[sysname], "measurable_from_grouped_daily": False},
-        {"name": "TRDlist", "label": "TRDlist", "condition": _PIPELINE_TRDLIST_COND[sysname], "measurable_from_grouped_daily": False},
-        {"name": "Entry", "label": "Entry", "condition": "allocation 後エントリ発火", "measurable_from_grouped_daily": False},
-        {"name": "Exit", "label": "Exit", "condition": "本日手仕舞い発火", "measurable_from_grouped_daily": False},
+        {
+            "name": "Tgt",
+            "label": "Tgt",
+            "condition": "ユニバース対象銘柄数",
+            "measurable_from_grouped_daily": True,
+        },
+        {
+            "name": "FILpass",
+            "label": "FILpass",
+            "condition": _PIPELINE_FILPASS_COND[sysname],
+            "measurable_from_grouped_daily": True,
+        },
+        {
+            "name": "STUpass",
+            "label": "STUpass",
+            "condition": _PIPELINE_STUPASS_COND[sysname],
+            "measurable_from_grouped_daily": False,
+        },
+        {
+            "name": "TRDlist",
+            "label": "TRDlist",
+            "condition": _PIPELINE_TRDLIST_COND[sysname],
+            "measurable_from_grouped_daily": False,
+        },
+        {
+            "name": "Entry",
+            "label": "Entry",
+            "condition": "allocation 後エントリ発火",
+            "measurable_from_grouped_daily": False,
+        },
+        {
+            "name": "Exit",
+            "label": "Exit",
+            "condition": "本日手仕舞い発火",
+            "measurable_from_grouped_daily": False,
+        },
     ]
 
 
@@ -312,6 +360,9 @@ __all__ = [
     "SYSTEM5_REQUIRED_INDICATORS",
     "SYSTEM6_REQUIRED_INDICATORS",
     "SYSTEM7_REQUIRED_INDICATORS",
+    # ヘッジ/インデックス除外 (systems 1-6 エントリー universe)
+    "SYSTEM7_SYMBOL",
+    "HEDGE_INDEX_SYMBOLS",
     # 設定管理
     "SYSTEM_CONFIGS",
     "get_system_config",

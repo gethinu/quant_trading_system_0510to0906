@@ -17,18 +17,60 @@ def signals() -> pd.DataFrame:
     return pd.DataFrame(
         [
             # system1 = market, long -> buy
-            {"symbol": "AAPL", "system": "system1", "side": "long", "shares": 10, "entry_price": 195.0, "entry_date": "2026-06-30"},
+            {
+                "symbol": "AAPL",
+                "system": "system1",
+                "side": "long",
+                "shares": 10,
+                "entry_price": 195.0,
+                "entry_date": "2026-06-30",
+            },
             # system2 = limit, short -> sell (limit_price=entry_price)
-            {"symbol": "TSLA", "system": "system2", "side": "short", "shares": 8, "entry_price": 250.0, "entry_date": "2026-06-30"},
+            {
+                "symbol": "TSLA",
+                "system": "system2",
+                "side": "short",
+                "shares": 8,
+                "entry_price": 250.0,
+                "entry_date": "2026-06-30",
+            },
             # system3 = limit (前日終値-7% 指値買), long -> buy (docs-alignment 2026-07-03)
-            {"symbol": "AMD", "system": "system3", "side": "long", "shares": 5, "entry_price": 140.0, "entry_date": "2026-06-30"},
+            {
+                "symbol": "AMD",
+                "system": "system3",
+                "side": "long",
+                "shares": 5,
+                "entry_price": 140.0,
+                "entry_date": "2026-06-30",
+            },
             # system5 = limit (前日終値-3% 指値買), long -> buy (docs-alignment 2026-07-03)
-            {"symbol": "NVDA", "system": "system5", "side": "long", "shares": 4, "entry_price": 120.0, "entry_date": "2026-06-30"},
+            {
+                "symbol": "NVDA",
+                "system": "system5",
+                "side": "long",
+                "shares": 4,
+                "entry_price": 120.0,
+                "entry_date": "2026-06-30",
+            },
             # system7 = MARKET (SPY hedge, 翌日寄付成行 per docs/systems/システム7.txt),
             # short -> sell. docs-alignment 2026-07-03 に是正 (旧: limit)。
-            {"symbol": "SPY", "system": "system7", "side": "short", "shares": 3, "entry_price": 545.0, "entry_date": "2026-06-30"},
+            {
+                "symbol": "SPY",
+                "system": "system7",
+                "side": "short",
+                "shares": 3,
+                "entry_price": 545.0,
+                "entry_date": "2026-06-30",
+            },
             # shares<=0 -> フィルタされる
-            {"symbol": "ZERO", "system": "system1", "side": "long", "shares": 0, "entry_price": 10.0, "entry_date": "2026-06-30"},
+            {
+                "symbol": "ZERO",
+                "system": "system1",
+                "side": "long",
+                "shares": 0,
+                "entry_price": 10.0,
+                "entry_date": "2026-06-30",
+            },
         ]
     )
 
@@ -84,8 +126,20 @@ def test_duplicate_signals_deduplicated():
     """(symbol, system, entry_date) 重複は 1 注文に統合。"""
     df = pd.DataFrame(
         [
-            {"symbol": "AAPL", "system": "system1", "side": "long", "shares": 10, "entry_date": "2026-06-30"},
-            {"symbol": "AAPL", "system": "system1", "side": "long", "shares": 10, "entry_date": "2026-06-30"},
+            {
+                "symbol": "AAPL",
+                "system": "system1",
+                "side": "long",
+                "shares": 10,
+                "entry_date": "2026-06-30",
+            },
+            {
+                "symbol": "AAPL",
+                "system": "system1",
+                "side": "long",
+                "shares": 10,
+                "entry_date": "2026-06-30",
+            },
         ]
     )
     orders = signals_to_orders(df, account_equity=100000.0, dry_run=True)
@@ -95,7 +149,15 @@ def test_duplicate_signals_deduplicated():
 def test_open_position_suppresses_duplicate_buy():
     """既にロング保有中の銘柄は買い増ししない。"""
     df = pd.DataFrame(
-        [{"symbol": "AAPL", "system": "system1", "side": "long", "shares": 10, "entry_date": "2026-06-30"}]
+        [
+            {
+                "symbol": "AAPL",
+                "system": "system1",
+                "side": "long",
+                "shares": 10,
+                "entry_date": "2026-06-30",
+            }
+        ]
     )
     orders = signals_to_orders(
         df, account_equity=100000.0, dry_run=True, open_positions={"AAPL": 10.0}
@@ -106,7 +168,15 @@ def test_open_position_suppresses_duplicate_buy():
 def test_open_position_allows_opposite_side():
     """ショート保有中に long シグナルは (ドテン) 許可される。"""
     df = pd.DataFrame(
-        [{"symbol": "AAPL", "system": "system1", "side": "long", "shares": 10, "entry_date": "2026-06-30"}]
+        [
+            {
+                "symbol": "AAPL",
+                "system": "system1",
+                "side": "long",
+                "shares": 10,
+                "entry_date": "2026-06-30",
+            }
+        ]
     )
     orders = signals_to_orders(
         df, account_equity=100000.0, dry_run=True, open_positions={"AAPL": -5.0}
@@ -124,7 +194,15 @@ def test_empty_or_missing_shares_returns_empty():
 def test_limit_without_price_falls_back_to_market():
     """limit システムでも entry_price が無ければ market にフォールバック。"""
     df = pd.DataFrame(
-        [{"symbol": "TSLA", "system": "system2", "side": "short", "shares": 5, "entry_date": "2026-06-30"}]
+        [
+            {
+                "symbol": "TSLA",
+                "system": "system2",
+                "side": "short",
+                "shares": 5,
+                "entry_date": "2026-06-30",
+            }
+        ]
     )
     orders = signals_to_orders(df, account_equity=100000.0, dry_run=True)
     assert orders[0].order_type == "market"

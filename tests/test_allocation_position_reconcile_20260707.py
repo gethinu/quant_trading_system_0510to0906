@@ -10,14 +10,12 @@ from __future__ import annotations
 from pathlib import Path
 import sys
 
-import pandas as pd
-
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import scripts.run_all_systems_today as rast  # noqa: E402
 from core.final_allocation import count_active_positions_by_system  # noqa: E402
+import scripts.run_all_systems_today as rast  # noqa: E402
 
 
 class _Pos:
@@ -75,4 +73,6 @@ def test_held_positions_reduce_available_slots():
     positions = [_Pos("AAPL", 10), _Pos("MSFT", 5)]
     sym_map = {"AAPL": "system1", "MSFT": "system1"}
     counts = count_active_positions_by_system(positions, sym_map)
-    assert counts.get("system1") == 2  # system1 は 2 枠使用中 → available_slots は 10-2=8
+    assert (
+        counts.get("system1") == 2
+    )  # system1 は 2 枠使用中 → available_slots は 10-2=8

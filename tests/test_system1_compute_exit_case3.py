@@ -20,9 +20,9 @@ from __future__ import annotations
 
 import inspect
 import io
+from pathlib import Path
 import re
 import tokenize
-from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -63,24 +63,24 @@ class TestSystem1ComputeExitStructure:
 
     def test_no_max_hold_days_config_key(self):
         src = self._source(System1Strategy)
-        assert '"max_hold_days"' not in src and "'max_hold_days'" not in src, (
-            "D5 regression: System1 has no time-based forced exit (spec)."
-        )
+        assert (
+            '"max_hold_days"' not in src and "'max_hold_days'" not in src
+        ), "D5 regression: System1 has no time-based forced exit (spec)."
 
     def test_uses_trailing_pct_config(self):
         src = self._source(System1Strategy)
-        assert '"trailing_pct"' in src or "'trailing_pct'" in src, (
-            "S1 trailing width must be resolved from config.trailing_pct."
-        )
+        assert (
+            '"trailing_pct"' in src or "'trailing_pct'" in src
+        ), "S1 trailing width must be resolved from config.trailing_pct."
 
     def test_default_trailing_pct_is_25_percent(self):
         src = self._source(System1Strategy)
         m = re.search(r'trailing_pct["\']\s*,\s*([0-9.]+)', src)
         assert m is not None, "trailing_pct default not extractable"
         default_val = float(m.group(1))
-        assert default_val == 0.25, (
-            f"S1 spec is 25%% trailing; default={default_val} violates spec."
-        )
+        assert (
+            default_val == 0.25
+        ), f"S1 spec is 25%% trailing; default={default_val} violates spec."
 
     def test_structure_matches_s4_trailing_only(self):
         s1_src = self._source(System1Strategy)
@@ -90,12 +90,10 @@ class TestSystem1ComputeExitStructure:
             "highest * (1 - trail_pct)",
             "close <= stop_price",
         ):
-            assert token in s1_src, (
-                f"S1.compute_exit missing S4-shape token {token!r}"
-            )
-            assert token in s4_src, (
-                f"S4.compute_exit should also contain {token!r} (baseline drift)"
-            )
+            assert token in s1_src, f"S1.compute_exit missing S4-shape token {token!r}"
+            assert (
+                token in s4_src
+            ), f"S4.compute_exit should also contain {token!r} (baseline drift)"
 
 
 class TestSystem1ComputeExitBehavior:
@@ -164,9 +162,9 @@ class TestSystem1ComputeExitBehavior:
         exit_price, _ = self.strategy.compute_exit(
             df, entry_idx=0, entry_price=100.0, stop_price=80.0
         )
-        assert exit_price == pytest.approx(146.0), (
-            "config.max_hold_days is being read by the new impl by mistake."
-        )
+        assert exit_price == pytest.approx(
+            146.0
+        ), "config.max_hold_days is being read by the new impl by mistake."
 
 
 def test_system1_strategy_file_has_no_max_hold_days_reference():
@@ -174,11 +172,7 @@ def test_system1_strategy_file_has_no_max_hold_days_reference():
 
     Docstring/comment mentions are ignored via tokenize.
     """
-    path = (
-        Path(__file__).resolve().parent.parent
-        / "strategies"
-        / "system1_strategy.py"
-    )
+    path = Path(__file__).resolve().parent.parent / "strategies" / "system1_strategy.py"
     text = path.read_text(encoding="utf-8")
     names = _code_tokens(text)
     assert "MAX_HOLD_DAYS_DEFAULT" not in names, (

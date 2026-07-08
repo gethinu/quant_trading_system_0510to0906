@@ -9,7 +9,6 @@ import uuid
 
 from dotenv import load_dotenv
 
-
 # F2 P0#8 audit fix (2026-07-03):
 # ``submit_order_with_retry`` は以前、client_order_id 未指定でも retry を
 # 何度でも走らせていた。timeout の retry は特に危険で、Alpaca 側が accept
@@ -59,6 +58,7 @@ def _is_transient_error(exc: Exception) -> bool:
     if any(p in msg for p in _TRANSIENT_ERROR_PATTERNS):
         return True
     return True  # 不明時は retry する (backward-compat)
+
 
 try:  # pragma: no cover - SDK 未導入環境でも壊れないように
     from alpaca.trading.client import TradingClient

@@ -26,9 +26,24 @@ from common.stage_metrics import StageSnapshot  # noqa: E402
 def _final_df() -> pd.DataFrame:
     return pd.DataFrame(
         [
-            {"symbol": "AAPL", "system": "system1", "side": "long", "entry_price": 100.0},
-            {"symbol": "MSFT", "system": "system1", "side": "long", "entry_price": 200.0},
-            {"symbol": "TSLA", "system": "system2", "side": "short", "entry_price": 250.0},
+            {
+                "symbol": "AAPL",
+                "system": "system1",
+                "side": "long",
+                "entry_price": 100.0,
+            },
+            {
+                "symbol": "MSFT",
+                "system": "system1",
+                "side": "long",
+                "entry_price": 200.0,
+            },
+            {
+                "symbol": "TSLA",
+                "system": "system2",
+                "side": "short",
+                "entry_price": 250.0,
+            },
         ]
     )
 
@@ -93,9 +108,7 @@ def test_funnel_none_phase_preserved_as_unmeasured():
     df = pd.DataFrame(
         [{"symbol": "AMD", "system": "system3", "side": "long", "entry_price": 90.0}]
     )
-    payload = build_signals_json(
-        df, None, date_str="2026-07-07", stage_metrics=metrics
-    )
+    payload = build_signals_json(df, None, date_str="2026-07-07", stage_metrics=metrics)
     funnel = payload["systems"]["sys3"]["funnel"]
     assert funnel["target"] == 4000
     assert funnel["setup_pass"] is None
@@ -105,10 +118,22 @@ def test_entry_count_backfilled_from_signals_when_null():
     """headless では entry_count が None になりがち → n_signals_output で補完する。"""
     # snapshot に entry_count を入れない (=None)。final_df に system1 の 2 signals。
     metrics = {"system1": StageSnapshot(progress=100, target=4000, candidate_count=12)}
-    df = pd.DataFrame([
-        {"symbol": "AAPL", "system": "system1", "side": "long", "entry_price": 100.0},
-        {"symbol": "MSFT", "system": "system1", "side": "long", "entry_price": 200.0},
-    ])
+    df = pd.DataFrame(
+        [
+            {
+                "symbol": "AAPL",
+                "system": "system1",
+                "side": "long",
+                "entry_price": 100.0,
+            },
+            {
+                "symbol": "MSFT",
+                "system": "system1",
+                "side": "long",
+                "entry_price": 200.0,
+            },
+        ]
+    )
     payload = build_signals_json(df, None, date_str="2026-07-07", stage_metrics=metrics)
     funnel = payload["systems"]["sys1"]["funnel"]
     assert funnel["entry_count"] == 2  # n_signals_output で補完
@@ -117,8 +142,15 @@ def test_entry_count_backfilled_from_signals_when_null():
 def test_entry_count_from_snapshot_not_overwritten():
     """snapshot に entry_count があればそれを優先 (補完で上書きしない)。"""
     metrics = {"system1": StageSnapshot(progress=100, target=4000, entry_count=7)}
-    df = pd.DataFrame([
-        {"symbol": "AAPL", "system": "system1", "side": "long", "entry_price": 100.0},
-    ])
+    df = pd.DataFrame(
+        [
+            {
+                "symbol": "AAPL",
+                "system": "system1",
+                "side": "long",
+                "entry_price": 100.0,
+            },
+        ]
+    )
     payload = build_signals_json(df, None, date_str="2026-07-07", stage_metrics=metrics)
     assert payload["systems"]["sys1"]["funnel"]["entry_count"] == 7

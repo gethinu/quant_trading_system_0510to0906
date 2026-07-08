@@ -18,7 +18,6 @@ from datetime import datetime, timedelta
 import json
 import logging
 from pathlib import Path
-from typing import Any
 
 import pandas as pd
 
@@ -274,8 +273,9 @@ def send_notification(report_files: dict[str, Path], paper: bool = True) -> None
     drive_links = {}
 
     try:
-        from common.google_drive_uploader import upload_to_drive, GDRIVE_AVAILABLE
         import os
+
+        from common.google_drive_uploader import GDRIVE_AVAILABLE, upload_to_drive
 
         folder_id = os.getenv("GOOGLE_DRIVE_FOLDER_ID")
 

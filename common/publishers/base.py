@@ -147,7 +147,9 @@ class Publisher(ABC):
     name: str = "base"
 
     @abstractmethod
-    def send(self, signals_json: dict[str, Any], *, dry_run: bool = False) -> PublishResult:
+    def send(
+        self, signals_json: dict[str, Any], *, dry_run: bool = False
+    ) -> PublishResult:
         """当日シグナル JSON (schema v1.0 dict) を配信する。
 
         dry_run=True では送信せず、生成 payload を PublishResult.detail に載せて返す。

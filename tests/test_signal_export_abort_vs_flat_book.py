@@ -28,15 +28,11 @@ from pathlib import Path
 import sys
 from unittest import mock
 
-import pytest
-
-
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from common import signal_export  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # build_signals_json: schema additive fields
@@ -114,14 +110,23 @@ def test_run_headless_systemexit_writes_aborted_marker_and_exits_3(
 
     fake_compute = mock.Mock(side_effect=SystemExit(1))
 
-    with mock.patch.dict(sys.modules, {"scripts.run_all_systems_today": mock.Mock(
-        compute_today_signals=fake_compute
-    )}):
-        rc = signal_export.run_headless([
-            "--headless",
-            "--date", "2026-07-03",
-            "--output-json", str(out_path),
-        ])
+    with mock.patch.dict(
+        sys.modules,
+        {
+            "scripts.run_all_systems_today": mock.Mock(
+                compute_today_signals=fake_compute
+            )
+        },
+    ):
+        rc = signal_export.run_headless(
+            [
+                "--headless",
+                "--date",
+                "2026-07-03",
+                "--output-json",
+                str(out_path),
+            ]
+        )
 
     assert rc == 3, "SystemExit must surface as exit code 3 (not 0)"
     assert out_path.exists()
@@ -138,14 +143,23 @@ def test_run_headless_success_path_writes_ok_status(tmp_path: Path) -> None:
     out_path = tmp_path / "today_signals.json"
 
     fake_compute = mock.Mock(return_value=(None, {}))
-    with mock.patch.dict(sys.modules, {"scripts.run_all_systems_today": mock.Mock(
-        compute_today_signals=fake_compute
-    )}):
-        rc = signal_export.run_headless([
-            "--headless",
-            "--date", "2026-07-03",
-            "--output-json", str(out_path),
-        ])
+    with mock.patch.dict(
+        sys.modules,
+        {
+            "scripts.run_all_systems_today": mock.Mock(
+                compute_today_signals=fake_compute
+            )
+        },
+    ):
+        rc = signal_export.run_headless(
+            [
+                "--headless",
+                "--date",
+                "2026-07-03",
+                "--output-json",
+                str(out_path),
+            ]
+        )
 
     assert rc == 0
     payload = json.loads(out_path.read_text(encoding="utf-8"))
@@ -159,13 +173,22 @@ def test_run_headless_generic_exception_still_returns_1(tmp_path: Path) -> None:
     out_path = tmp_path / "today_signals.json"
 
     fake_compute = mock.Mock(side_effect=RuntimeError("boom"))
-    with mock.patch.dict(sys.modules, {"scripts.run_all_systems_today": mock.Mock(
-        compute_today_signals=fake_compute
-    )}):
-        rc = signal_export.run_headless([
-            "--headless",
-            "--date", "2026-07-03",
-            "--output-json", str(out_path),
-        ])
+    with mock.patch.dict(
+        sys.modules,
+        {
+            "scripts.run_all_systems_today": mock.Mock(
+                compute_today_signals=fake_compute
+            )
+        },
+    ):
+        rc = signal_export.run_headless(
+            [
+                "--headless",
+                "--date",
+                "2026-07-03",
+                "--output-json",
+                str(out_path),
+            ]
+        )
 
     assert rc == 1  # unchanged from existing behavior

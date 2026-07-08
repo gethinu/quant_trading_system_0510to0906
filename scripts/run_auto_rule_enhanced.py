@@ -13,7 +13,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timedelta
+from datetime import datetime
 import json
 import logging
 from pathlib import Path
@@ -23,7 +23,7 @@ import pandas as pd
 
 from common import broker_alpaca as ba
 from common.alpaca_order import submit_exit_orders_df
-from common.trade_management import SYSTEM_TRADE_RULES, ExitReason
+from common.trade_management import SYSTEM_TRADE_RULES
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT / "data"
@@ -269,7 +269,7 @@ def build_auto_rows_enhanced(
                 exit_reason_counts[exit_reason] += 1
 
         except Exception:
-            logger.exception(f"failed to evaluate position")
+            logger.exception("failed to evaluate position")
 
     # Save updated trailing stops
     save_trailing_stops(trailing_stops)

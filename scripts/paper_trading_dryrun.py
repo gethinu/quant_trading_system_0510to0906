@@ -24,10 +24,38 @@ from common.alpaca_trading import (  # noqa: E402
 def _demo_signals() -> pd.DataFrame:
     return pd.DataFrame(
         [
-            {"symbol": "AAPL", "system": "system1", "side": "long", "shares": 10, "entry_price": 195.5, "entry_date": "2026-06-30"},
-            {"symbol": "MSFT", "system": "system3", "side": "long", "shares": 5, "entry_price": 420.0, "entry_date": "2026-06-30"},
-            {"symbol": "TSLA", "system": "system2", "side": "short", "shares": 8, "entry_price": 250.0, "entry_date": "2026-06-30"},
-            {"symbol": "SPY", "system": "system7", "side": "short", "shares": 3, "entry_price": 545.0, "entry_date": "2026-06-30"},
+            {
+                "symbol": "AAPL",
+                "system": "system1",
+                "side": "long",
+                "shares": 10,
+                "entry_price": 195.5,
+                "entry_date": "2026-06-30",
+            },
+            {
+                "symbol": "MSFT",
+                "system": "system3",
+                "side": "long",
+                "shares": 5,
+                "entry_price": 420.0,
+                "entry_date": "2026-06-30",
+            },
+            {
+                "symbol": "TSLA",
+                "system": "system2",
+                "side": "short",
+                "shares": 8,
+                "entry_price": 250.0,
+                "entry_date": "2026-06-30",
+            },
+            {
+                "symbol": "SPY",
+                "system": "system7",
+                "side": "short",
+                "shares": 3,
+                "entry_price": 545.0,
+                "entry_date": "2026-06-30",
+            },
         ]
     )
 
@@ -50,7 +78,9 @@ def load_signals(args):
     if args.demo:
         print("[demo] 内蔵デモ fixture を使用します (API 不要)。")
         return _demo_signals()
-    csv_path = Path(args.signals_csv) if args.signals_csv else _default_csv_for_date(args.date)
+    csv_path = (
+        Path(args.signals_csv) if args.signals_csv else _default_csv_for_date(args.date)
+    )
     if csv_path is None or not csv_path.exists():
         raise SystemExit(
             "signals CSV が見つかりません。--signals-csv <path> を指定するか、"
@@ -96,8 +126,16 @@ def _dryrun_from_json(args):
         rows = [o.to_row() for o in orders]
         df = pd.DataFrame(rows)
         cols = [
-            "symbol", "side", "qty", "notional_usd", "order_type",
-            "time_in_force", "system", "tier", "dry_run", "skip_reason",
+            "symbol",
+            "side",
+            "qty",
+            "notional_usd",
+            "order_type",
+            "time_in_force",
+            "system",
+            "tier",
+            "dry_run",
+            "skip_reason",
             "client_order_id",
         ]
         df = df[[c for c in cols if c in df.columns]]
@@ -142,7 +180,9 @@ def _dryrun_from_json(args):
         )
         print(f"[write] paper_orders JSON: {out_path}")
 
-    print("※ これは dry-run です。実発注は scripts/paper_trading_submit.py --confirm で行います。")
+    print(
+        "※ これは dry-run です。実発注は scripts/paper_trading_submit.py --confirm で行います。"
+    )
     return 0
 
 
@@ -175,8 +215,12 @@ def main(argv=None):
         action="store_true",
         help="fractional (notional 発注) を無効化し整数株で発注する。",
     )
-    parser.add_argument("--equity", type=float, default=10000.0, help="口座資産 (ログ用)。")
-    parser.add_argument("--demo", action="store_true", help="内蔵デモ fixture で動作確認。")
+    parser.add_argument(
+        "--equity", type=float, default=10000.0, help="口座資産 (ログ用)。"
+    )
+    parser.add_argument(
+        "--demo", action="store_true", help="内蔵デモ fixture で動作確認。"
+    )
     args = parser.parse_args(argv)
 
     if args.signals_json:
@@ -196,15 +240,23 @@ def main(argv=None):
     rows = [o.to_row() for o in orders]
     df = pd.DataFrame(rows)
     cols = [
-        "symbol", "side", "qty", "order_type", "limit_price",
-        "time_in_force", "system", "client_order_id",
+        "symbol",
+        "side",
+        "qty",
+        "order_type",
+        "limit_price",
+        "time_in_force",
+        "system",
+        "client_order_id",
     ]
     df = df[[c for c in cols if c in df.columns]]
 
     print("\n===== DRY-RUN: 送信予定注文 (実発注なし) =====")
     print(df.to_string(index=False))
     print(f"\n合計 {len(df)} 注文 / equity=${args.equity:,.0f}")
-    print("※ これは dry-run です。実発注は scripts/paper_trading_submit.py --confirm で行います。")
+    print(
+        "※ これは dry-run です。実発注は scripts/paper_trading_submit.py --confirm で行います。"
+    )
     return 0
 
 

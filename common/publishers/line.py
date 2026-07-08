@@ -33,7 +33,9 @@ class LinePublisher(Publisher):
     def is_configured(self) -> bool:
         return bool(self.access_token and self.to)
 
-    def send(self, signals_json: dict[str, Any], *, dry_run: bool = False) -> PublishResult:
+    def send(
+        self, signals_json: dict[str, Any], *, dry_run: bool = False
+    ) -> PublishResult:
         message = SignalMessage(payload=signals_json)
         detail = (
             "LinePublisher は Phase 2 で実装予定 (LINE Messaging API push)。"

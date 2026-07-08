@@ -31,41 +31,73 @@ def _sample_payload() -> dict:
         "systems": {
             "sys1": {
                 "signals": [
-                    {"symbol": "AAPL", "side": "BUY", "entry_price": 289.24,
-                     "weight": 0.2, "rank": 1, "reason": "SMA200 breakout"},
-                    {"symbol": "MSFT", "side": "BUY", "entry_price": 512.6,
-                     "weight": 0.18, "rank": 2, "reason": "ROC200"},
+                    {
+                        "symbol": "AAPL",
+                        "side": "BUY",
+                        "entry_price": 289.24,
+                        "weight": 0.2,
+                        "rank": 1,
+                        "reason": "SMA200 breakout",
+                    },
+                    {
+                        "symbol": "MSFT",
+                        "side": "BUY",
+                        "entry_price": 512.6,
+                        "weight": 0.18,
+                        "rank": 2,
+                        "reason": "ROC200",
+                    },
                 ],
-                "n_candidates_input": 20, "n_signals_output": 2,
+                "n_candidates_input": 20,
+                "n_signals_output": 2,
                 "gate_survival_ratio": 0.10,
             },
             "sys6": {  # 生存率 < 0.05 -> WARN
                 "signals": [
-                    {"symbol": "XOM", "side": "SELL", "entry_price": 118.2,
-                     "weight": 0.05, "rank": 1, "reason": "6-day high"},
+                    {
+                        "symbol": "XOM",
+                        "side": "SELL",
+                        "entry_price": 118.2,
+                        "weight": 0.05,
+                        "rank": 1,
+                        "reason": "6-day high",
+                    },
                 ],
-                "n_candidates_input": 100, "n_signals_output": 1,
+                "n_candidates_input": 100,
+                "n_signals_output": 1,
                 "gate_survival_ratio": 0.01,
             },
             "sys7": {
                 "signals": [
-                    {"symbol": "SPY", "side": "SELL", "entry_price": 641.8,
-                     "weight": 0.06, "rank": 1, "reason": "hedge"},
+                    {
+                        "symbol": "SPY",
+                        "side": "SELL",
+                        "entry_price": 641.8,
+                        "weight": 0.06,
+                        "rank": 1,
+                        "reason": "hedge",
+                    },
                 ],
-                "n_candidates_input": 1, "n_signals_output": 1,
+                "n_candidates_input": 1,
+                "n_signals_output": 1,
                 "gate_survival_ratio": 1.0,
             },
         },
         "portfolio": {
-            "total_signals": 4, "total_notional_usd": 50000.0,
+            "total_signals": 4,
+            "total_notional_usd": 50000.0,
             "hedge": {"symbol": "SPY", "side": "SELL", "entry_price": 641.8},
         },
-        "meta": {"cli_version": "0.1.0", "run_id": "20260701_061523_abc123",
-                 "elapsed_seconds": 47.3},
+        "meta": {
+            "cli_version": "0.1.0",
+            "run_id": "20260701_061523_abc123",
+            "elapsed_seconds": 47.3,
+        },
     }
 
 
 # --- SignalMessage ---------------------------------------------------------
+
 
 def test_signal_message_accessors_and_warn():
     msg = SignalMessage(payload=_sample_payload())
@@ -80,6 +112,7 @@ def test_signal_message_accessors_and_warn():
 
 
 # --- ntfy ------------------------------------------------------------------
+
 
 def test_ntfy_dry_run_headers_and_action():
     pub = NtfyPublisher(topic="quant-test-abc", priority=4)
@@ -118,13 +151,19 @@ def test_ntfy_unconfigured():
 
 # --- email (SendGrid) ------------------------------------------------------
 
+
 def test_email_dry_run_payload():
-    pub = EmailPublisher(api_key="SG.x", from_email="bot@ex.com", to_emails="a@ex.com,b@ex.com")
+    pub = EmailPublisher(
+        api_key="SG.x", from_email="bot@ex.com", to_emails="a@ex.com,b@ex.com"
+    )
     assert pub.is_configured() is True
     res = pub.send(_sample_payload(), dry_run=True)
     body = json.loads(res.detail)
     assert body["from"]["email"] == "bot@ex.com"
-    assert [p["email"] for p in body["personalizations"][0]["to"]] == ["a@ex.com", "b@ex.com"]
+    assert [p["email"] for p in body["personalizations"][0]["to"]] == [
+        "a@ex.com",
+        "b@ex.com",
+    ]
     types = [c["type"] for c in body["content"]]
     assert "text/plain" in types and "text/html" in types
     assert "2026-07-01" in body["subject"]
@@ -138,6 +177,7 @@ def test_email_unconfigured():
 
 
 # --- registry chain --------------------------------------------------------
+
 
 class _FakePublisher(Publisher):
     def __init__(self, name: str, ok: bool):
@@ -186,6 +226,7 @@ def test_registry_always_secondary():
 
 # --- factory + signal_export ----------------------------------------------
 
+
 def test_build_publisher_factory_and_unknown():
     assert build_publisher("ntfy", topic="t").name == "ntfy"
     assert build_publisher("email").name == "email"
@@ -196,18 +237,34 @@ def test_build_publisher_factory_and_unknown():
 def test_build_signals_json_from_dataframe():
     final_df = pd.DataFrame(
         [
-            {"system": "System1", "symbol": "AAPL", "side": "long",
-             "entry_price": 289.24, "shares": 10, "score": 5.0, "rank": 1,
-             "reason": "SMA200 breakout"},
-            {"system": "system7", "symbol": "SPY", "side": "short",
-             "entry_price": 641.8, "shares": 3, "score": 1.0, "rank": 1},
+            {
+                "system": "System1",
+                "symbol": "AAPL",
+                "side": "long",
+                "entry_price": 289.24,
+                "shares": 10,
+                "score": 5.0,
+                "rank": 1,
+                "reason": "SMA200 breakout",
+            },
+            {
+                "system": "system7",
+                "symbol": "SPY",
+                "side": "short",
+                "entry_price": 641.8,
+                "shares": 3,
+                "score": 1.0,
+                "rank": 1,
+            },
         ]
     )
     per_system = {
         "System1": pd.DataFrame([{"symbol": "AAPL"}, {"symbol": "X"}, {"symbol": "Y"}]),
         "System7": pd.DataFrame([{"symbol": "SPY"}]),
     }
-    payload = build_signals_json(final_df, per_system, date_str="2026-07-01", run_id="testrun_1")
+    payload = build_signals_json(
+        final_df, per_system, date_str="2026-07-01", run_id="testrun_1"
+    )
     assert payload["version"] == "1.0"
     assert payload["meta"]["run_id"] == "testrun_1"
     assert payload["systems"]["sys1"]["n_signals_output"] == 1

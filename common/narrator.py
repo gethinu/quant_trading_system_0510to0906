@@ -24,7 +24,6 @@ import logging
 import os
 import re
 import time
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -63,12 +62,12 @@ _SYSTEM_PROMPT = (
     "    - 見出し全体は目安 40-50 文字以内 (絵文字含む)\n"
     "    - 絵文字は先頭 1 個のみ、以降は使わない\n"
     "  正しい例:\n"
-    "    OK '\U0001F4C8 07-02 49 signals / BUY:39 SELL:10 / $37K'\n"
-    "    OK '\U0001F4C9 07-03 12 signals / BUY:3 SELL:9 / $8K'\n"
-    "    OK '\U0001F6E1️ 07-04 3 signals / BUY:0 SELL:3 / $1.2M'\n"
+    "    OK '\U0001f4c8 07-02 49 signals / BUY:39 SELL:10 / $37K'\n"
+    "    OK '\U0001f4c9 07-03 12 signals / BUY:3 SELL:9 / $8K'\n"
+    "    OK '\U0001f6e1️ 07-04 3 signals / BUY:0 SELL:3 / $1.2M'\n"
     "  誤った例 (絶対に生成しない):\n"
     "    NG '7系統49シグナル、BUY主流・SELL10件・生存率100%が3系統' (日本語 → mangled)\n"
-    "    NG '\U0001F4C849signalsBUY39SELL10$37K' (区切りなしで cram、読めない)\n"
+    "    NG '\U0001f4c849signalsBUY39SELL10$37K' (区切りなしで cram、読めない)\n"
     "    NG 'Mega tech buy day, SPY hedge on!' (統計値が無い)"
 )
 
@@ -76,8 +75,22 @@ _SYSTEM_PROMPT = (
 _TICKER_RE = re.compile(r"\b[A-Z]{1,5}\b")
 # ticker と紛らわしい一般大文字語 (system 記述等) は cross-check から除外。
 _TICKER_STOPWORDS = {
-    "BUY", "SELL", "AI", "SPY", "USD", "JPY", "SMA", "ROC", "RSI", "ADX",
-    "WARN", "OK", "NET", "ETF", "US", "PICKS",
+    "BUY",
+    "SELL",
+    "AI",
+    "SPY",
+    "USD",
+    "JPY",
+    "SMA",
+    "ROC",
+    "RSI",
+    "ADX",
+    "WARN",
+    "OK",
+    "NET",
+    "ETF",
+    "US",
+    "PICKS",
 }
 
 
@@ -153,9 +166,9 @@ def _synth_headline(signals_json: dict) -> str:
     if warn:
         emoji = "⚠️"  # ⚠️
     elif sell > buy:
-        emoji = "\U0001F4C9"  # 📉
+        emoji = "\U0001f4c9"  # 📉
     else:
-        emoji = "\U0001F4C8"  # 📈
+        emoji = "\U0001f4c8"  # 📈
 
     parts = [emoji]
     if mmdd:
@@ -192,14 +205,18 @@ class SignalNarrator:
         fail-safe: API key 未設定 / SDK 欠如 / API 失敗なら空 dict + WARN log。
         """
         if not self.is_configured():
-            logger.warning("narrator: ANTHROPIC_API_KEY 未設定のためスキップ (空 narrative)")
+            logger.warning(
+                "narrator: ANTHROPIC_API_KEY 未設定のためスキップ (空 narrative)"
+            )
             return {}
 
         start = time.monotonic()
         try:
             import anthropic
         except ImportError:
-            logger.warning("narrator: anthropic SDK 未インストール (pip install anthropic)")
+            logger.warning(
+                "narrator: anthropic SDK 未インストール (pip install anthropic)"
+            )
             return {}
 
         try:
@@ -208,7 +225,9 @@ class SignalNarrator:
                 model=self.model,
                 max_tokens=_MAX_TOKENS,
                 system=_SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": self._build_user_prompt(signals_json)}],
+                messages=[
+                    {"role": "user", "content": self._build_user_prompt(signals_json)}
+                ],
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning("narrator: Claude API 呼び出し失敗: %s", exc)
@@ -272,7 +291,9 @@ class SignalNarrator:
             cfg = systems[sys_key]
             ratio = float(cfg.get("gate_survival_ratio", 0.0))
             n_out = int(cfg.get("n_signals_output", 0))
-            stats_lines.append(f"{sys_key}: {n_out} signals, survival {ratio * 100:.0f}%")
+            stats_lines.append(
+                f"{sys_key}: {n_out} signals, survival {ratio * 100:.0f}%"
+            )
         coverage = "\n".join(stats_lines)
 
         # subscriber 向けに配信される headline は次の制約に従う:
@@ -293,7 +314,7 @@ class SignalNarrator:
             "★ headline は ASCII (半角英数字+記号) と絵文字だけで作成し、日本語文字を"
             "1 文字も含めないこと (iPhone 通知の X-Title は非 ASCII を strip する)。\n"
             "書式 (厳守): '<絵文字> <MM-DD> <N> signals / BUY:<x> SELL:<y> / $<Z>K'\n"
-            f"    例: '\U0001F4C8 {mmdd_hint} {n_hint} signals / BUY:X SELL:Y / $ZK'\n"
+            f"    例: '\U0001f4c8 {mmdd_hint} {n_hint} signals / BUY:X SELL:Y / $ZK'\n"
             "  - スラッシュの前後に必ず半角 space、'BUY:39' の形で数値を明示\n"
             "  - notional は千ドル単位で '$37K'、100 万超は '$1.2M'\n"
             "  - 見出し全体は 50 文字以内、絵文字は先頭 1 個のみ\n"
@@ -367,9 +388,7 @@ class SignalNarrator:
         """narrator が言及した ticker のうち signals JSON に無いものの割合。"""
         valid = self._signal_symbols(signals_json)
         text = f"{result.get('headline', '')} {result.get('summary', '')}"
-        mentioned = {
-            t for t in _TICKER_RE.findall(text) if t not in _TICKER_STOPWORDS
-        }
+        mentioned = {t for t in _TICKER_RE.findall(text) if t not in _TICKER_STOPWORDS}
         mentioned |= set(result.get("per_symbol_reasons", {}).keys())
         if not mentioned:
             return 0.0
@@ -382,9 +401,7 @@ class SignalNarrator:
         n_signals = int(
             (signals_json.get("portfolio", {}) or {}).get("total_signals", 0)
         )
-        n_sys = sum(
-            1 for cfg in systems.values() if (cfg.get("signals") or [])
-        )
+        n_sys = sum(1 for cfg in systems.values() if (cfg.get("signals") or []))
         hedge = (signals_json.get("portfolio", {}) or {}).get("hedge") or {}
         hedge_str = (
             f"{hedge.get('side')} {hedge.get('symbol')}"

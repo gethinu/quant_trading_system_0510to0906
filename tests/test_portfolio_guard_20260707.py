@@ -58,7 +58,9 @@ def test_sector_cap_limits_per_sector():
     tech_kept = [r for r in kept if r["sector"] == "tech"]
     assert len(tech_kept) == 3  # tech は 3 で頭打ち
     assert dropped.get("tech") == 2
-    assert len([r for r in kept if r["sector"] == "energy"]) == 2  # energy は 2 <= 3 全通過
+    assert (
+        len([r for r in kept if r["sector"] == "energy"]) == 2
+    )  # energy は 2 <= 3 全通過
 
 
 def test_sector_none_always_passes():

@@ -92,8 +92,8 @@ def exit_all_positions(paper: bool = True, dry_run: bool = False) -> dict[str, A
                 order_side = "buy"
 
             # Submit market order
-            from alpaca.trading.requests import MarketOrderRequest
             from alpaca.trading.enums import OrderSide, TimeInForce
+            from alpaca.trading.requests import MarketOrderRequest
 
             order_request = MarketOrderRequest(
                 symbol=symbol,
@@ -102,7 +102,7 @@ def exit_all_positions(paper: bool = True, dry_run: bool = False) -> dict[str, A
                 time_in_force=TimeInForce.DAY,
             )
 
-            order = client.submit_order(order_request)
+            client.submit_order(order_request)
 
             exited.append(
                 {

@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 PIPELINE = Path(__file__).resolve().parents[2] / "scripts" / "daily_pipeline.ps1"
 
 

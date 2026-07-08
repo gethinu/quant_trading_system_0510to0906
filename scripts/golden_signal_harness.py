@@ -49,8 +49,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import sys
 from pathlib import Path
+import sys
 from typing import Any, Callable
 
 import pandas as pd
@@ -450,9 +450,7 @@ def _run_one(system: str, fixture_date: str, top_n: int) -> dict[str, Any]:
     gen = _load_generator(system)
 
     # latest_only fast path
-    fast_result = gen(
-        prepared, top_n=top_n, latest_only=True, include_diagnostics=True
-    )
+    fast_result = gen(prepared, top_n=top_n, latest_only=True, include_diagnostics=True)
     fast_by_date, fast_df, fast_diag = _split_result(fast_result)
     fast_entries = _extract_latest_entries(system, fast_by_date, rank_col)
 
@@ -628,15 +626,11 @@ def _diff_snapshot(want: dict[str, Any], got: dict[str, Any]) -> list[str]:
             w_vals = [c.get("rank_value") for c in w_mode.get("candidates", [])]
             g_vals = [c.get("rank_value") for c in g_mode.get("candidates", [])]
             if w_syms == g_syms and w_vals != g_vals:
-                diffs.append(
-                    f"  {mode}: rank_value changed want={w_vals} got={g_vals}"
-                )
+                diffs.append(f"  {mode}: rank_value changed want={w_vals} got={g_vals}")
             w_diag = w_mode.get("diagnostics", {})
             g_diag = g_mode.get("diagnostics", {})
             if w_diag != g_diag:
-                diffs.append(
-                    f"  {mode}: diagnostics diff want={w_diag} got={g_diag}"
-                )
+                diffs.append(f"  {mode}: diagnostics diff want={w_diag} got={g_diag}")
     return diffs
 
 

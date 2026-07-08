@@ -10,7 +10,6 @@ from pathlib import Path
 
 import streamlit as st
 
-
 STYLES_DIR = Path(__file__).parent / "styles"
 
 

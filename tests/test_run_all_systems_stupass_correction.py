@@ -21,11 +21,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
-SCRIPT = (
-    Path(__file__).resolve().parent.parent
-    / "scripts" / "run_all_systems_today.py"
-)
+SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "run_all_systems_today.py"
 
 
 def _read() -> str:
@@ -45,7 +41,7 @@ def test_correction_log_uses_setup_count_from_snapshot():
     """The correction reads setup_count via _get_stage_snapshot (post-candidate)."""
     txt = _read()
     # 補正 block が snapshot 経由で setup_count を引く形態
-    assert 'setup_count' in txt and '_get_stage_snapshot' in txt
+    assert "setup_count" in txt and "_get_stage_snapshot" in txt
     # 補正 log は sys3 と sys5 の両方を扱う
     # (sys1/2/4/6/7 は事前確定なので pre-print で正しい値が出る)
     #
@@ -82,4 +78,6 @@ def test_pre_print_still_present_for_other_systems():
     """
     txt = _read()
     # 事前 print も残っている
-    assert "🧩 セットアップ結果: " in txt, "事前 print が消えている. 補正は追加 emit のみが望ましい"
+    assert (
+        "🧩 セットアップ結果: " in txt
+    ), "事前 print が消えている. 補正は追加 emit のみが望ましい"

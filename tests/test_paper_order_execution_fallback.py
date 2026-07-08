@@ -12,15 +12,14 @@ from __future__ import annotations
 
 import pytest
 
-import common.broker_alpaca as ba
 from common.alpaca_trading import (
     EXEC_NOTIONAL,
     EXEC_QTY,
     EXEC_SKIP,
-    PreparedOrder,
     plan_order_execution,
     signals_json_to_orders,
 )
+import common.broker_alpaca as ba
 
 
 # --------------------------------------------------------------------------
@@ -83,7 +82,10 @@ def test_unknown_fractionable_is_conservative_whole_shares():
 
 def test_prefer_fractional_false_forces_qty():
     mode, qty, _, _ = plan_order_execution(
-        side="buy", notional_usd=30.0, price=10.0, fractionable=True,
+        side="buy",
+        notional_usd=30.0,
+        price=10.0,
+        fractionable=True,
         prefer_fractional=False,
     )
     assert mode == EXEC_QTY and qty == 3
@@ -150,15 +152,40 @@ def _signals_json():
         "systems": {
             "sys1": {
                 "signals": [
-                    {"symbol": "AAPL", "side": "buy", "entry_price": 200.0, "weight": 1.0},   # frac long -> notional
-                    {"symbol": "PENNY", "side": "buy", "entry_price": 10.0, "weight": 1.0},    # non-frac long -> qty
-                    {"symbol": "BIGNF", "side": "buy", "entry_price": 500.0, "weight": 1.0},   # non-frac, $200<$500 -> skip
-                    {"symbol": "WASHY", "side": "buy", "entry_price": 20.0, "weight": 1.0},    # wash (既存 sell) -> skip
+                    {
+                        "symbol": "AAPL",
+                        "side": "buy",
+                        "entry_price": 200.0,
+                        "weight": 1.0,
+                    },  # frac long -> notional
+                    {
+                        "symbol": "PENNY",
+                        "side": "buy",
+                        "entry_price": 10.0,
+                        "weight": 1.0,
+                    },  # non-frac long -> qty
+                    {
+                        "symbol": "BIGNF",
+                        "side": "buy",
+                        "entry_price": 500.0,
+                        "weight": 1.0,
+                    },  # non-frac, $200<$500 -> skip
+                    {
+                        "symbol": "WASHY",
+                        "side": "buy",
+                        "entry_price": 20.0,
+                        "weight": 1.0,
+                    },  # wash (既存 sell) -> skip
                 ]
             },
             "sys2": {
                 "signals": [
-                    {"symbol": "SHORTX", "side": "sell", "entry_price": 10.0, "weight": 1.0},  # short -> qty
+                    {
+                        "symbol": "SHORTX",
+                        "side": "sell",
+                        "entry_price": 10.0,
+                        "weight": 1.0,
+                    },  # short -> qty
                 ]
             },
         },
@@ -176,13 +203,21 @@ def test_integration_routes_all_three_classes(monkeypatch, paper_env):
 
     client = _FakeClient(
         fractionable_map={
-            "AAPL": True, "PENNY": False, "BIGNF": False, "WASHY": True, "SHORTX": True,
+            "AAPL": True,
+            "PENNY": False,
+            "BIGNF": False,
+            "WASHY": True,
+            "SHORTX": True,
         },
         open_orders=[_FakeOrder("x", symbol="WASHY", side="sell", coid="user-exit-1")],
     )
 
     orders = signals_json_to_orders(
-        _signals_json(), tier="small", dry_run=False, client=client, min_notional_usd=5.0,
+        _signals_json(),
+        tier="small",
+        dry_run=False,
+        client=client,
+        min_notional_usd=5.0,
     )
     by_sym = {o.symbol: o for o in orders}
 
@@ -200,30 +235,49 @@ def test_integration_routes_all_three_classes(monkeypatch, paper_env):
 
     # 非frac で 1 株に満たない → skip (理由付き, silent drop 禁止)
     assert by_sym["BIGNF"].order_id is None
-    assert by_sym["BIGNF"].skip_reason and "below_1_share" in by_sym["BIGNF"].skip_reason
+    assert (
+        by_sym["BIGNF"].skip_reason and "below_1_share" in by_sym["BIGNF"].skip_reason
+    )
 
     # wash-trade: 反対側 (sell) の既存注文がある WASHY は skip。既存注文は触らない。
     assert by_sym["WASHY"].order_id is None
-    assert by_sym["WASHY"].skip_reason and "wash_trade_conflict" in by_sym["WASHY"].skip_reason
+    assert (
+        by_sym["WASHY"].skip_reason
+        and "wash_trade_conflict" in by_sym["WASHY"].skip_reason
+    )
 
 
 def test_integration_idempotency_skips_duplicate_coid(monkeypatch, paper_env):
     monkeypatch.setattr(
-        ba, "submit_order_with_retry",
+        ba,
+        "submit_order_with_retry",
         lambda *a, **k: _FakeOrder("should-not-be-called"),
     )
     # 既に system1-AAPL-20260702 が open → 二重 submit しない
     client = _FakeClient(
         fractionable_map={"AAPL": True},
-        open_orders=[_FakeOrder("x", symbol="AAPL", side="buy", coid="system1-AAPL-20260702")],
+        open_orders=[
+            _FakeOrder("x", symbol="AAPL", side="buy", coid="system1-AAPL-20260702")
+        ],
     )
     json_data = {
         "date": "2026-07-02",
-        "systems": {"sys1": {"signals": [
-            {"symbol": "AAPL", "side": "buy", "entry_price": 200.0, "weight": 1.0},
-        ]}},
+        "systems": {
+            "sys1": {
+                "signals": [
+                    {
+                        "symbol": "AAPL",
+                        "side": "buy",
+                        "entry_price": 200.0,
+                        "weight": 1.0,
+                    },
+                ]
+            }
+        },
     }
-    orders = signals_json_to_orders(json_data, tier="small", dry_run=False, client=client)
+    orders = signals_json_to_orders(
+        json_data, tier="small", dry_run=False, client=client
+    )
     assert len(orders) == 1
     assert orders[0].order_id is None
     assert "duplicate_client_order_id" in orders[0].skip_reason
@@ -240,11 +294,17 @@ def test_no_silent_drop_every_order_has_terminal_state(monkeypatch, paper_env):
     monkeypatch.setattr(ba, "submit_order_with_retry", fake_retry)
     client = _FakeClient(
         fractionable_map={
-            "AAPL": True, "PENNY": False, "BIGNF": False, "WASHY": True, "SHORTX": True,
+            "AAPL": True,
+            "PENNY": False,
+            "BIGNF": False,
+            "WASHY": True,
+            "SHORTX": True,
         },
         open_orders=[_FakeOrder("x", symbol="WASHY", side="sell", coid="user-exit-1")],
     )
-    orders = signals_json_to_orders(_signals_json(), tier="small", dry_run=False, client=client)
+    orders = signals_json_to_orders(
+        _signals_json(), tier="small", dry_run=False, client=client
+    )
     for o in orders:
         terminal = bool(o.order_id) or bool(o.error) or bool(o.skip_reason)
         assert terminal, f"{o.symbol} has no terminal state (silent drop!)"
@@ -256,7 +316,8 @@ def test_no_silent_drop_every_order_has_terminal_state(monkeypatch, paper_env):
 def test_already_held_same_direction_is_skipped(monkeypatch, paper_env):
     """既に long 保有中の銘柄への buy は重ね買いせず skip_reason 付きで残す。"""
     monkeypatch.setattr(
-        ba, "submit_order_with_retry",
+        ba,
+        "submit_order_with_retry",
         lambda *a, **k: _FakeOrder("should-not-be-called"),
     )
     client = _FakeClient(
@@ -266,11 +327,22 @@ def test_already_held_same_direction_is_skipped(monkeypatch, paper_env):
     )
     json_data = {
         "date": "2026-07-02",
-        "systems": {"sys1": {"signals": [
-            {"symbol": "AAPL", "side": "buy", "entry_price": 200.0, "weight": 1.0},
-        ]}},
+        "systems": {
+            "sys1": {
+                "signals": [
+                    {
+                        "symbol": "AAPL",
+                        "side": "buy",
+                        "entry_price": 200.0,
+                        "weight": 1.0,
+                    },
+                ]
+            }
+        },
     }
-    orders = signals_json_to_orders(json_data, tier="small", dry_run=False, client=client)
+    orders = signals_json_to_orders(
+        json_data, tier="small", dry_run=False, client=client
+    )
     assert len(orders) == 1
     assert orders[0].order_id is None
     assert orders[0].skip_reason and "already_held" in orders[0].skip_reason
@@ -285,8 +357,10 @@ def test_opposite_direction_not_blocked_by_held(monkeypatch, paper_env):
     """
     submitted: list = []
     monkeypatch.setattr(
-        ba, "submit_order_with_retry",
-        lambda client, symbol, qty, **kw: submitted.append((symbol, qty)) or _FakeOrder(f"qid-{symbol}"),
+        ba,
+        "submit_order_with_retry",
+        lambda client, symbol, qty, **kw: submitted.append((symbol, qty))
+        or _FakeOrder(f"qid-{symbol}"),
     )
     client = _FakeClient(
         fractionable_map={"AAPL": True},
@@ -295,11 +369,24 @@ def test_opposite_direction_not_blocked_by_held(monkeypatch, paper_env):
     )
     json_data = {
         "date": "2026-07-02",
-        "systems": {"sys1": {"signals": [
-            {"symbol": "AAPL", "side": "buy", "entry_price": 200.0, "weight": 1.0},
-        ]}},
+        "systems": {
+            "sys1": {
+                "signals": [
+                    {
+                        "symbol": "AAPL",
+                        "side": "buy",
+                        "entry_price": 200.0,
+                        "weight": 1.0,
+                    },
+                ]
+            }
+        },
     }
-    orders = signals_json_to_orders(json_data, tier="small", dry_run=False, client=client)
+    orders = signals_json_to_orders(
+        json_data, tier="small", dry_run=False, client=client
+    )
     assert len(orders) == 1
     # held-check では skip されない (already_held 理由が付かない)
-    assert not (orders[0].skip_reason and "already_held" in (orders[0].skip_reason or ""))
+    assert not (
+        orders[0].skip_reason and "already_held" in (orders[0].skip_reason or "")
+    )

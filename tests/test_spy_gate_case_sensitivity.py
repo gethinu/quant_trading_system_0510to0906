@@ -34,7 +34,6 @@ import pytest
 from common import today_signals
 from common.today_signals import _make_spy_gate
 
-
 # ---------------------------------------------------------------------------
 # Direct _make_spy_gate coverage (source of truth for the bug)
 # ---------------------------------------------------------------------------

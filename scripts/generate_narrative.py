@@ -34,9 +34,17 @@ logger = logging.getLogger(__name__)
 
 def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    p.add_argument("--signals", required=True, help="入力 today_signals_YYYYMMDD.json path。")
-    p.add_argument("--output", default=None, help="出力 narrative JSON path (未指定なら stdout)。")
-    p.add_argument("--model", default=None, help="narrator model 上書き (default NARRATOR_MODEL / Haiku)。")
+    p.add_argument(
+        "--signals", required=True, help="入力 today_signals_YYYYMMDD.json path。"
+    )
+    p.add_argument(
+        "--output", default=None, help="出力 narrative JSON path (未指定なら stdout)。"
+    )
+    p.add_argument(
+        "--model",
+        default=None,
+        help="narrator model 上書き (default NARRATOR_MODEL / Haiku)。",
+    )
     p.add_argument("--dry-run", action="store_true", help="書き込まず結果を表示。")
     p.add_argument("--log-level", default="INFO", help="ログレベル。")
     return p
@@ -85,7 +93,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         out_path.parent.mkdir(parents=True, exist_ok=True)
         tmp = out_path.with_suffix(out_path.suffix + ".tmp")
-        tmp.write_text(json.dumps(narrative, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.write_text(
+            json.dumps(narrative, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         tmp.replace(out_path)
         logger.info("narrative 書き出し: %s", out_path)
     except Exception as exc:  # noqa: BLE001

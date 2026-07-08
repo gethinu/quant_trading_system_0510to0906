@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime
-import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -151,7 +150,7 @@ def main():
     tracker = sync_positions(paper=paper)
 
     # Print summary
-    print(f"\n=== Position Tracker Summary ===")
+    print("\n=== Position Tracker Summary ===")
     print(f"Total positions: {len(tracker)}")
 
     # Group by system

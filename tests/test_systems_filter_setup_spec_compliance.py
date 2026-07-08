@@ -33,7 +33,6 @@ import core.system4 as s4
 import core.system5 as s5
 import core.system6 as s6
 
-
 # ============================================================================
 # System 1: Long trend high momentum (docs-compliant post D1 audit 2026-07-02)
 #   Filter: Close >= 5.0, DollarVolume20 > 50M
@@ -45,7 +44,7 @@ def _s1_row(**over) -> pd.DataFrame:
     row = {
         "Close": 100.0,
         "dollarvolume20": 60_000_000,
-        "sma25": 105.0,   # SMA25 > SMA50 by default (docs setup 条件)
+        "sma25": 105.0,  # SMA25 > SMA50 by default (docs setup 条件)
         "sma50": 100.0,
         "roc200": 0.05,
     }
@@ -57,7 +56,7 @@ class TestSystem1Filter:
     @pytest.mark.parametrize(
         ("close", "expected"),
         [
-            (5.0, True),   # 境界: 実装は >=、5.00 ちょうどで pass
+            (5.0, True),  # 境界: 実装は >=、5.00 ちょうどで pass
             (4.99, False),  # 境界のちょい下 → fail
             (10.0, True),
         ],
@@ -85,7 +84,7 @@ class TestSystem1Setup:
         ("sma25", "sma50", "expected"),
         [
             (100.01, 100.0, True),
-            (100.0, 100.0, False),   # SMA25 > SMA50 (strict)
+            (100.0, 100.0, False),  # SMA25 > SMA50 (strict)
             (99.99, 100.0, False),
         ],
     )
@@ -99,7 +98,7 @@ class TestSystem1Setup:
     @pytest.mark.parametrize(
         ("roc200", "expected"),
         [
-            (0.0, False),   # roc200 > 0 (strict)
+            (0.0, False),  # roc200 > 0 (strict)
             (0.001, True),
             (-0.01, False),
         ],
@@ -133,31 +132,32 @@ class TestSystem2Filter:
     @pytest.mark.parametrize(
         ("atr_ratio", "expected"),
         [
-            (0.03, False),   # 実装は > (strict)、0.03 ちょうどは fail
+            (0.03, False),  # 実装は > (strict)、0.03 ちょうどは fail
             (0.0301, True),
             (0.029, False),
         ],
     )
     def test_atr_ratio_threshold(self, atr_ratio, expected):
-        assert bool(
-            s2._apply_filter_conditions(_s2_row(atr_ratio=atr_ratio)).iloc[0]
-        ) is expected
+        assert (
+            bool(s2._apply_filter_conditions(_s2_row(atr_ratio=atr_ratio)).iloc[0])
+            is expected
+        )
 
     @pytest.mark.parametrize(
         ("close", "expected"),
         [(5.0, True), (4.99, False), (100.0, True)],
     )
     def test_price_threshold(self, close, expected):
-        assert bool(
-            s2._apply_filter_conditions(_s2_row(Close=close)).iloc[0]
-        ) is expected
+        assert (
+            bool(s2._apply_filter_conditions(_s2_row(Close=close)).iloc[0]) is expected
+        )
 
 
 class TestSystem2Setup:
     @pytest.mark.parametrize(
         ("rsi3", "expected"),
         [
-            (90.0, False),   # RSI3 > 90 (strict) → 90 ちょうどは fail
+            (90.0, False),  # RSI3 > 90 (strict) → 90 ちょうどは fail
             (90.01, True),
             (89.99, False),
         ],
@@ -197,65 +197,70 @@ class TestSystem3Filter:
     )
     def test_low_price_boundary(self, low, expected):
         """spec: 最低株価 ≥ 1ドル (Low >= 1.0)。"""
-        assert bool(
-            s3._apply_filter_conditions(_s3_row(Low=low))["filter"].iloc[0]
-        ) is expected
+        assert (
+            bool(s3._apply_filter_conditions(_s3_row(Low=low))["filter"].iloc[0])
+            is expected
+        )
 
     @pytest.mark.parametrize(
         ("vol", "expected"),
         [
-            (1_000_000, True),   # spec: 100万株 >=
+            (1_000_000, True),  # spec: 100万株 >=
             (999_999, False),
             (1_500_000, True),
         ],
     )
     def test_avg_volume_50_boundary(self, vol, expected):
-        assert bool(
-            s3._apply_filter_conditions(_s3_row(avgvolume50=vol))["filter"].iloc[0]
-        ) is expected
+        assert (
+            bool(
+                s3._apply_filter_conditions(_s3_row(avgvolume50=vol))["filter"].iloc[0]
+            )
+            is expected
+        )
 
     @pytest.mark.parametrize(
         ("atr_ratio", "expected"),
         [
-            (0.05, True),   # spec: >= 5% (inclusive)
+            (0.05, True),  # spec: >= 5% (inclusive)
             (0.049, False),
             (0.06, True),
         ],
     )
     def test_atr_ratio_boundary(self, atr_ratio, expected):
-        assert bool(
-            s3._apply_filter_conditions(_s3_row(atr_ratio=atr_ratio))["filter"].iloc[0]
-        ) is expected
+        assert (
+            bool(
+                s3._apply_filter_conditions(_s3_row(atr_ratio=atr_ratio))[
+                    "filter"
+                ].iloc[0]
+            )
+            is expected
+        )
 
 
 class TestSystem3Setup:
     @pytest.mark.parametrize(
         ("drop3d", "expected"),
         [
-            (0.125, True),   # spec: 3日 12.5% 下落 >= (inclusive)
+            (0.125, True),  # spec: 3日 12.5% 下落 >= (inclusive)
             (0.124, False),
             (0.20, True),
         ],
     )
     def test_drop3d_boundary(self, drop3d, expected):
         df = s3._apply_filter_conditions(_s3_row(drop3d=drop3d))
-        assert bool(
-            s3._apply_setup_conditions(df)["setup"].iloc[0]
-        ) is expected
+        assert bool(s3._apply_setup_conditions(df)["setup"].iloc[0]) is expected
 
     @pytest.mark.parametrize(
         ("close", "sma150", "expected"),
         [
             (100.0, 99.99, True),
-            (100.0, 100.0, False),   # Close > SMA150 (strict)
+            (100.0, 100.0, False),  # Close > SMA150 (strict)
             (99.99, 100.0, False),
         ],
     )
     def test_close_above_sma150_strict(self, close, sma150, expected):
         df = s3._apply_filter_conditions(_s3_row(Close=close, sma150=sma150))
-        assert bool(
-            s3._apply_setup_conditions(df)["setup"].iloc[0]
-        ) is expected
+        assert bool(s3._apply_setup_conditions(df)["setup"].iloc[0]) is expected
 
 
 # ============================================================================
@@ -281,28 +286,34 @@ class TestSystem4Filter:
         ("dv50", "expected"),
         [
             (100_000_001, True),
-            (100_000_000, False),   # > (strict)
+            (100_000_000, False),  # > (strict)
             (99_999_999, False),
         ],
     )
     def test_dv50_boundary(self, dv50, expected):
-        assert bool(
-            s4._apply_filter_conditions(_s4_row(dollarvolume50=dv50))["filter"].iloc[0]
-        ) is expected
+        assert (
+            bool(
+                s4._apply_filter_conditions(_s4_row(dollarvolume50=dv50))[
+                    "filter"
+                ].iloc[0]
+            )
+            is expected
+        )
 
     @pytest.mark.parametrize(
         ("hv50", "expected"),
         [
-            (10.0, True),   # between(10,40) inclusive
+            (10.0, True),  # between(10,40) inclusive
             (40.0, True),
             (9.99, False),
             (40.01, False),
         ],
     )
     def test_hv50_between_10_40_inclusive(self, hv50, expected):
-        assert bool(
-            s4._apply_filter_conditions(_s4_row(hv50=hv50))["filter"].iloc[0]
-        ) is expected
+        assert (
+            bool(s4._apply_filter_conditions(_s4_row(hv50=hv50))["filter"].iloc[0])
+            is expected
+        )
 
 
 class TestSystem4Setup:
@@ -310,15 +321,13 @@ class TestSystem4Setup:
         ("close", "sma200", "expected"),
         [
             (100.0, 99.99, True),
-            (100.0, 100.0, False),   # > (strict)
+            (100.0, 100.0, False),  # > (strict)
             (99.99, 100.0, False),
         ],
     )
     def test_close_above_sma200(self, close, sma200, expected):
         df = s4._apply_filter_conditions(_s4_row(Close=close, sma200=sma200))
-        assert bool(
-            s4._apply_setup_conditions(df)["setup"].iloc[0]
-        ) is expected
+        assert bool(s4._apply_setup_conditions(df)["setup"].iloc[0]) is expected
 
 
 # ============================================================================
@@ -335,12 +344,12 @@ def _s5_row(**over) -> pd.DataFrame:
     row = {
         "Close": 100.0,
         "adx7": 60.0,
-        "atr_pct": 0.05,        # Case A: spec 4% を超える値をデフォルトに
+        "atr_pct": 0.05,  # Case A: spec 4% を超える値をデフォルトに
         "sma100": 90.0,
-        "atr10": 5.0,   # sma100+atr10 = 95, Close 100 > 95
+        "atr10": 5.0,  # sma100+atr10 = 95, Close 100 > 95
         "rsi3": 30.0,
         # Case A: 流動性 filter を通過するデフォルト値
-        "avgvolume50": 1_000_000,   # > 500k spec
+        "avgvolume50": 1_000_000,  # > 500k spec
         "dollarvolume50": 5_000_000,  # > 2.5M spec
     }
     row.update(over)
@@ -351,16 +360,17 @@ class TestSystem5Filter:
     @pytest.mark.parametrize(
         ("adx7", "expected"),
         [
-            (55.0, False),   # spec: > 55 (strict)
+            (55.0, False),  # spec: > 55 (strict)
             (55.01, True),
             (54.99, False),
             (80.0, True),
         ],
     )
     def test_adx7_boundary(self, adx7, expected):
-        assert bool(
-            s5._apply_filter_conditions(_s5_row(adx7=adx7))["filter"].iloc[0]
-        ) is expected
+        assert (
+            bool(s5._apply_filter_conditions(_s5_row(adx7=adx7))["filter"].iloc[0])
+            is expected
+        )
 
     @pytest.mark.parametrize(
         ("atr_pct", "expected"),
@@ -373,9 +383,12 @@ class TestSystem5Filter:
         ],
     )
     def test_atr_pct_boundary(self, atr_pct, expected):
-        assert bool(
-            s5._apply_filter_conditions(_s5_row(atr_pct=atr_pct))["filter"].iloc[0]
-        ) is expected
+        assert (
+            bool(
+                s5._apply_filter_conditions(_s5_row(atr_pct=atr_pct))["filter"].iloc[0]
+            )
+            is expected
+        )
 
     @pytest.mark.parametrize(
         ("close", "expected"),
@@ -401,9 +414,14 @@ class TestSystem5Filter:
         ],
     )
     def test_avgvolume50_boundary(self, avgvolume50, expected):
-        assert bool(
-            s5._apply_filter_conditions(_s5_row(avgvolume50=avgvolume50))["filter"].iloc[0]
-        ) is expected
+        assert (
+            bool(
+                s5._apply_filter_conditions(_s5_row(avgvolume50=avgvolume50))[
+                    "filter"
+                ].iloc[0]
+            )
+            is expected
+        )
 
     @pytest.mark.parametrize(
         ("dollarvolume50", "expected"),
@@ -416,25 +434,28 @@ class TestSystem5Filter:
         ],
     )
     def test_dollarvolume50_boundary(self, dollarvolume50, expected):
-        assert bool(
-            s5._apply_filter_conditions(_s5_row(dollarvolume50=dollarvolume50))["filter"].iloc[0]
-        ) is expected
+        assert (
+            bool(
+                s5._apply_filter_conditions(_s5_row(dollarvolume50=dollarvolume50))[
+                    "filter"
+                ].iloc[0]
+            )
+            is expected
+        )
 
 
 class TestSystem5Setup:
     @pytest.mark.parametrize(
         ("rsi3", "expected"),
         [
-            (50.0, False),   # spec: < 50 (strict)
+            (50.0, False),  # spec: < 50 (strict)
             (49.99, True),
             (0.0, True),
         ],
     )
     def test_rsi3_below_50(self, rsi3, expected):
         df = s5._apply_filter_conditions(_s5_row(rsi3=rsi3))
-        assert bool(
-            s5._apply_setup_conditions(df)["setup"].iloc[0]
-        ) is expected
+        assert bool(s5._apply_setup_conditions(df)["setup"].iloc[0]) is expected
 
     @pytest.mark.parametrize(
         ("close", "sma100", "atr10", "expected"),
@@ -449,9 +470,7 @@ class TestSystem5Setup:
         df = s5._apply_filter_conditions(
             _s5_row(Close=close, sma100=sma100, atr10=atr10)
         )
-        assert bool(
-            s5._apply_setup_conditions(df)["setup"].iloc[0]
-        ) is expected
+        assert bool(s5._apply_setup_conditions(df)["setup"].iloc[0]) is expected
 
 
 # ============================================================================
@@ -465,7 +484,7 @@ def _s6_row(**over) -> pd.DataFrame:
     row = {
         "Low": 10.0,
         "dollarvolume50": 20_000_000,
-        "hv50": 20.0,   # percent form → in HV50_BOUNDS_PERCENT
+        "hv50": 20.0,  # percent form → in HV50_BOUNDS_PERCENT
         "return_6d": 0.25,
         "UpTwoDays": True,
     }
@@ -479,46 +498,46 @@ class TestSystem6Filter:
         [(5.0, True), (4.99, False), (10.0, True)],
     )
     def test_low_price_boundary(self, low, expected):
-        assert bool(
-            s6._apply_filter_conditions(_s6_row(Low=low))["filter"].iloc[0]
-        ) is expected
+        assert (
+            bool(s6._apply_filter_conditions(_s6_row(Low=low))["filter"].iloc[0])
+            is expected
+        )
 
     @pytest.mark.parametrize(
         ("dv50", "expected"),
         [
             (10_000_001, True),
-            (10_000_000, False),   # > (strict)
+            (10_000_000, False),  # > (strict)
             (9_999_999, False),
         ],
     )
     def test_dv50_boundary(self, dv50, expected):
-        assert bool(
-            s6._apply_filter_conditions(
-                _s6_row(dollarvolume50=dv50)
-            )["filter"].iloc[0]
-        ) is expected
+        assert (
+            bool(
+                s6._apply_filter_conditions(_s6_row(dollarvolume50=dv50))[
+                    "filter"
+                ].iloc[0]
+            )
+            is expected
+        )
 
 
 class TestSystem6Setup:
     @pytest.mark.parametrize(
         ("return_6d", "expected"),
         [
-            (0.20, False),   # spec: > 0.20 (strict)
+            (0.20, False),  # spec: > 0.20 (strict)
             (0.2001, True),
             (0.19, False),
         ],
     )
     def test_return_6d_boundary(self, return_6d, expected):
         df = s6._apply_filter_conditions(_s6_row(return_6d=return_6d))
-        assert bool(
-            s6._apply_setup_conditions(df)["setup"].iloc[0]
-        ) is expected
+        assert bool(s6._apply_setup_conditions(df)["setup"].iloc[0]) is expected
 
     def test_setup_requires_up_two_days(self):
         df = s6._apply_filter_conditions(_s6_row(UpTwoDays=False))
-        assert bool(
-            s6._apply_setup_conditions(df)["setup"].iloc[0]
-        ) is False
+        assert bool(s6._apply_setup_conditions(df)["setup"].iloc[0]) is False
 
 
 # ============================================================================
@@ -537,6 +556,7 @@ class TestTradeRulesSpecCompliance:
     @pytest.fixture(scope="class")
     def rules(self):
         from common.trade_management import SYSTEM_TRADE_RULES
+
         return SYSTEM_TRADE_RULES
 
     def test_system7_stub_absent(self, rules):
@@ -557,7 +577,7 @@ class TestTradeRulesSpecCompliance:
         assert r.stop_atr_period == 20, f"stop_atr_period={r.stop_atr_period}"
         assert r.stop_atr_multiplier == 5.0
         assert r.use_trailing_stop is True
-        assert r.trailing_stop_pct == 0.25   # 25% trailing (spec 準拠)
+        assert r.trailing_stop_pct == 0.25  # 25% trailing (spec 準拠)
 
     def test_system2_stop(self, rules):
         """System2 spec: 3ATR10 stop, 4% profit target."""
@@ -565,6 +585,7 @@ class TestTradeRulesSpecCompliance:
         assert r.side == "short"
         assert r.stop_atr_period == 10
         assert r.stop_atr_multiplier == 3.0
+
     def test_system3_stop_and_profit(self, rules):
         """System3 spec: 2.5ATR10 stop, 4% profit target, 3 日 time exit."""
         r = rules["system3"]
@@ -579,7 +600,7 @@ class TestTradeRulesSpecCompliance:
         assert r.stop_atr_period == 40
         assert r.stop_atr_multiplier == 1.5
         assert r.use_trailing_stop is True
-        assert r.trailing_stop_pct == 0.20   # 20% trailing (spec 準拠)
+        assert r.trailing_stop_pct == 0.20  # 20% trailing (spec 準拠)
 
     def test_system5_stop_and_target(self, rules):
         """System5 spec: 3ATR10 stop, 1ATR10 profit target."""

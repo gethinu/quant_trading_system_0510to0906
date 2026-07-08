@@ -78,7 +78,8 @@ def test_thirty_day_cron_never_shrinks_any_cache_file(tmp_cache, monkeypatch):
         for i, d in enumerate(bdays)
     }
     monkeypatch.setattr(
-        cdp, "get_polygon_grouped_daily",
+        cdp,
+        "get_polygon_grouped_daily",
         lambda ds: responses.get(ds, pd.DataFrame()),
     )
 
@@ -101,9 +102,9 @@ def test_thirty_day_cron_never_shrinks_any_cache_file(tmp_cache, monkeypatch):
 
     # 30 営業日累積で全銘柄が 30 行に到達
     for sym in symbols:
-        assert row_history[f"{sym}.csv"] == 30, (
-            f"{sym}: 30 日 cron 実行後 {row_history[f'{sym}.csv']} 行 (期待値 30)."
-        )
+        assert (
+            row_history[f"{sym}.csv"] == 30
+        ), f"{sym}: 30 日 cron 実行後 {row_history[f'{sym}.csv']} 行 (期待値 30)."
 
 
 def test_intermittent_polygon_outage_never_shrinks_cache(tmp_cache, monkeypatch):
@@ -125,7 +126,8 @@ def test_intermittent_polygon_outage_never_shrinks_cache(tmp_cache, monkeypatch)
             responses[ds] = _grouped_daily(["AAPL"], 100.0 + i)
 
     monkeypatch.setattr(
-        cdp, "get_polygon_grouped_daily",
+        cdp,
+        "get_polygon_grouped_daily",
         lambda ds: responses.get(ds, pd.DataFrame()),
     )
 

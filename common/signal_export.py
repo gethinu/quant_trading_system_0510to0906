@@ -66,9 +66,7 @@ def _try_tokyo_now() -> datetime:
     except Exception:  # pragma: no cover - Windows で tzdata 欠損時
         from datetime import timedelta
 
-        return datetime.now(timezone.utc).astimezone(
-            timezone(timedelta(hours=9))
-        )
+        return datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=9)))
 
 
 def generate_run_id(now: datetime | None = None) -> str:
@@ -78,7 +76,7 @@ def generate_run_id(now: datetime | None = None) -> str:
 
 
 def normalize_system_key(name: Any) -> str | None:
-    """"System1" / "system1" / "sys1" / "SPY(sys7)" などを ``sysN`` に正規化。"""
+    """ "System1" / "system1" / "sys1" / "SPY(sys7)" などを ``sysN`` に正規化。"""
     if name is None:
         return None
     s = str(name).lower()
@@ -378,11 +376,7 @@ def build_signals_json(
             # funnel 未計測なら None。
             "universe_target": (
                 max(
-                    (
-                        f["target"]
-                        for f in funnel_by_sys.values()
-                        if f.get("target")
-                    ),
+                    (f["target"] for f in funnel_by_sys.values() if f.get("target")),
                     default=None,
                 )
                 if funnel_by_sys
@@ -392,9 +386,11 @@ def build_signals_json(
         "meta": {
             "cli_version": cli_version,
             "run_id": run_id,
-            "elapsed_seconds": round(float(elapsed_seconds), 1)
-            if elapsed_seconds is not None
-            else None,
+            "elapsed_seconds": (
+                round(float(elapsed_seconds), 1)
+                if elapsed_seconds is not None
+                else None
+            ),
             # F2 P0#6: subscribers が abort と flat book を区別できるよう明示。
             # 既定 "ok" は真の flat book / 正常了、"aborted" は pipeline 側の
             # 停止 (stale cache 等)。abort_reason は運用側 log 収集用。
@@ -412,7 +408,9 @@ def default_output_path(date_str: str) -> Path:
 def write_signals_json(payload: dict[str, Any], output_path: Path) -> Path:
     """JSON を atomic write (tmp -> replace) で書き出す。"""
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = output_path.with_suffix(output_path.suffix + f".{payload['meta']['run_id']}.tmp")
+    tmp = output_path.with_suffix(
+        output_path.suffix + f".{payload['meta']['run_id']}.tmp"
+    )
     tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     tmp.replace(output_path)
     return output_path
@@ -422,12 +420,17 @@ def write_signals_json(payload: dict[str, Any], output_path: Path) -> Path:
 # Headless CLI  (apps/app_today_signals.py --headless から dispatch される)
 # --------------------------------------------------------------------------
 
+
 def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="app_today_signals.py --headless",
         description="当日シグナルを生成し standardize JSON を出力する (Streamlit UI 非起動)。",
     )
-    p.add_argument("--headless", action="store_true", help="Streamlit UI を起動せず core logic のみ実行。")
+    p.add_argument(
+        "--headless",
+        action="store_true",
+        help="Streamlit UI を起動せず core logic のみ実行。",
+    )
     p.add_argument(
         "--output-json",
         type=str,
@@ -440,10 +443,21 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=None,
         help="対象シンボルを comma 区切りで指定 (省略時は full universe)。例: AAPL,SPY",
     )
-    p.add_argument("--date", type=str, default=None, help="シグナル対象日 (YYYY-MM-DD)。省略時は今日(JST)。")
-    p.add_argument("--capital-long", type=float, default=None, help="ロング側資金 (USD)。")
-    p.add_argument("--capital-short", type=float, default=None, help="ショート側資金 (USD)。")
-    p.add_argument("--parallel", action="store_true", help="システム別抽出を並列実行する。")
+    p.add_argument(
+        "--date",
+        type=str,
+        default=None,
+        help="シグナル対象日 (YYYY-MM-DD)。省略時は今日(JST)。",
+    )
+    p.add_argument(
+        "--capital-long", type=float, default=None, help="ロング側資金 (USD)。"
+    )
+    p.add_argument(
+        "--capital-short", type=float, default=None, help="ショート側資金 (USD)。"
+    )
+    p.add_argument(
+        "--parallel", action="store_true", help="システム別抽出を並列実行する。"
+    )
     p.add_argument(
         "--skip-latest-check",
         action="store_true",
@@ -521,7 +535,9 @@ def run_headless(argv: list[str]) -> int:
         snapshots = GLOBAL_STAGE_METRICS.all_snapshots()
         if snapshots:
             stage_metrics = dict(snapshots)
-    except Exception:  # noqa: BLE001 - funnel は best-effort。失敗しても signals は出す。
+    except (
+        Exception
+    ):  # noqa: BLE001 - funnel は best-effort。失敗しても signals は出す。
         stage_metrics = None
 
     payload = build_signals_json(
@@ -535,7 +551,9 @@ def run_headless(argv: list[str]) -> int:
         stage_metrics=stage_metrics,
     )
 
-    out_path = Path(args.output_json) if args.output_json else default_output_path(date_str)
+    out_path = (
+        Path(args.output_json) if args.output_json else default_output_path(date_str)
+    )
     write_signals_json(payload, out_path)
 
     logger.info(

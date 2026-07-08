@@ -41,7 +41,9 @@ class EmailPublisher(Publisher):
     ) -> None:
         self.api_key = api_key or os.getenv("SENDGRID_API_KEY") or ""
         self.from_email = from_email or os.getenv("SENDGRID_FROM_EMAIL") or ""
-        raw_to = to_emails if to_emails is not None else os.getenv("SENDGRID_TO_EMAIL") or ""
+        raw_to = (
+            to_emails if to_emails is not None else os.getenv("SENDGRID_TO_EMAIL") or ""
+        )
         if isinstance(raw_to, str):
             self.to_emails = [e.strip() for e in raw_to.split(",") if e.strip()]
         else:
@@ -101,7 +103,9 @@ class EmailPublisher(Publisher):
                 else ""
             )
             sum_html = (
-                f"<div style='font-size:13px;color:#444'>{summary}</div>" if summary else ""
+                f"<div style='font-size:13px;color:#444'>{summary}</div>"
+                if summary
+                else ""
             )
             narrative_html = (
                 "<div style='background:#eef2ff;border:1px solid #c7d2fe;"
@@ -126,9 +130,7 @@ class EmailPublisher(Publisher):
 
     def _build_payload(self, message: SignalMessage) -> dict[str, Any]:
         return {
-            "personalizations": [
-                {"to": [{"email": e} for e in self.to_emails]}
-            ],
+            "personalizations": [{"to": [{"email": e} for e in self.to_emails]}],
             "from": {"email": self.from_email, "name": "Quant Signals"},
             "subject": message.title(),
             "content": [
@@ -138,7 +140,9 @@ class EmailPublisher(Publisher):
         }
 
     # -- transport ------------------------------------------------------
-    def send(self, signals_json: dict[str, Any], *, dry_run: bool = False) -> PublishResult:
+    def send(
+        self, signals_json: dict[str, Any], *, dry_run: bool = False
+    ) -> PublishResult:
         message = SignalMessage(payload=signals_json)
         payload = self._build_payload(message)
         target = ",".join(self.to_emails) or "unset"
@@ -170,7 +174,10 @@ class EmailPublisher(Publisher):
         for attempt in range(1, _MAX_RETRIES + 1):
             try:
                 resp = requests.post(
-                    _SENDGRID_ENDPOINT, json=payload, headers=headers, timeout=self.timeout
+                    _SENDGRID_ENDPOINT,
+                    json=payload,
+                    headers=headers,
+                    timeout=self.timeout,
                 )
                 last_status = resp.status_code
                 if 200 <= resp.status_code < 300:

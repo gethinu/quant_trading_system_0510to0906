@@ -6,6 +6,7 @@ Goals:
 - No overlapping positions per symbol; exits on/after entries; PnL numeric;
     shares > 0
 """
+
 from __future__ import annotations
 
 import math
@@ -107,20 +108,16 @@ def _assert_common_trade_invariants(trades: pd.DataFrame) -> None:
     }
     assert required_cols.issubset(set(trades.columns))
     # Types and values
-    assert trades["shares"].map(
-        lambda x: isinstance(x, (int, float)) and x > 0
-    ).all()
-    assert trades["entry_price"].map(
-        lambda x: isinstance(x, (int, float)) and x > 0
-    ).all()
-    assert trades["exit_price"].map(
-        lambda x: isinstance(x, (int, float)) and x > 0
-    ).all()
+    assert trades["shares"].map(lambda x: isinstance(x, (int, float)) and x > 0).all()
+    assert (
+        trades["entry_price"].map(lambda x: isinstance(x, (int, float)) and x > 0).all()
+    )
+    assert (
+        trades["exit_price"].map(lambda x: isinstance(x, (int, float)) and x > 0).all()
+    )
     assert trades["entry_date"].le(trades["exit_date"]).all()
     # No overlapping trades per symbol
-    for sym, grp in trades.sort_values(["symbol", "entry_date"]).groupby(
-        "symbol"
-    ):
+    for sym, grp in trades.sort_values(["symbol", "entry_date"]).groupby("symbol"):
         prev_exit = None
         for _, row in grp.iterrows():
             if prev_exit is not None:
@@ -131,14 +128,14 @@ def _assert_common_trade_invariants(trades: pd.DataFrame) -> None:
 def _assert_slot_and_capital_constraints(logs: pd.DataFrame, strategy) -> None:
     if logs.empty:
         return
-    max_positions = int(
-        getattr(strategy, "config", {}).get("max_positions", 10)
-    )
+    max_positions = int(getattr(strategy, "config", {}).get("max_positions", 10))
     assert logs["active_positions"].max() <= max_positions
     # Capital should remain finite and non-negative
-    assert logs["capital"].map(
-        lambda x: isinstance(x, (int, float)) and math.isfinite(x) and x >= 0
-    ).all()
+    assert (
+        logs["capital"]
+        .map(lambda x: isinstance(x, (int, float)) and math.isfinite(x) and x >= 0)
+        .all()
+    )
 
 
 @pytest.mark.parametrize(

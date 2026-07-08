@@ -1636,9 +1636,7 @@ def _load_portfolio_caps() -> dict[str, float]:
             "max_total_positions": int(getattr(pf, "max_total_positions", 70)),
             "max_long_positions": int(getattr(pf, "max_long_positions", 40)),
             "max_short_positions": int(getattr(pf, "max_short_positions", 30)),
-            "max_gross_exposure_pct": float(
-                getattr(pf, "max_gross_exposure_pct", 1.0)
-            ),
+            "max_gross_exposure_pct": float(getattr(pf, "max_gross_exposure_pct", 1.0)),
             "max_net_exposure_pct": float(getattr(pf, "max_net_exposure_pct", 1.0)),
         }
     except Exception:
@@ -1746,7 +1744,9 @@ def _apply_portfolio_caps(
         "new_short_usd": round(short_usd, 2),
     }
     if trims:
-        logger.info("[PORTFOLIO_CAP] trimmed %s (held L%d/S%d)", trims, held_long, held_short)
+        logger.info(
+            "[PORTFOLIO_CAP] trimmed %s (held L%d/S%d)", trims, held_long, held_short
+        )
     return trimmed_df, report
 
 
@@ -2250,7 +2250,9 @@ def finalize_allocation(
             summary.system_diagnostics = existing_diag
         except Exception:
             pass
-    except Exception as exc:  # noqa: BLE001 - caps は best-effort、失敗しても allocation 継続
+    except (
+        Exception
+    ) as exc:  # noqa: BLE001 - caps は best-effort、失敗しても allocation 継続
         logger.warning("[PORTFOLIO_CAP] 適用に失敗、trim なしで継続: %s", exc)
 
     if "system" in final_df.columns:

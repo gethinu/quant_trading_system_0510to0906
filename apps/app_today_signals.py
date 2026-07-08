@@ -111,8 +111,8 @@ from common.system_groups import (  # noqa: E402
 from common.today_signals import (  # noqa: E402
     run_all_systems_today as compute_today_signals,
 )
-from common.trade_history import get_trade_history_logger  # noqa: E402
 from common.today_signals import LONG_SYSTEMS, SHORT_SYSTEMS  # noqa: E402
+from common.trade_history import get_trade_history_logger  # noqa: E402
 from common.utils_spy import (  # noqa: E402
     calculate_trading_days_lag,
     describe_trading_gap,
@@ -3327,8 +3327,7 @@ def _execute_auto_trading(
                         },
                     )
                     logger.log(
-                        f"✅ トレード履歴を記録しました: "
-                        f"{len(results_df)} 件"
+                        f"✅ トレード履歴を記録しました: " f"{len(results_df)} 件"
                     )
                 except Exception as exc:
                     logger.log(f"⚠️ 履歴記録に失敗: {exc}")
@@ -3344,7 +3343,11 @@ def _execute_auto_trading(
         total = len(results_df)
         success = len(results_df[results_df["status"].notna()])
         # error列が存在するかチェック（存在しないかもしれない）
-        errors = len(results_df[results_df.get("error", pd.Series(dtype=object)).notna()]) if "error" in results_df.columns else 0
+        errors = (
+            len(results_df[results_df.get("error", pd.Series(dtype=object)).notna()])
+            if "error" in results_df.columns
+            else 0
+        )
 
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -3361,12 +3364,11 @@ def _execute_auto_trading(
         if errors > 0 and "error" in results_df.columns:
             st.warning(f"⚠️ {errors} 件の注文でエラーが発生しました")
             error_df = results_df[results_df["error"].notna()]
-            error_cols = [c for c in ["symbol", "side", "qty", "error"] if c in error_df.columns]
+            error_cols = [
+                c for c in ["symbol", "side", "qty", "error"] if c in error_df.columns
+            ]
             if error_cols:
-                st.dataframe(
-                    error_df[error_cols],
-                    width="stretch"
-                )
+                st.dataframe(error_df[error_cols], width="stretch")
 
         # ポーリング
         if trade_options.poll_status and any(
@@ -3824,14 +3826,18 @@ with st.sidebar:
                 for order in orders:
                     orders_data.append(
                         {
-                            "注文ID": str(order.id) if order.id else "",  # UUID を文字列に変換
+                            "注文ID": (
+                                str(order.id) if order.id else ""
+                            ),  # UUID を文字列に変換
                             "銘柄": order.symbol,
                             "サイド": order.side,
                             "数量": order.qty,
                             "注文価格": getattr(order, "limit_price", "Market"),
                             "注文タイプ": order.order_type,
                             "状況": order.status,
-                            "作成日時": str(order.created_at) if order.created_at else "",
+                            "作成日時": (
+                                str(order.created_at) if order.created_at else ""
+                            ),
                         }
                     )
                 orders_df = pd.DataFrame(orders_data)

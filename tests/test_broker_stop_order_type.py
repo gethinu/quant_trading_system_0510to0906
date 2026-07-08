@@ -28,8 +28,14 @@ class _CapturingClient:
 def test_stop_order_type_builds_stop_request():
     client = _CapturingClient()
     order = ba.submit_order(
-        client, "HST", 70, side="sell", order_type="stop",
-        stop_price=17.33, time_in_force="gtc", client_order_id="system4-HST-exit",
+        client,
+        "HST",
+        70,
+        side="sell",
+        order_type="stop",
+        stop_price=17.33,
+        time_in_force="gtc",
+        client_order_id="system4-HST-exit",
     )
     assert type(client.req).__name__ == "StopOrderRequest"
     assert float(client.req.stop_price) == 17.33

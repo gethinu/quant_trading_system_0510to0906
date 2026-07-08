@@ -19,11 +19,10 @@ This test locks in:
 from __future__ import annotations
 
 import io
-import tokenize
 from pathlib import Path
+import tokenize
 
 import pytest
-
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -81,8 +80,17 @@ def test_individual_constants_preserved():
 
 
 def _iter_py_files(root: Path):
-    skip_dirs = {".git", ".venv", "venv", "__pycache__", ".mypy_cache",
-                 ".pytest_cache", "node_modules", ".ruff_cache", "docs"}
+    skip_dirs = {
+        ".git",
+        ".venv",
+        "venv",
+        "__pycache__",
+        ".mypy_cache",
+        ".pytest_cache",
+        "node_modules",
+        ".ruff_cache",
+        "docs",
+    }
     for p in root.rglob("*.py"):
         parts = set(p.parts)
         if parts & skip_dirs:
