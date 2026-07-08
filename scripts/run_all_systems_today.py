@@ -1359,6 +1359,136 @@ def _recent_trading_days(
     return out
 
 
+# エントリー対象ユニバースの「実在する最新取引日」を推定するための参照バスケット。
+# 毎日更新される大型株のみを用いる。SPY 等ヘッジ指数は Polygon index endpoint の
+# 403 等で rolling が単独で古くなり得る (2026-07-08: SPY rolling=07-01 に対し普通株
+# ユニバースは 07-06 で確定済み) ため、市場基準アンカーを SPY 単独で決めてはならない。
+_UNIVERSE_FRESHNESS_PROBE_SYMBOLS: tuple[str, ...] = (
+    "AAPL",
+    "MSFT",
+    "AMZN",
+    "GOOGL",
+    "META",
+    "NVDA",
+    "JPM",
+    "JNJ",
+    "XOM",
+    "WMT",
+    "PG",
+    "V",
+    "MA",
+    "HD",
+    "KO",
+    "TSLA",
+    "AVGO",
+    "COST",
+)
+
+
+def _latest_available_cache_day(
+    cache_manager: CacheManager, extra: pd.Timestamp | None = None
+) -> pd.Timestamp | None:
+    """エントリー対象ユニバースが実際に到達している最新取引日を推定する。
+
+    SPY 単独ではなく普通株の参照バスケットの rolling 最終日 (max) を用いる。
+    理由: SPY 等ヘッジ指数は別フェッチ経路で rolling が単独で古くなる場合があり、
+    それをアンカーにすると鮮度のある普通株ユニバース (直近営業日) を丸ごと捨てて
+    しまう (2026-07-08 に観測: SPY rolling=07-01 を基準に as-of を後退させた結果、
+    07-06 まで確定済みの流動性銘柄が freshness フィルタで全滅し、更新に失敗した
+    低品質銘柄だけが残って signal が枯れた)。バスケットの max を取ることで「一部でも
+    当日確定データを持つ流動性銘柄が存在する最新営業日」= 実質的な universe の最新
+    確定日を得る。個別銘柄の鮮度落ちは下流の freshness フィルタが処理する。
+
+    ``extra`` は SPY rolling 最終日などのフォールバック候補 (バスケットが空の
+    テスト環境等で使用)。戻り値は候補群の最大値 (最も新しい取引日)、無ければ None。
+    """
+    dates: list[pd.Timestamp] = []
+    if extra is not None:
+        try:
+            dates.append(pd.Timestamp(extra).normalize())
+        except Exception:
+            pass
+    for sym in _UNIVERSE_FRESHNESS_PROBE_SYMBOLS:
+        try:
+            df = cache_manager.read(sym, "rolling")
+        except Exception:
+            df = None
+        d = _extract_last_cache_date(df) if df is not None else None
+        if d is not None:
+            dates.append(pd.Timestamp(d).normalize())
+    if not dates:
+        return None
+    return max(dates)
+
+
+def _refresh_hedge_reference_inplace(ctx: Any, basic_data: Any) -> None:
+    """SPY (市場レジームゲート / System7 ヘッジの基準) の in-memory 鮮度補正。
+
+    rolling SPY は Polygon index endpoint の 403 等で普通株ユニバースより古くなる
+    場合がある (2026-07-08: SPY rolling=07-01 に対し full_backup=07-06)。その状態で
+    as-of を universe の最新日にアンカーすると、SPY だけが freshness フィルタから
+    外れて System7 (ヘッジ) が発火せず、市場レジームゲートも stale になる。
+    full_backup には指標付きのより新しい SPY が存在するため、それが rolling より
+    新しければ basic_data["SPY"] を差し替える。通常運用 (rolling が最新) では no-op。
+    """
+    if not isinstance(basic_data, dict):
+        return
+    sym = "SPY"  # SYSTEM7_SYMBOL / HEDGE_INDEX_SYMBOLS の唯一の市場基準銘柄
+    cur = basic_data.get(sym)
+    cur_last = _extract_last_cache_date(cur) if cur is not None else None
+    try:
+        base_day = pd.Timestamp(getattr(ctx, "signal_base_day", None)).normalize()
+    except Exception:
+        base_day = None
+    # rolling が既に基準日をカバーしているなら何もしない
+    if cur_last is not None and base_day is not None and cur_last >= base_day:
+        return
+    try:
+        full = ctx.cache_manager.read(sym, "full")
+    except Exception:
+        full = None
+    full_last = _extract_last_cache_date(full) if full is not None else None
+    if full_last is None:
+        return
+    if cur_last is not None and full_last <= cur_last:
+        return  # full_backup も古い/同等なら差し替えても無意味
+    # full_backup フレームを basic_data と同じ schema に正規化する
+    try:
+        work = full.copy()
+        if "Date" not in work.columns and "date" in work.columns:
+            work["Date"] = pd.to_datetime(work["date"].to_numpy(), errors="coerce")
+        if "Date" in work.columns:
+            work["Date"] = pd.to_datetime(
+                work["Date"].to_numpy(), errors="coerce"
+            ).normalize()
+        work = _normalize_ohlcv(work)
+        if "Date" in work.columns:
+            work = work.dropna(subset=["Date"]).sort_values("Date")
+        # rolling 相当の長さに tail (指標は算出済みのため末尾切り出しで欠落しない)
+        try:
+            target_len = int(
+                ctx.settings.cache.rolling.base_lookback_days
+                + ctx.settings.cache.rolling.buffer_days
+            )
+        except Exception:
+            target_len = 400
+        if target_len > 0 and len(work) > target_len:
+            work = work.tail(target_len)
+    except Exception:
+        return
+    if work is None or getattr(work, "empty", True):
+        return
+    basic_data[sym] = work
+    try:
+        _log(
+            f"🩹 ヘッジ基準鮮度補正: {sym} を full_backup で差し替え "
+            f"(rolling={cur_last.date() if cur_last is not None else None} "
+            f"→ full={full_last.date()})。市場ゲート/System7 を最新化。"
+        )
+    except Exception:
+        pass
+
+
 def _build_rolling_from_base(
     symbol: str,
     base_df: pd.DataFrame,
@@ -3790,23 +3920,45 @@ def compute_today_signals(  # noqa: C901  # type: ignore[reportGeneralTypeIssues
     except Exception:
         ctx.signal_base_day = entry_day
 
-    # --- データ可用性ガード: as-of をキャッシュ実在の最新取引日で頭打ち --------
+    # --- データ可用性ガード: as-of をユニバース実在の最新取引日で頭打ち ---------
     # データベンダー (Polygon) が最新営業日をまだ提供していない場合
     # (当日 EOD 前 / 休日・週末 / マシン時計がベンダー提供日より先行) は、
     # clock 由来の signal_base_day が「キャッシュにまだ存在しない日」を指す。
     # すると全銘柄が鮮度落ちで除外され total_signals=0 で異常停止する
-    # (= 2026-07-07 に観測された症状)。これを避けるため、市場基準の SPY rolling
-    # に実在する最新取引日を上限として as-of / base を後退させ、
-    # 「最後にデータが確定している取引日」でシグナルを生成する。
+    # (= 2026-07-07 に観測された症状)。これを避けるため、エントリー対象ユニバース
+    # (普通株) の rolling が実在到達している最新取引日を上限として as-of / base を
+    # 後退させ、「最後にデータが確定している取引日」でシグナルを生成する。
+    #
+    # 重要 (2026-07-08 修正): アンカーは SPY 単独ではなく普通株バスケットの最新日で
+    # 決める。SPY はヘッジ指数で別フェッチ経路のため rolling が単独で古くなり得る
+    # (07-08: SPY rolling=07-01 に対し普通株は 07-06)。SPY を基準にすると鮮度のある
+    # 07-06 ユニバースを丸ごと捨て、更新に失敗した低品質銘柄だけが残って signal が
+    # 枯れる (baseline 実測 = 2件)。設計原則「シグナルは潤沢に出るのが正しい、絞るのは
+    # entry 段階だけ」に反する。SPY 基準の stale 問題は _refresh_hedge_reference_inplace
+    # が別途 full_backup から補正する。
     # 休日・週末・当日 EOD 前は実データ日基準で自動的に回避される。
     # キャッシュが十分新しい通常運用では no-op (base <= cache_last)。
     try:
         _spy_roll = ctx.cache_manager.read("SPY", "rolling")
-        _cache_last = (
+        _spy_last = (
             _extract_last_cache_date(_spy_roll) if _spy_roll is not None else None
         )
     except Exception:
-        _cache_last = None
+        _spy_last = None
+    # 市場基準の「実在する最新取引日」は普通株ユニバースの鮮度で決める。
+    # SPY 単独 (rolling) は別フェッチ経路で古くなり得る (2026-07-08 に観測) ため、
+    # 参照バスケットの最新日 (max) を採用し、SPY rolling 最終日はフォールバック候補
+    # として渡す。テストモードでは参照バスケットの実データを混ぜないよう従来どおり
+    # SPY のみを用いる。
+    if getattr(ctx, "test_mode", None):
+        _cache_last = _spy_last
+    else:
+        try:
+            _cache_last = _latest_available_cache_day(
+                ctx.cache_manager, extra=_spy_last
+            )
+        except Exception:
+            _cache_last = _spy_last
     if _cache_last is not None:
         try:
             _cache_last = pd.Timestamp(_cache_last).normalize()
@@ -3970,6 +4122,15 @@ def compute_today_signals(  # noqa: C901  # type: ignore[reportGeneralTypeIssues
         pass
 
     basic_data = _load_universe_basic_data(ctx, symbols)
+
+    # SPY (市場レジームゲート / System7 ヘッジの基準) を universe の最新確定日まで
+    # in-memory で鮮度補正する。rolling SPY が単独で古い場合、full_backup の指標付き
+    # SPY で差し替え、freshness フィルタ/最新営業日チェックが SPY を誤って落として
+    # System7 を無効化するのを防ぐ。通常運用 (rolling が最新) では no-op。
+    try:
+        _refresh_hedge_reference_inplace(ctx, basic_data)
+    except Exception:
+        pass
 
     # Progress: phase2 complete
     try:
