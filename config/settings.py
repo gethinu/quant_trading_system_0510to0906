@@ -441,7 +441,11 @@ def _build_sizing_config(cfg: dict[str, Any]) -> SizingConfig:
     mode = raw_mode if raw_mode in ("equity_linked", "fixed_tier") else d.mode
 
     try:
-        pct = float(os.getenv("EQUITY_DEPLOY_PCT", cfg.get("equity_deploy_pct", d.equity_deploy_pct)))
+        pct = float(
+            os.getenv(
+                "EQUITY_DEPLOY_PCT", cfg.get("equity_deploy_pct", d.equity_deploy_pct)
+            )
+        )
     except (TypeError, ValueError):
         pct = d.equity_deploy_pct
     import math as _math

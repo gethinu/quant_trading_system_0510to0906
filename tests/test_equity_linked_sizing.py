@@ -33,9 +33,13 @@ def test_equity_linked_basic_weight_times_budget():
     # per-name cap 0.10*100k=10k で全部 clamp されないよう max_pct を緩める。
     p = compute_position_notionals(
         [(0.5, "buy"), (0.3, "buy"), (0.2, "buy")],
-        mode=SIZING_EQUITY_LINKED, tier="small", equity=100_000,
-        equity_deploy_pct=1.0, max_pct=1.0,  # per-name 実質無効
-        max_gross_exposure_pct=1.0, max_net_exposure_pct=1.0,
+        mode=SIZING_EQUITY_LINKED,
+        tier="small",
+        equity=100_000,
+        equity_deploy_pct=1.0,
+        max_pct=1.0,  # per-name 実質無効
+        max_gross_exposure_pct=1.0,
+        max_net_exposure_pct=1.0,
     )
     assert p.deploy_budget == 100_000.0
     assert p.notionals == [50_000.0, 30_000.0, 20_000.0]
@@ -46,9 +50,13 @@ def test_equity_deploy_pct_scales_budget():
     # pct 0.5 → deploy_budget = 50k。notional は半分。
     p = compute_position_notionals(
         [(0.5, "buy"), (0.5, "buy")],
-        mode=SIZING_EQUITY_LINKED, tier="small", equity=100_000,
-        equity_deploy_pct=0.5, max_pct=1.0,
-        max_gross_exposure_pct=1.0, max_net_exposure_pct=1.0,
+        mode=SIZING_EQUITY_LINKED,
+        tier="small",
+        equity=100_000,
+        equity_deploy_pct=0.5,
+        max_pct=1.0,
+        max_gross_exposure_pct=1.0,
+        max_net_exposure_pct=1.0,
     )
     assert p.deploy_budget == 50_000.0
     assert p.notionals == [25_000.0, 25_000.0]
@@ -58,9 +66,13 @@ def test_weights_normalized_to_budget():
     # 合計 weight != 1 でも予算基準で正規化される (Σnotional == budget)。
     p = compute_position_notionals(
         [(2.0, "buy"), (1.0, "buy"), (1.0, "buy")],
-        mode=SIZING_EQUITY_LINKED, tier="small", equity=40_000,
-        equity_deploy_pct=1.0, max_pct=1.0,
-        max_gross_exposure_pct=1.0, max_net_exposure_pct=1.0,
+        mode=SIZING_EQUITY_LINKED,
+        tier="small",
+        equity=40_000,
+        equity_deploy_pct=1.0,
+        max_pct=1.0,
+        max_gross_exposure_pct=1.0,
+        max_net_exposure_pct=1.0,
     )
     assert sum(p.notionals) == pytest.approx(40_000.0)
     assert p.notionals[0] == pytest.approx(20_000.0)  # 2/4 * 40k
@@ -74,9 +86,13 @@ def test_per_name_cap_clamps_and_does_not_reinflate():
     # hard cap: 余りを他へ再配分しない。
     p = compute_position_notionals(
         [(0.5, "buy"), (0.3, "buy"), (0.2, "buy")],
-        mode=SIZING_EQUITY_LINKED, tier="small", equity=100_000,
-        equity_deploy_pct=1.0, max_pct=0.10,
-        max_gross_exposure_pct=1.0, max_net_exposure_pct=1.0,
+        mode=SIZING_EQUITY_LINKED,
+        tier="small",
+        equity=100_000,
+        equity_deploy_pct=1.0,
+        max_pct=0.10,
+        max_gross_exposure_pct=1.0,
+        max_net_exposure_pct=1.0,
     )
     assert p.notionals == [10_000.0, 10_000.0, 10_000.0]
     assert p.caps["per_name"]["clamped_count"] == 3
@@ -90,9 +106,13 @@ def test_gross_cap_scales_whole_book():
     # pct 2.0 → deploy 200k > gross_cap 100k。全体を 0.5 倍に縮小。
     p = compute_position_notionals(
         [(0.5, "buy"), (0.5, "buy")],
-        mode=SIZING_EQUITY_LINKED, tier="small", equity=100_000,
-        equity_deploy_pct=2.0, max_pct=1.0,
-        max_gross_exposure_pct=1.0, max_net_exposure_pct=1.0,
+        mode=SIZING_EQUITY_LINKED,
+        tier="small",
+        equity=100_000,
+        equity_deploy_pct=2.0,
+        max_pct=1.0,
+        max_gross_exposure_pct=1.0,
+        max_net_exposure_pct=1.0,
     )
     assert p.gross_after == pytest.approx(100_000.0)
     assert p.caps["gross"]["scale"] == pytest.approx(0.5)
@@ -106,9 +126,14 @@ def test_net_cap_scales_dominant_long_side():
     # gross=100k(=cap), net=|90k-10k|=80k > 50k → long を (10k+50k)/90k 倍。
     entries = [(0.09, "buy")] * 10 + [(0.10, "sell")]
     p = compute_position_notionals(
-        entries, mode=SIZING_EQUITY_LINKED, tier="small", equity=100_000,
-        equity_deploy_pct=1.0, max_pct=0.10,
-        max_gross_exposure_pct=1.0, max_net_exposure_pct=0.5,
+        entries,
+        mode=SIZING_EQUITY_LINKED,
+        tier="small",
+        equity=100_000,
+        equity_deploy_pct=1.0,
+        max_pct=0.10,
+        max_gross_exposure_pct=1.0,
+        max_net_exposure_pct=0.5,
     )
     assert p.net_after == pytest.approx(50_000.0, abs=1.0)
     assert p.short_after == pytest.approx(10_000.0, abs=1.0)
@@ -118,9 +143,14 @@ def test_net_cap_scales_dominant_long_side():
 def test_net_cap_scales_dominant_short_side():
     entries = [(0.10, "buy")] + [(0.09, "sell")] * 10
     p = compute_position_notionals(
-        entries, mode=SIZING_EQUITY_LINKED, tier="small", equity=100_000,
-        equity_deploy_pct=1.0, max_pct=0.10,
-        max_gross_exposure_pct=1.0, max_net_exposure_pct=0.5,
+        entries,
+        mode=SIZING_EQUITY_LINKED,
+        tier="small",
+        equity=100_000,
+        equity_deploy_pct=1.0,
+        max_pct=0.10,
+        max_gross_exposure_pct=1.0,
+        max_net_exposure_pct=0.5,
     )
     assert p.net_after == pytest.approx(50_000.0, abs=1.0)
     assert p.caps["net"]["scaled_side"] == "short"
@@ -130,9 +160,13 @@ def test_balanced_book_no_net_scaling():
     # long$ == short$ → net 0 → net cap 発火しない。
     p = compute_position_notionals(
         [(0.5, "buy"), (0.5, "sell")],
-        mode=SIZING_EQUITY_LINKED, tier="small", equity=100_000,
-        equity_deploy_pct=1.0, max_pct=1.0,
-        max_gross_exposure_pct=1.0, max_net_exposure_pct=0.5,
+        mode=SIZING_EQUITY_LINKED,
+        tier="small",
+        equity=100_000,
+        equity_deploy_pct=1.0,
+        max_pct=1.0,
+        max_gross_exposure_pct=1.0,
+        max_net_exposure_pct=0.5,
     )
     assert p.net_after == pytest.approx(0.0)
     assert "net" not in p.caps
@@ -145,9 +179,13 @@ def test_fixed_tier_matches_legacy_and_ignores_equity():
     # tier small = $1000, weight 0.5/0.3/0.2 → 500/300/200。equity は無視。
     p = compute_position_notionals(
         [(0.5, "buy"), (0.3, "buy"), (0.2, "buy")],
-        mode=SIZING_FIXED_TIER, tier="small", equity=999_999,
-        equity_deploy_pct=1.0, max_pct=0.10,
-        max_gross_exposure_pct=1.0, max_net_exposure_pct=0.5,
+        mode=SIZING_FIXED_TIER,
+        tier="small",
+        equity=999_999,
+        equity_deploy_pct=1.0,
+        max_pct=0.10,
+        max_gross_exposure_pct=1.0,
+        max_net_exposure_pct=0.5,
     )
     assert p.deploy_budget == 1000.0
     assert p.notionals == [500.0, 300.0, 200.0]
@@ -158,8 +196,12 @@ def test_fixed_tier_no_dollar_cap_even_if_concentrated():
     # 単一銘柄 weight 1.0, tier large=$100k → per-name 10% など掛からず 100k。
     p = compute_position_notionals(
         [(1.0, "buy")],
-        mode=SIZING_FIXED_TIER, tier="large", equity=100_000,
-        max_pct=0.10, max_gross_exposure_pct=1.0, max_net_exposure_pct=0.5,
+        mode=SIZING_FIXED_TIER,
+        tier="large",
+        equity=100_000,
+        max_pct=0.10,
+        max_gross_exposure_pct=1.0,
+        max_net_exposure_pct=0.5,
     )
     assert p.notionals == [100_000.0]  # clamp されない (後方互換)
 
@@ -170,9 +212,13 @@ def test_fixed_tier_no_dollar_cap_even_if_concentrated():
 def test_zero_total_weight_equal_split():
     p = compute_position_notionals(
         [(0.0, "buy"), (0.0, "buy")],
-        mode=SIZING_EQUITY_LINKED, tier="small", equity=100_000,
-        equity_deploy_pct=1.0, max_pct=1.0,
-        max_gross_exposure_pct=1.0, max_net_exposure_pct=1.0,
+        mode=SIZING_EQUITY_LINKED,
+        tier="small",
+        equity=100_000,
+        equity_deploy_pct=1.0,
+        max_pct=1.0,
+        max_gross_exposure_pct=1.0,
+        max_net_exposure_pct=1.0,
     )
     assert p.notionals == [50_000.0, 50_000.0]  # 均等割り
 
@@ -180,7 +226,9 @@ def test_zero_total_weight_equal_split():
 def test_zero_equity_returns_zeros():
     p = compute_position_notionals(
         [(0.5, "buy"), (0.5, "buy")],
-        mode=SIZING_EQUITY_LINKED, tier="small", equity=0.0,
+        mode=SIZING_EQUITY_LINKED,
+        tier="small",
+        equity=0.0,
         equity_deploy_pct=1.0,
     )
     assert p.notionals == [0.0, 0.0]
@@ -191,9 +239,13 @@ def test_nonpositive_pct_falls_back_to_default():
     # pct <= 0 は既定 0.5 に安全フォールバック (誤設定でゼロ発注しない)。
     p = compute_position_notionals(
         [(1.0, "buy")],
-        mode=SIZING_EQUITY_LINKED, tier="small", equity=100_000,
-        equity_deploy_pct=0.0, max_pct=1.0,
-        max_gross_exposure_pct=1.0, max_net_exposure_pct=1.0,
+        mode=SIZING_EQUITY_LINKED,
+        tier="small",
+        equity=100_000,
+        equity_deploy_pct=0.0,
+        max_pct=1.0,
+        max_gross_exposure_pct=1.0,
+        max_net_exposure_pct=1.0,
     )
     assert p.deploy_budget == 50_000.0  # 100k × 既定 0.5
 
@@ -245,16 +297,20 @@ def test_resolve_equity_fixed_tier_passthrough():
 
 def test_resolve_equity_fetch_success():
     eq, src = resolve_sizing_equity(
-        10_000.0, mode=SIZING_EQUITY_LINKED,
-        client=_FakeAcctClient(equity=106252.0), allow_fetch=True,
+        10_000.0,
+        mode=SIZING_EQUITY_LINKED,
+        client=_FakeAcctClient(equity=106252.0),
+        allow_fetch=True,
     )
     assert eq == 106252.0 and src == "alpaca"
 
 
 def test_resolve_equity_fetch_failure_falls_back():
     eq, src = resolve_sizing_equity(
-        10_000.0, mode=SIZING_EQUITY_LINKED,
-        client=_FakeAcctClient(raise_exc=True), allow_fetch=True,
+        10_000.0,
+        mode=SIZING_EQUITY_LINKED,
+        client=_FakeAcctClient(raise_exc=True),
+        allow_fetch=True,
     )
     assert eq == 10_000.0 and src.startswith("fallback")
 
@@ -263,7 +319,8 @@ def test_resolve_equity_test_mode_skips_fetch(monkeypatch):
     # TEST_MODE 環境では fetch しない (creds を叩かない・従来挙動)。
     monkeypatch.setenv("TEST_MODE", "1")
     eq, src = resolve_sizing_equity(
-        10_000.0, mode=SIZING_EQUITY_LINKED,
+        10_000.0,
+        mode=SIZING_EQUITY_LINKED,
         client=_FakeAcctClient(equity=999999),  # 使われないはず
     )
     assert eq == 10_000.0 and "test_mode" in src
@@ -271,8 +328,10 @@ def test_resolve_equity_test_mode_skips_fetch(monkeypatch):
 
 def test_resolve_equity_allow_fetch_false_uses_fallback():
     eq, src = resolve_sizing_equity(
-        10_000.0, mode=SIZING_EQUITY_LINKED,
-        client=_FakeAcctClient(equity=999999), allow_fetch=False,
+        10_000.0,
+        mode=SIZING_EQUITY_LINKED,
+        client=_FakeAcctClient(equity=999999),
+        allow_fetch=False,
     )
     assert eq == 10_000.0 and "fetch_disabled" in src
 
@@ -284,13 +343,32 @@ def _json():
     return {
         "date": "2026-07-08",
         "systems": {
-            "sys1": {"signals": [
-                {"symbol": "AAPL", "side": "BUY", "entry_price": 100.0, "weight": 0.5},
-                {"symbol": "MSFT", "side": "BUY", "entry_price": 200.0, "weight": 0.3},
-            ]},
-            "sys2": {"signals": [
-                {"symbol": "TSLA", "side": "SELL", "entry_price": 250.0, "weight": 0.2},
-            ]},
+            "sys1": {
+                "signals": [
+                    {
+                        "symbol": "AAPL",
+                        "side": "BUY",
+                        "entry_price": 100.0,
+                        "weight": 0.5,
+                    },
+                    {
+                        "symbol": "MSFT",
+                        "side": "BUY",
+                        "entry_price": 200.0,
+                        "weight": 0.3,
+                    },
+                ]
+            },
+            "sys2": {
+                "signals": [
+                    {
+                        "symbol": "TSLA",
+                        "side": "SELL",
+                        "entry_price": 250.0,
+                        "weight": 0.2,
+                    },
+                ]
+            },
         },
     }
 
@@ -298,10 +376,15 @@ def _json():
 def test_signals_json_equity_linked_uses_equity():
     # equity 50k, pct 1.0, per-name cap 緩め → notional = weight*50k。
     orders = signals_json_to_orders(
-        _json(), tier="small", dry_run=True,
-        sizing_mode=SIZING_EQUITY_LINKED, account_equity=50_000.0,
-        equity_deploy_pct=1.0, max_pct=1.0,
-        max_gross_exposure_pct=1.0, max_net_exposure_pct=1.0,
+        _json(),
+        tier="small",
+        dry_run=True,
+        sizing_mode=SIZING_EQUITY_LINKED,
+        account_equity=50_000.0,
+        equity_deploy_pct=1.0,
+        max_pct=1.0,
+        max_gross_exposure_pct=1.0,
+        max_net_exposure_pct=1.0,
     )
     by = {o.symbol: o.notional_usd for o in orders}
     assert by["AAPL"] == pytest.approx(25_000.0)  # 0.5*50k
@@ -312,10 +395,15 @@ def test_signals_json_equity_linked_uses_equity():
 def test_signals_json_equity_linked_applies_per_name_cap():
     # equity 50k, per-name 10% = 5k。AAPL 0.5 → 25k → clamp 5k。
     orders = signals_json_to_orders(
-        _json(), tier="small", dry_run=True,
-        sizing_mode=SIZING_EQUITY_LINKED, account_equity=50_000.0,
-        equity_deploy_pct=1.0, max_pct=0.10,
-        max_gross_exposure_pct=1.0, max_net_exposure_pct=1.0,
+        _json(),
+        tier="small",
+        dry_run=True,
+        sizing_mode=SIZING_EQUITY_LINKED,
+        account_equity=50_000.0,
+        equity_deploy_pct=1.0,
+        max_pct=0.10,
+        max_gross_exposure_pct=1.0,
+        max_net_exposure_pct=1.0,
     )
     by = {o.symbol: o.notional_usd for o in orders}
     assert by["AAPL"] == pytest.approx(5_000.0)  # clamped
@@ -325,8 +413,13 @@ def test_signals_json_default_mode_is_equity_linked():
     # 明示 mode/pct 無し → 既定 equity_linked + equity_deploy_pct 0.5。
     # cap を無効化して「予算=equity×0.5」だけを確認 (cap 相互作用は別テスト)。
     orders = signals_json_to_orders(
-        _json(), tier="small", dry_run=True, account_equity=10_000.0,
-        max_pct=1.0, max_gross_exposure_pct=1.0, max_net_exposure_pct=1.0,
+        _json(),
+        tier="small",
+        dry_run=True,
+        account_equity=10_000.0,
+        max_pct=1.0,
+        max_gross_exposure_pct=1.0,
+        max_net_exposure_pct=1.0,
     )
     total = sum((o.notional_usd or 0.0) for o in orders)
     # equity_linked 10k × 既定 pct 0.5 = 5k を配分 (tier small $1k でも 10k でもない)

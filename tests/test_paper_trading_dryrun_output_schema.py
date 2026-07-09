@@ -225,7 +225,11 @@ def test_no_fractional_uses_integer_qty():
     # tier=small, weight 0.5/0.3/0.2 → notional 500/300/200 に対して価格 195.5/420/250
     # qty = 500/195.5 ≈ 2 株, 300/420 ≈ 0 株 (skip), 200/250 ≈ 0 株 (skip)
     orders = signals_json_to_orders(
-        data, tier="small", dry_run=True, prefer_fractional=False, sizing_mode="fixed_tier"
+        data,
+        tier="small",
+        dry_run=True,
+        prefer_fractional=False,
+        sizing_mode="fixed_tier",
     )
     symbols = {o.symbol for o in orders}
     assert "AAPL" in symbols

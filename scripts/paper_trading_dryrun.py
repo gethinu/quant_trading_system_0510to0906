@@ -37,7 +37,9 @@ def build_sizing_kwargs(args, *, client=None) -> tuple[dict, dict]:
     mode = getattr(args, "sizing_mode", None) or s.sizing.mode
     pct_arg = getattr(args, "equity_deploy_pct", None)
     try:
-        pct = float(pct_arg) if pct_arg is not None else float(s.sizing.equity_deploy_pct)
+        pct = (
+            float(pct_arg) if pct_arg is not None else float(s.sizing.equity_deploy_pct)
+        )
     except (TypeError, ValueError):
         pct = float(s.sizing.equity_deploy_pct)
     max_pct = float(s.risk.max_pct)
