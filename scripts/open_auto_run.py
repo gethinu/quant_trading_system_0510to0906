@@ -377,6 +377,17 @@ class Runner:
             return None
 
     def notify(self, eq: float | None) -> None:
+        # publish_execution_summary は既存 recon_<date>.json を優先ロードして
+        # 再ビルドしない。06:00 daily が薄シグナル(0)状態で書いた stale recon が
+        # 残っていると、open-run が実発注しても ntfy が 0 と誤報する。stale を消して
+        # fresh な today_signals/paper_orders/exit_orders から必ず再ビルドさせる。
+        stale = self.results / f"recon_{self.compact}.json"
+        if stale.exists():
+            try:
+                stale.unlink()
+                self.log(f"[notify] stale recon を削除し再ビルド強制: {stale.name}")
+            except Exception as exc:  # noqa: BLE001
+                self.log(f"[notify] stale recon 削除失敗 (無視): {exc}")
         argv = [
             str(ROOT / "scripts" / "publish_execution_summary.py"),
             "--date",
