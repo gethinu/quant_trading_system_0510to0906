@@ -296,7 +296,7 @@ class Runner:
         self._dump("close_fills.json", fills)
         self._snapshot_positions("positions_after_close.json")
 
-    def entry_stage(self) -> None:
+    def entry_stage(self, eq: float | None) -> None:
         argv = [
             str(ROOT / "scripts" / "paper_trading_submit.py"),
             "--signals-json",
@@ -304,6 +304,11 @@ class Runner:
             "--output-json",
             str(self.paper_json),
         ]
+        # submit 側は Alpaca から equity を自動取得するが、その取得が transient に
+        # 失敗すると fallback が既定 $10k になり deploy_budget が桁違いに小さくなる。
+        # runner が既に取得済みの実 equity を fallback として渡し、桁落ちを防ぐ。
+        if eq is not None and eq > 0:
+            argv += ["--equity", str(eq)]
         if not self.dry_run:
             argv += ["--confirm", "--yes"]
         code, out, _err = self.run_step("entry", argv)
@@ -433,7 +438,7 @@ class Runner:
         eq = self.equity()
         market_ids = self.exit_stage()
         self.wait_exit_fills(market_ids)  # exit->entry 順の担保点
-        self.entry_stage()
+        self.entry_stage(eq)
         self.record_stage()
         self.notify(eq)
         self.finalize(aborted=False)
