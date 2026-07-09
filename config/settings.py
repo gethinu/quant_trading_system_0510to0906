@@ -69,13 +69,13 @@ class SizingConfig:
       - "fixed_tier": 従来の tier 固定予算 (small=$1k/medium=$10k/large=$100k)。
         後方互換のため撤去せず残す。tier 経路には dollar cap は掛けない (従来挙動)。
     equity_deploy_pct:
-      deploy_budget = equity × この係数。既定 1.0 (gross≤1.0×equity cap いっぱい)。
-      後から 0.5 等の単一ノブで絞れる。0 以下/NaN は 1.0 に安全フォールバック。
+      deploy_budget = equity × この係数。既定 0.5 (gross 目標 ≈ 0.5×equity)。
+      単一ノブで増減 (例 1.0 で gross cap いっぱい)。0 以下/NaN は 0.5 に安全フォールバック。
     詳細: docs/EQUITY_LINKED_SIZING_20260709.md。
     """
 
     mode: str = "equity_linked"
-    equity_deploy_pct: float = 1.0
+    equity_deploy_pct: float = 0.5
 
 
 @dataclass(frozen=True)

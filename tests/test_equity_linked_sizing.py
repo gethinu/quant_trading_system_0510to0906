@@ -187,15 +187,15 @@ def test_zero_equity_returns_zeros():
     assert p.deploy_budget == 0.0
 
 
-def test_nonpositive_pct_falls_back_to_one():
-    # pct <= 0 は 1.0 に安全フォールバック (誤設定でゼロ発注しない)。
+def test_nonpositive_pct_falls_back_to_default():
+    # pct <= 0 は既定 0.5 に安全フォールバック (誤設定でゼロ発注しない)。
     p = compute_position_notionals(
         [(1.0, "buy")],
         mode=SIZING_EQUITY_LINKED, tier="small", equity=100_000,
         equity_deploy_pct=0.0, max_pct=1.0,
         max_gross_exposure_pct=1.0, max_net_exposure_pct=1.0,
     )
-    assert p.deploy_budget == 100_000.0
+    assert p.deploy_budget == 50_000.0  # 100k × 既定 0.5
 
 
 def test_empty_entries():
@@ -322,15 +322,15 @@ def test_signals_json_equity_linked_applies_per_name_cap():
 
 
 def test_signals_json_default_mode_is_equity_linked():
-    # 明示 mode 無し → 既定 equity_linked (tier ではない)。account_equity 既定 10k。
-    # cap を無効化して「予算=equity」だけを確認 (cap 相互作用は別テスト)。
+    # 明示 mode/pct 無し → 既定 equity_linked + equity_deploy_pct 0.5。
+    # cap を無効化して「予算=equity×0.5」だけを確認 (cap 相互作用は別テスト)。
     orders = signals_json_to_orders(
         _json(), tier="small", dry_run=True, account_equity=10_000.0,
         max_pct=1.0, max_gross_exposure_pct=1.0, max_net_exposure_pct=1.0,
     )
     total = sum((o.notional_usd or 0.0) for o in orders)
-    # equity_linked 10k を配分 → 合計 ~10k (tier small $1k ではない)
-    assert total == pytest.approx(10_000.0)
+    # equity_linked 10k × 既定 pct 0.5 = 5k を配分 (tier small $1k でも 10k でもない)
+    assert total == pytest.approx(5_000.0)
 
 
 # ---------------------------------------------------------------------------
@@ -341,7 +341,7 @@ def test_settings_sizing_defaults():
 
     d = SizingConfig()
     assert d.mode == "equity_linked"
-    assert d.equity_deploy_pct == 1.0
+    assert d.equity_deploy_pct == 0.5
 
 
 def test_settings_sizing_env_override(monkeypatch):
@@ -361,4 +361,4 @@ def test_settings_sizing_invalid_pct_falls_back(monkeypatch):
     monkeypatch.delenv("SIZING_MODE", raising=False)
     cfg = st._build_sizing_config({"mode": "weird", "equity_deploy_pct": -3})
     assert cfg.mode == "equity_linked"  # 未知 mode → 既定
-    assert cfg.equity_deploy_pct == 1.0  # 負値 → 1.0
+    assert cfg.equity_deploy_pct == 0.5  # 負値 → 既定 0.5

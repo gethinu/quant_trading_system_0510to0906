@@ -28,10 +28,11 @@ sizing:
   # equity_linked = deploy_budget を口座 equity 連動に (既定)。
   # fixed_tier    = 従来の tier 固定予算 (small=$1k/medium=$10k/large=$100k, 後方互換)。
   mode: equity_linked
-  # deploy_budget = current_equity × equity_deploy_pct。既定 1.0 (gross≤1.0×equity cap いっぱい)。
-  # 後から 0.5 等の単一ノブで絞れる。risk cap (per-name 10% / gross 1.0 / net 0.5 / 件数) は
-  # この予算の *内側* で従来通り縛る (budget を上げても cap は緩まない)。
-  equity_deploy_pct: 1.0
+  # deploy_budget = current_equity × equity_deploy_pct。既定 0.5 (gross 目標 ≈ 0.5×equity)。
+  # 単一ノブで増減できる (例 1.0 で gross≤1.0×equity cap いっぱい)。risk cap
+  # (per-name 10% / gross 1.0 / net 0.5 / 件数) はこの予算の *内側* で従来通り縛る
+  # (budget を上げても cap は緩まない)。
+  equity_deploy_pct: 0.5
 
 strategies:
   # 各システム固有パラメータ（必要に応じて追加）

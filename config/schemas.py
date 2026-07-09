@@ -41,7 +41,7 @@ class SizingModel(BaseModel):
     """
 
     mode: str = "equity_linked"
-    equity_deploy_pct: float = Field(1.0, gt=0)
+    equity_deploy_pct: float = Field(0.5, gt=0)
 
     @field_validator("mode")
     @classmethod

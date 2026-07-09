@@ -71,13 +71,16 @@ def resolve_tier_notional(tier: str) -> float:
 # Position sizing (2026-07-09): equity 連動 or 固定 tier
 # =========================================================================
 # 旧: notional_i = weight_i × tier_notional (tier="small"=$1k 固定, equity 非連動)。
-# 新: deploy_budget = equity × equity_deploy_pct。notional_i = weight_i × deploy_budget。
-# risk cap (per-name max_pct / gross / net) は *予算の内側* で従来通り縛る
-# (equity_deploy_pct を上げても cap は緩まない)。件数 cap / max_positions スロットは
-# 上流 (core.final_allocation) で today_signals JSON 生成時に既に効いている。
+# 新: deploy_budget = equity × equity_deploy_pct (既定 0.5)。notional_i = weight_i ×
+# deploy_budget。risk cap (per-name max_pct / gross / net) は *予算の内側* で従来通り
+# 縛る (equity_deploy_pct を上げても cap は緩まない)。件数 cap / max_positions スロット
+# は上流 (core.final_allocation) で today_signals JSON 生成時に既に効いている。
 # 詳細: docs/EQUITY_LINKED_SIZING_20260709.md。
 SIZING_EQUITY_LINKED = "equity_linked"
 SIZING_FIXED_TIER = "fixed_tier"
+# deploy_budget = equity × これ。既定 0.5 (gross 目標 ≈ 0.5×equity)。0 以下/NaN の
+# フォールバック値も兼ねる。config sizing.equity_deploy_pct が single source of truth。
+DEFAULT_EQUITY_DEPLOY_PCT = 0.5
 
 
 @dataclass(slots=True)
@@ -109,7 +112,7 @@ def compute_position_notionals(
     mode: str,
     tier: str,
     equity: float,
-    equity_deploy_pct: float = 1.0,
+    equity_deploy_pct: float = DEFAULT_EQUITY_DEPLOY_PCT,
     max_pct: float = 0.10,
     max_gross_exposure_pct: float = 1.0,
     max_net_exposure_pct: float = 0.5,
@@ -141,9 +144,9 @@ def compute_position_notionals(
         try:
             pct = float(equity_deploy_pct)
         except (TypeError, ValueError):
-            pct = 1.0
+            pct = DEFAULT_EQUITY_DEPLOY_PCT
         if not math.isfinite(pct) or pct <= 0:
-            pct = 1.0
+            pct = DEFAULT_EQUITY_DEPLOY_PCT
         deploy_budget = eq * pct
         caps["equity"] = round(eq, 2)
         caps["equity_deploy_pct"] = pct
@@ -880,7 +883,7 @@ def signals_json_to_orders(
     entry_date: str | None = None,
     client: Any | None = None,
     sizing_mode: str = SIZING_EQUITY_LINKED,
-    equity_deploy_pct: float = 1.0,
+    equity_deploy_pct: float = DEFAULT_EQUITY_DEPLOY_PCT,
     max_pct: float = 0.10,
     max_gross_exposure_pct: float = 1.0,
     max_net_exposure_pct: float = 0.5,
@@ -1730,6 +1733,7 @@ __all__ = [
     "TIER_NOTIONAL_USD",
     "SIZING_EQUITY_LINKED",
     "SIZING_FIXED_TIER",
+    "DEFAULT_EQUITY_DEPLOY_PCT",
     "NotionalPlan",
     "compute_position_notionals",
     "fetch_account_equity",
