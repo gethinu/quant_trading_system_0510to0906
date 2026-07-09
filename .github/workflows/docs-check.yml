@@ -38,6 +38,11 @@ jobs:
                   file-path: "./README.md, ./CHANGELOG.md, ./CONTRIBUTING.md"
                   max-depth: -1
                   check-modified-files-only: "yes"
+                  # Repo default branch is `main`; the action otherwise defaults
+                  # base-branch to `master`, which does not exist here and makes
+                  # every docs-touching PR fail with
+                  # "fatal: couldn't find remote ref master".
+                  base-branch: "main"
 
     markdown-lint:
         runs-on: ubuntu-latest
