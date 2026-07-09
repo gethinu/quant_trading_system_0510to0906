@@ -16,6 +16,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 import json
 import logging
+import math
 import os
 from pathlib import Path
 from typing import Any
@@ -64,6 +65,253 @@ TIER_NOTIONAL_USD: dict[str, float] = {
 def resolve_tier_notional(tier: str) -> float:
     key = (tier or "").strip().lower()
     return TIER_NOTIONAL_USD.get(key, TIER_NOTIONAL_USD["small"])
+
+
+# =========================================================================
+# Position sizing (2026-07-09): equity 連動 or 固定 tier
+# =========================================================================
+# 旧: notional_i = weight_i × tier_notional (tier="small"=$1k 固定, equity 非連動)。
+# 新: deploy_budget = equity × equity_deploy_pct (既定 0.5)。notional_i = weight_i ×
+# deploy_budget。risk cap (per-name max_pct / gross / net) は *予算の内側* で従来通り
+# 縛る (equity_deploy_pct を上げても cap は緩まない)。件数 cap / max_positions スロット
+# は上流 (core.final_allocation) で today_signals JSON 生成時に既に効いている。
+# 詳細: docs/EQUITY_LINKED_SIZING_20260709.md。
+SIZING_EQUITY_LINKED = "equity_linked"
+SIZING_FIXED_TIER = "fixed_tier"
+# deploy_budget = equity × これ。既定 0.5 (gross 目標 ≈ 0.5×equity)。0 以下/NaN の
+# フォールバック値も兼ねる。config sizing.equity_deploy_pct が single source of truth。
+DEFAULT_EQUITY_DEPLOY_PCT = 0.5
+
+
+@dataclass(slots=True)
+class NotionalPlan:
+    """compute_position_notionals の結果 (pure, side-effect free)。
+
+    notionals は入力 entries と同順・同数。合計は deploy_budget 以下 (cap 適用後)。
+    caps は発火した cap と scale factor の観測性ログ (呼び出し側サマリ用)。
+    """
+
+    notionals: list[float]
+    mode: str
+    deploy_budget: float
+    total_weight: float
+    gross_after: float
+    net_after: float
+    long_after: float
+    short_after: float
+    caps: dict[str, Any] = field(default_factory=dict)
+
+
+def _is_short_side(side: str) -> bool:
+    return (side or "").strip().lower() in ("sell", "short", "sell_short")
+
+
+def compute_position_notionals(
+    entries: list[tuple[float, str]],
+    *,
+    mode: str,
+    tier: str,
+    equity: float,
+    equity_deploy_pct: float = DEFAULT_EQUITY_DEPLOY_PCT,
+    max_pct: float = 0.10,
+    max_gross_exposure_pct: float = 1.0,
+    max_net_exposure_pct: float = 0.5,
+) -> NotionalPlan:
+    """weight × 予算で per-signal notional を計算する pure 関数。
+
+    Args:
+        entries: ``[(weight, side), ...]`` side は "buy"/"sell"(/"short" 等)。順序保持。
+        mode: ``SIZING_FIXED_TIER`` = 従来の tier 固定予算 (dollar cap 掛けない)。
+              ``SIZING_EQUITY_LINKED`` = deploy_budget=equity×pct, cap を内側で適用。
+        tier: fixed_tier 時の予算 (small/medium/large)。
+        equity: 口座 equity (equity_linked の予算と cap の分母)。
+        equity_deploy_pct: deploy_budget = equity × これ (equity_linked のみ)。
+        max_pct: per-name 上限 (equity 比)。0 以下で無効。
+        max_gross_exposure_pct: gross(long$+short$)/equity 上限。0 以下で無効。
+        max_net_exposure_pct: |net|(|long$-short$|)/equity 上限。0 以下で無効。
+
+    Returns:
+        NotionalPlan。``notionals[i]`` は entries[i] に対応する目標 notional(USD, 2dp)。
+    """
+    n = len(entries)
+    weights = [max(0.0, float(w or 0.0)) for (w, _s) in entries]
+    sides = [str(s) for (_w, s) in entries]
+    total_weight = sum(weights)
+    caps: dict[str, Any] = {"mode": mode}
+
+    eq = max(0.0, float(equity or 0.0))
+    if mode == SIZING_EQUITY_LINKED:
+        try:
+            pct = float(equity_deploy_pct)
+        except (TypeError, ValueError):
+            pct = DEFAULT_EQUITY_DEPLOY_PCT
+        if not math.isfinite(pct) or pct <= 0:
+            pct = DEFAULT_EQUITY_DEPLOY_PCT
+        deploy_budget = eq * pct
+        caps["equity"] = round(eq, 2)
+        caps["equity_deploy_pct"] = pct
+    else:
+        deploy_budget = resolve_tier_notional(tier)
+        caps["tier"] = (tier or "").strip().lower()
+    caps["deploy_budget"] = round(deploy_budget, 2)
+
+    if n == 0 or deploy_budget <= 0:
+        return NotionalPlan(
+            notionals=[0.0] * n,
+            mode=mode,
+            deploy_budget=round(deploy_budget, 2),
+            total_weight=total_weight,
+            gross_after=0.0,
+            net_after=0.0,
+            long_after=0.0,
+            short_after=0.0,
+            caps=caps,
+        )
+
+    # base: weight 比で予算配分 (weight が全 0 なら均等割り = 旧 per_signal_default 相当)
+    if total_weight > 0:
+        notionals = [w / total_weight * deploy_budget for w in weights]
+    else:
+        notionals = [deploy_budget / n] * n
+
+    # --- fixed_tier: 従来挙動。dollar cap は掛けない。---
+    if mode != SIZING_EQUITY_LINKED:
+        notionals = [round(x, 2) for x in notionals]
+        long_after = sum(x for x, s in zip(notionals, sides) if not _is_short_side(s))
+        short_after = sum(x for x, s in zip(notionals, sides) if _is_short_side(s))
+        return NotionalPlan(
+            notionals=notionals,
+            mode=mode,
+            deploy_budget=round(deploy_budget, 2),
+            total_weight=total_weight,
+            gross_after=round(long_after + short_after, 2),
+            net_after=round(abs(long_after - short_after), 2),
+            long_after=round(long_after, 2),
+            short_after=round(short_after, 2),
+            caps=caps,
+        )
+
+    # --- equity_linked: per-name → gross → net cap を予算の内側で適用 ---
+    # (1) per-name 上限 (equity×max_pct)。超過分は他銘柄へ再配分しない (hard cap)。
+    if max_pct and max_pct > 0:
+        name_cap = max_pct * eq
+        clamped = 0
+        new_notionals = []
+        for x in notionals:
+            if x > name_cap:
+                clamped += 1
+                new_notionals.append(name_cap)
+            else:
+                new_notionals.append(x)
+        notionals = new_notionals
+        caps["per_name"] = {
+            "cap_usd": round(name_cap, 2),
+            "clamped_count": clamped,
+        }
+
+    # (2) gross 上限 (equity×gross_pct)。超過なら全体を比例縮小。
+    gross = sum(notionals)
+    if max_gross_exposure_pct and max_gross_exposure_pct > 0:
+        gross_cap = max_gross_exposure_pct * eq
+        if gross > gross_cap and gross > 0:
+            f = gross_cap / gross
+            notionals = [x * f for x in notionals]
+            caps["gross"] = {
+                "cap_usd": round(gross_cap, 2),
+                "before_usd": round(gross, 2),
+                "scale": round(f, 6),
+            }
+
+    # (3) net 上限 (equity×net_pct)。超過なら優勢サイドのみ縮小 (gross は増えない)。
+    long_usd = sum(x for x, s in zip(notionals, sides) if not _is_short_side(s))
+    short_usd = sum(x for x, s in zip(notionals, sides) if _is_short_side(s))
+    net = abs(long_usd - short_usd)
+    if max_net_exposure_pct and max_net_exposure_pct > 0:
+        net_cap = max_net_exposure_pct * eq
+        if net > net_cap:
+            if long_usd > short_usd and long_usd > 0:
+                f_long = max(0.0, (short_usd + net_cap) / long_usd)
+                notionals = [
+                    (x * f_long if not _is_short_side(s) else x)
+                    for x, s in zip(notionals, sides)
+                ]
+                caps["net"] = {
+                    "cap_usd": round(net_cap, 2),
+                    "before_usd": round(net, 2),
+                    "scaled_side": "long",
+                    "scale": round(f_long, 6),
+                }
+            elif short_usd > long_usd and short_usd > 0:
+                f_short = max(0.0, (long_usd + net_cap) / short_usd)
+                notionals = [
+                    (x * f_short if _is_short_side(s) else x)
+                    for x, s in zip(notionals, sides)
+                ]
+                caps["net"] = {
+                    "cap_usd": round(net_cap, 2),
+                    "before_usd": round(net, 2),
+                    "scaled_side": "short",
+                    "scale": round(f_short, 6),
+                }
+
+    notionals = [round(x, 2) for x in notionals]
+    long_after = sum(x for x, s in zip(notionals, sides) if not _is_short_side(s))
+    short_after = sum(x for x, s in zip(notionals, sides) if _is_short_side(s))
+    return NotionalPlan(
+        notionals=notionals,
+        mode=mode,
+        deploy_budget=round(deploy_budget, 2),
+        total_weight=total_weight,
+        gross_after=round(long_after + short_after, 2),
+        net_after=round(abs(long_after - short_after), 2),
+        long_after=round(long_after, 2),
+        short_after=round(short_after, 2),
+        caps=caps,
+    )
+
+
+def fetch_account_equity(client: Any | None = None) -> float | None:
+    """Alpaca paper 口座の equity を取得 (read-only)。取得失敗/creds 無しは None。
+
+    発注は一切しない。equity_linked サイジングの予算解決に使う。
+    """
+    try:
+        if client is None:
+            client = ba.get_client(paper=True)
+        acct = client.get_account()
+        val = float(getattr(acct, "equity", 0.0) or 0.0)
+        return val if val > 0 else None
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("account equity 取得失敗、fallback します: %s", exc)
+        return None
+
+
+def resolve_sizing_equity(
+    fallback_equity: float,
+    *,
+    mode: str,
+    client: Any | None = None,
+    allow_fetch: bool | None = None,
+) -> tuple[float, str]:
+    """equity_linked サイジング用の equity を安全に解決する。
+
+    - mode != equity_linked: fallback をそのまま (equity は sizing に不使用)。
+    - allow_fetch=None のとき、TEST_MODE 環境変数があれば fetch しない
+      (テスト/従来挙動を壊さない。creds を叩かず決定論的)。
+    - fetch 成功 → (Alpaca 実 equity, "alpaca")。
+    - creds 無し/取得失敗/0 → (fallback, "fallback:...") で安全に退避。
+    """
+    fb = float(fallback_equity or 0.0)
+    if mode != SIZING_EQUITY_LINKED:
+        return fb, "fixed_tier:fallback_unused"
+    if allow_fetch is None:
+        allow_fetch = not bool(os.getenv("TEST_MODE", "").strip())
+    if not allow_fetch:
+        return fb, "fallback:fetch_disabled(test_mode)"
+    val = fetch_account_equity(client)
+    if val is not None and val > 0:
+        return val, "alpaca"
+    return fb, "fallback:fetch_failed_or_no_creds"
 
 
 class LiveAccountGuardError(RuntimeError):
@@ -634,18 +882,23 @@ def signals_json_to_orders(
     prefer_fractional: bool = True,
     entry_date: str | None = None,
     client: Any | None = None,
+    sizing_mode: str = SIZING_EQUITY_LINKED,
+    equity_deploy_pct: float = DEFAULT_EQUITY_DEPLOY_PCT,
+    max_pct: float = 0.10,
+    max_gross_exposure_pct: float = 1.0,
+    max_net_exposure_pct: float = 0.5,
 ) -> list[PreparedOrder]:
-    """today_signals JSON を tier 別 notional で配分し Alpaca 注文へ変換する。"""
+    """today_signals JSON を配分し Alpaca 注文へ変換する。
+
+    sizing_mode:
+      - ``SIZING_EQUITY_LINKED`` (既定): deploy_budget = account_equity ×
+        equity_deploy_pct。per-name/gross/net cap を予算の内側で適用。
+      - ``SIZING_FIXED_TIER``: 従来の tier 固定予算 (後方互換, dollar cap 掛けない)。
+    account_equity は equity_linked の予算と cap の分母に使う (fixed_tier では未使用)。
+    """
     signals = _flatten_json_signals(json_data)
     if not signals:
         return []
-
-    tier_notional = resolve_tier_notional(tier)
-    total_weight = sum(max(0.0, s["weight"]) for s in signals)
-    if total_weight <= 0:
-        per_signal_default = tier_notional / len(signals)
-    else:
-        per_signal_default = 0.0
 
     if not dry_run:
         assert_paper_env()
@@ -656,25 +909,36 @@ def signals_json_to_orders(
         entry_date = str(json_data.get("date") or "")
     date_compact = entry_date.replace("-", "").replace(" ", "")[:8]
 
-    prepared: list[PreparedOrder] = []
+    # dedup (sym, system) を先に確定してから予算配分する。件数 cap / max_positions は
+    # 上流 (final_allocation) で today_signals 生成時に既に効いているので、ここでは
+    # per-name/gross/net の dollar cap のみを予算の内側で適用する。
+    deduped: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
-
     for s in signals:
-        sym = s["symbol"]
-        side = s["side"]
-        price = s["entry_price"]
-        weight = max(0.0, s["weight"])
-        system = s["system"]
-
-        dedup = (sym, system)
+        dedup = (s["symbol"], s["system"])
         if dedup in seen:
             continue
         seen.add(dedup)
+        deduped.append(s)
 
-        if total_weight > 0:
-            notional = weight / total_weight * tier_notional
-        else:
-            notional = per_signal_default
+    plan = compute_position_notionals(
+        [(float(s["weight"]), s["side"]) for s in deduped],
+        mode=sizing_mode,
+        tier=tier,
+        equity=account_equity,
+        equity_deploy_pct=equity_deploy_pct,
+        max_pct=max_pct,
+        max_gross_exposure_pct=max_gross_exposure_pct,
+        max_net_exposure_pct=max_net_exposure_pct,
+    )
+
+    prepared: list[PreparedOrder] = []
+
+    for s, notional in zip(deduped, plan.notionals):
+        sym = s["symbol"]
+        side = s["side"]
+        price = s["entry_price"]
+        system = s["system"]
 
         client_order_id = (
             f"{system}-{sym}-{date_compact}" if date_compact else f"{system}-{sym}"
@@ -719,12 +983,16 @@ def signals_json_to_orders(
         prepared.append(po)
 
     logger.info(
-        "signals_json_to_orders: %d 注文 tier=%s tier_notional=$%.0f dry_run=%s equity=$%.0f",
+        "signals_json_to_orders: %d 注文 mode=%s deploy_budget=$%.0f "
+        "gross=$%.0f net=$%.0f dry_run=%s equity=$%.0f caps=%s",
         len(prepared),
-        tier,
-        tier_notional,
+        plan.mode,
+        plan.deploy_budget,
+        plan.gross_after,
+        plan.net_after,
         dry_run,
         account_equity,
+        plan.caps,
     )
 
     if dry_run:
@@ -1463,6 +1731,13 @@ __all__ = [
     "OrderSubmitError",
     "PositionsFetchError",
     "TIER_NOTIONAL_USD",
+    "SIZING_EQUITY_LINKED",
+    "SIZING_FIXED_TIER",
+    "DEFAULT_EQUITY_DEPLOY_PCT",
+    "NotionalPlan",
+    "compute_position_notionals",
+    "fetch_account_equity",
+    "resolve_sizing_equity",
     "assert_paper_env",
     "resolve_tier_notional",
     "submit_paper_order",

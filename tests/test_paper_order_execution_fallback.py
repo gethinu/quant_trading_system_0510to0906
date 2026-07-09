@@ -218,6 +218,7 @@ def test_integration_routes_all_three_classes(monkeypatch, paper_env):
         dry_run=False,
         client=client,
         min_notional_usd=5.0,
+        sizing_mode="fixed_tier",
     )
     by_sym = {o.symbol: o for o in orders}
 
@@ -276,7 +277,7 @@ def test_integration_idempotency_skips_duplicate_coid(monkeypatch, paper_env):
         },
     }
     orders = signals_json_to_orders(
-        json_data, tier="small", dry_run=False, client=client
+        json_data, tier="small", dry_run=False, client=client, sizing_mode="fixed_tier"
     )
     assert len(orders) == 1
     assert orders[0].order_id is None
@@ -303,7 +304,11 @@ def test_no_silent_drop_every_order_has_terminal_state(monkeypatch, paper_env):
         open_orders=[_FakeOrder("x", symbol="WASHY", side="sell", coid="user-exit-1")],
     )
     orders = signals_json_to_orders(
-        _signals_json(), tier="small", dry_run=False, client=client
+        _signals_json(),
+        tier="small",
+        dry_run=False,
+        client=client,
+        sizing_mode="fixed_tier",
     )
     for o in orders:
         terminal = bool(o.order_id) or bool(o.error) or bool(o.skip_reason)
@@ -341,7 +346,7 @@ def test_already_held_same_direction_is_skipped(monkeypatch, paper_env):
         },
     }
     orders = signals_json_to_orders(
-        json_data, tier="small", dry_run=False, client=client
+        json_data, tier="small", dry_run=False, client=client, sizing_mode="fixed_tier"
     )
     assert len(orders) == 1
     assert orders[0].order_id is None
@@ -383,7 +388,7 @@ def test_opposite_direction_not_blocked_by_held(monkeypatch, paper_env):
         },
     }
     orders = signals_json_to_orders(
-        json_data, tier="small", dry_run=False, client=client
+        json_data, tier="small", dry_run=False, client=client, sizing_mode="fixed_tier"
     )
     assert len(orders) == 1
     # held-check では skip されない (already_held 理由が付かない)
