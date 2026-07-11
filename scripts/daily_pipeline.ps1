@@ -49,6 +49,10 @@
     Task Scheduler の Action に含めない限り絶対に発注しない。
     **live 口座 (実マネー) は本 pipeline では扱わない。**
 
+.PARAMETER SkipVercel
+    Step 6 の Vercel publish (data/ commit + push) をスキップ。main 追従 worktree で
+    生成のみ行い、publish は別途 primary (monitor-webapp) ツリーから実行する運用用。
+
 .PARAMETER Tier
     paper_orders の tier。small=$1k / medium=$10k / large=$100k。
     未指定なら env ALPACA_TIER、無ければ "small"。
@@ -74,6 +78,7 @@ param(
     [switch]$SkipPaperOrders = $false,
     [switch]$SkipExitCheck = $false,
     [switch]$AutoSubmitPaper = $false,
+    [switch]$SkipVercel = $false,
     [string]$Tier = ""
 )
 
@@ -344,7 +349,10 @@ try {
     }
 
     # --- Step 6: publish data to Vercel (git commit + push) ------------
-    if (-not (Test-Path $SignalsJson)) {
+    if ($SkipVercel) {
+        Write-Log "[vercel] SkipVercel 指定によりスキップ (別途 primary ツリーから publish 想定)"
+    }
+    elseif (-not (Test-Path $SignalsJson)) {
         Write-Log "[vercel] signals JSON が無いため data push をスキップ"
     }
     else {
