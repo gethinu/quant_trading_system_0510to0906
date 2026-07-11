@@ -28,6 +28,8 @@ param(
     [switch]$AllowClosed = $false,
     [switch]$SkipSignals = $false,
     [switch]$Force = $false,
+    [switch]$FlattenAll = $false,
+    [switch]$NoPublish = $false,
     [int]$MinSignals = 10,
     [double]$PollTimeout = 300,
     [string]$PrimaryRoot = "C:\Repos\quant_trading_system_0510to0906"
@@ -87,15 +89,32 @@ if ($env:ALPACA_PAPER -and ($env:ALPACA_PAPER.ToLower() -notin @("1", "true", "y
 $env:PYTHONUTF8 = "1"
 $env:PYTHONIOENCODING = "utf-8"
 
+# --- one-time flatten-all reset marker -----------------------------------
+# logs\RESET_ONCE.flag が在れば「次に成功したオープン run」で一度だけ全ポジションを
+# flatten してからクリーン再エントリーする (PHASE 2 リセット)。
+#   - dry-run では消費も強制もしない (テストが marker に干渉しない)。
+#   - 成功 (exit 0) した時にのみ marker を削除 = 冪等な一回限り。
+#   - abort (thin signals / market closed = exit 3) では marker 保持 -> 次の open で再試行。
+$ResetMarker = Join-Path $LogDir "RESET_ONCE.flag"
+$ConsumeResetMarker = $false
+if ((Test-Path $ResetMarker) -and (-not $DryRun)) {
+    Write-Launch "RESET_ONCE.flag 検出 -> この run は --flatten-all (一回限りリセット)"
+    $FlattenAll = $true
+    $ConsumeResetMarker = $true
+}
+
 # --- build python args ---------------------------------------------------
 $py = Join-Path $WorktreeRoot "scripts\open_auto_run.py"
 $pyArgs = @($py)
 if ($Date) { $pyArgs += @("--date", $Date) }
 $pyArgs += @("--min-signals", "$MinSignals", "--poll-timeout", "$PollTimeout")
+$pyArgs += @("--primary-root", $PrimaryRoot)
 if ($DryRun) { $pyArgs += "--dry-run" }
 if ($AllowClosed) { $pyArgs += "--allow-closed" }
 if ($SkipSignals) { $pyArgs += "--skip-signals" }
 if ($Force) { $pyArgs += "--force" }
+if ($FlattenAll) { $pyArgs += "--flatten-all" }
+if ($NoPublish) { $pyArgs += "--no-publish" }
 
 Set-Location $WorktreeRoot
 Write-Launch ("python " + ($pyArgs -join " "))
@@ -103,4 +122,19 @@ Write-Launch ("python " + ($pyArgs -join " "))
 & python @pyArgs 2>&1 | ForEach-Object { Write-Launch $_ }
 $code = $LASTEXITCODE
 Write-Launch "=== open_auto_run.py exit=$code ==="
+
+# 成功した flatten-all リセット run の後にのみ marker を消費 (再発防止 = 一回限り)。
+if ($ConsumeResetMarker) {
+    if ($code -eq 0) {
+        try {
+            Remove-Item $ResetMarker -Force -ErrorAction Stop
+            Write-Launch "RESET_ONCE.flag を消費 (リセット完了、以降は通常 open run)"
+        }
+        catch { Write-Launch "WARN: RESET_ONCE.flag 削除失敗 (次回も flatten の恐れ): $_" }
+    }
+    else {
+        Write-Launch "リセット run が exit=$code (非成功) -> marker 保持 (次の open で再試行)"
+    }
+}
+
 exit $code

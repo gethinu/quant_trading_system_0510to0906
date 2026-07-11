@@ -236,6 +236,8 @@ class Runner:
 
     def exit_stage(self) -> list[str]:
         """exit を発注し、market-close (即時 fill) の order_id を返す。"""
+        if self.args.flatten_all:
+            return self._flatten_all_stage()
         argv = [
             str(ROOT / "scripts" / "paper_exit_check.py"),
             "--date",
@@ -263,6 +265,126 @@ class Runner:
         except Exception as exc:  # noqa: BLE001
             self.log(f"[exit] exit_orders 解析失敗: {exc}")
         self.log(f"[exit] market-close 注文 {len(market_ids)} 件を fill 監視対象に")
+        return market_ids
+
+    def _flatten_all_stage(self) -> list[str]:
+        """--flatten-all: 全 position を成行 close + 既存 order を cancel (clean reset)。
+
+        一回限りリセット run 用。Alpaca ネイティブの close_all_positions を使い、
+        fractional/整数・long/short を broker 側で正しく処理させる (side/qty 計算の
+        自作バグを避ける)。exit_orders.json は既存 schema (exits[].order_type/
+        order_id/dry_run) で書き、wait_exit_fills がそのまま fill 監視できるようにする。
+        """
+        self.log("[exit] --flatten-all: 全ポジションを market close + open order cancel (clean reset)")
+        # 事前スナップショット (dry-run でも「何を閉じるか」を durable に残す)
+        snaps: list = []
+        try:
+            from common.alpaca_trading import fetch_position_snapshots
+
+            snaps = fetch_position_snapshots(self._client())
+        except Exception as exc:  # noqa: BLE001
+            self.log(f"[exit] position 取得失敗: {exc}")
+        self._dump(
+            "positions_before_flatten.json",
+            [
+                {
+                    "symbol": s.symbol,
+                    "qty": s.qty,
+                    "side": s.side,
+                    "market_value": s.market_value,
+                    "system": s.system,
+                }
+                for s in snaps
+            ],
+        )
+
+        exits_rows: list[dict] = []
+        market_ids: list[str] = []
+
+        if self.dry_run:
+            for s in snaps:
+                exits_rows.append(
+                    {
+                        "symbol": s.symbol,
+                        "system": s.system,
+                        "side": s.side,
+                        "qty": s.qty,
+                        "order_type": "market",
+                        "reason": "flatten_all",
+                        "order_id": None,
+                        "dry_run": True,
+                    }
+                )
+            self.record["exit_count"] = len(exits_rows)
+            payload = {
+                "date": self.date,
+                "mode": "dry_run",
+                "flatten_all": True,
+                "count": len(exits_rows),
+                "exits": exits_rows,
+            }
+            self.exit_json.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2, default=str),
+                encoding="utf-8",
+            )
+            self._dump("exit_orders.json", payload)
+            self.log(
+                f"[exit] dry-run: {len(exits_rows)} ポジションを close する予定 (未発注)"
+            )
+            return []
+
+        # 実発注: close_all_positions(cancel_orders=True)
+        client = self._client()
+        try:
+            resps = client.close_all_positions(cancel_orders=True)
+        except Exception as exc:  # noqa: BLE001
+            self.log(f"[exit] close_all_positions 失敗: {exc}")
+            resps = []
+
+        ok = 0
+        failed = 0
+        for r in resps or []:
+            sym = getattr(r, "symbol", None)
+            st = getattr(r, "status", None)
+            raw_oid = getattr(r, "order_id", None)
+            oid = str(raw_oid) if raw_oid else None
+            if st == 200 and oid:
+                ok += 1
+                market_ids.append(oid)
+            else:
+                failed += 1
+                self.log(f"[exit] close 失敗 sym={sym} http={st}")
+            exits_rows.append(
+                {
+                    "symbol": sym,
+                    "order_type": "market",
+                    "reason": "flatten_all",
+                    "order_id": oid,
+                    "http_status": st,
+                    "dry_run": False,
+                }
+            )
+        self.record["exit_count"] = len(exits_rows)
+        self.record["flatten_ok"] = ok
+        self.record["flatten_failed"] = failed
+        payload = {
+            "date": self.date,
+            "mode": "submitted",
+            "flatten_all": True,
+            "count": len(exits_rows),
+            "submitted": ok,
+            "failed": failed,
+            "exits": exits_rows,
+        }
+        self.exit_json.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2, default=str),
+            encoding="utf-8",
+        )
+        self._dump("exit_orders.json", payload)
+        self.log(
+            f"[exit] flatten-all 発注: ok={ok} failed={failed} -> "
+            f"{len(market_ids)} 件を fill 監視"
+        )
         return market_ids
 
     def wait_exit_fills(self, order_ids: list[str]) -> None:
@@ -399,6 +521,72 @@ class Runner:
             argv += ["--dry-run"]
         self.run_step("notify", argv)
 
+    def publish(self) -> None:
+        """post-entry の Alpaca snapshot を再生成し、PRIMARY worktree から Vercel
+        monitor へ data/ を publish (commit+push claude/monitor-webapp)。
+
+        - snapshot は read-only GET (export_alpaca_snapshot.py)。entry/record の後に
+          撮るので post-entry のポジションを反映する。
+        - Vercel publish は PRIMARY worktree (monitor-webapp を checkout 済) の
+          scripts/publish_data_to_vercel.ps1 を叩く。data/ のみ stage されるので
+          ユーザーの未コミット変更は巻き込まない (script 側の -- $RelData 制約)。
+        - dry-run は snapshot 生成のみ (commit/push しない)。
+        """
+        if self.args.no_publish:
+            self.log("[publish] --no-publish: publish stage skip")
+            return
+        # 1) post-entry snapshot 再生成 (read-only)
+        self.run_step(
+            "snapshot",
+            [str(ROOT / "scripts" / "export_alpaca_snapshot.py"), "--date", self.date],
+        )
+        if self.dry_run:
+            self.log("[publish] dry-run: Vercel publish (commit/push) skip。snapshot のみ生成")
+            return
+        # 2) PRIMARY worktree から data/ を publish
+        primary = Path(self.args.primary_root)
+        ps1 = primary / "scripts" / "publish_data_to_vercel.ps1"
+        if not ps1.exists():
+            self.log(f"[publish] publish script 不在 (skip): {ps1}")
+            self.record["publish"] = "script_missing"
+            return
+        self.log(f"[publish] {ps1} -Date {self.date} (cwd={primary})")
+        try:
+            proc = subprocess.run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(ps1),
+                    "-Date",
+                    self.date,
+                ],
+                cwd=str(primary),
+                env=_child_env(),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.log(f"[publish] publish 実行失敗 (無視): {exc}")
+            self.record["publish"] = f"error:{exc}"
+            return
+        out = proc.stdout or ""
+        err = proc.stderr or ""
+        for ln in out.splitlines():
+            self.log(f"  | {ln}")
+        if err.strip():
+            for ln in err.splitlines():
+                self.log(f"  ! {ln}")
+        (self.out / "publish.log").write_text(
+            out + "\n---STDERR---\n" + err, encoding="utf-8"
+        )
+        self.log(f"[publish] publish_data_to_vercel exit={proc.returncode}")
+        self.record["publish_exit_code"] = proc.returncode
+
     def finalize(self, aborted: bool) -> None:
         self._dump("completion_recon.json", self.record)
         lines = [
@@ -451,6 +639,7 @@ class Runner:
         self.wait_exit_fills(market_ids)  # exit->entry 順の担保点
         self.entry_stage(eq)
         self.record_stage()
+        self.publish()  # post-entry snapshot 再生成 + Vercel monitor へ data/ publish
         self.notify(eq)
         self.finalize(aborted=False)
         self.log("=== OPEN AUTO RUN done ===")
@@ -491,6 +680,21 @@ def main(argv: list[str] | None = None) -> int:
         "--force",
         action="store_true",
         help="DONE.lock があっても実行する",
+    )
+    p.add_argument(
+        "--flatten-all",
+        action="store_true",
+        help="exit stage で保護 exit ではなく全ポジションを market close (一回限りリセット用)",
+    )
+    p.add_argument(
+        "--no-publish",
+        action="store_true",
+        help="publish stage を skip (snapshot 再生成 + Vercel monitor への push をしない)",
+    )
+    p.add_argument(
+        "--primary-root",
+        default=r"C:\Repos\quant_trading_system_0510to0906",
+        help="publish_data_to_vercel.ps1 を持つ PRIMARY worktree (monitor-webapp checkout)",
     )
     args = p.parse_args(argv)
     try:
