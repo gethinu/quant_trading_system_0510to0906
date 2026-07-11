@@ -1,17 +1,17 @@
 {
   "schema": "alpaca_snapshot/v1",
   "date": "2026-07-10",
-  "generated_at": "2026-07-11T04:06:24Z",
+  "generated_at": "2026-07-11T13:48:28Z",
   "provider": "alpaca-paper",
   "account": {
     "equity": 106274.21,
-    "last_equity": 101984.86,
+    "last_equity": 101988.34,
     "cash": 101509.15,
     "buying_power": 406727.03,
     "long_market_value": 4926.92,
     "short_market_value": -161.86,
-    "pnl_today_abs": 4289.35,
-    "pnl_today_pct": 4.206,
+    "pnl_today_abs": 4285.87,
+    "pnl_today_pct": 4.202,
     "unrealized_pl_total": 54.32,
     "status": "ACTIVE",
     "trading_blocked": false,
@@ -521,8 +521,8 @@
       {
         "t": "2026-07-10",
         "equity": 106274.21,
-        "pl": null,
-        "pl_pct": null,
+        "pl": 3.48,
+        "pl_pct": 0.0,
         "live": true,
         "peak": 106274.21,
         "dd_pct": 0.0
