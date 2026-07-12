@@ -1137,6 +1137,14 @@ _PROTECT_TRAIL_SUFFIX = "protect-trail"
 _PROTECT_TARGET_SUFFIX = "protect-target"
 _EXIT_TIME_SUFFIX = "exit-time"
 _EXIT_BREAKOUT_SUFFIX = "exit-breakout"
+# 端株 (fractional) 用 synthetic protection の coid suffix。Alpaca は端株に
+# native stop/limit/trailing を出せないため、日次 exit_check で現値が stop/target
+# を突破していれば成行DAYの全数クローズをこの suffix で 1 件だけ発注する。
+_EXIT_SYN_STOP_SUFFIX = "exit-synstop"
+_EXIT_SYN_TARGET_SUFFIX = "exit-syntarget"
+
+# 整数株判定の許容誤差。float 表現誤差 (例 5.0000000001) は整数株として扱う。
+_QTY_WHOLE_TOL = 1e-9
 
 
 class ExitReasonCode:
@@ -1168,8 +1176,52 @@ class PositionSnapshot:
     entry_date: str | None = None  # ISO date "YYYY-MM-DD"
 
     @property
-    def abs_qty(self) -> int:
-        return int(abs(self.qty))
+    def abs_qty(self) -> float:
+        """符号なしの実 position qty (端株を保持する)。
+
+        以前は ``int(abs(self.qty))`` で端株 (qty<1 や小数株) を 0 に切り捨て、
+        ``build_exit_orders_from_positions`` の ``if snap.abs_qty <= 0`` により
+        time / breakout / protection の全 exit 種別から **silent 除外** していた
+        (2026-07-12 端株 exit 未計画バグ)。equity 連動サイジングは端株を日常的に
+        作るため、多数の建玉が閉じられなくなっていた。切り捨てを廃止する。
+        """
+        return abs(float(self.qty))
+
+    @property
+    def is_fractional(self) -> bool:
+        """整数株でない (端株) かどうか。
+
+        Alpaca は端株に native な stop/limit/trailing を出せず成行 DAY のみ
+        受け付ける。整数株は従来どおり native protection を発注し、端株は
+        synthetic (日次現値突破→成行 DAY 全数クローズ) へ振り分ける判定に使う。
+        """
+        aq = self.abs_qty
+        return abs(aq - round(aq)) > _QTY_WHOLE_TOL
+
+    @property
+    def current_price(self) -> float | None:
+        """market_value / qty から現値を逆算する (Alpaca live quote 由来)。
+
+        market_value が無い / qty=0 なら None。synthetic stop/target の突破
+        判定に使う (取得不能なら synthetic は発注しない safe fallback)。
+        """
+        if self.market_value is None:
+            return None
+        aq = self.abs_qty
+        if aq <= 0:
+            return None
+        return abs(float(self.market_value)) / aq
+
+    def exit_qty(self) -> float:
+        """exit order に載せる qty。整数株は int、端株は float(9桁丸め) を返す。
+
+        整数株を int で返すのは native stop/limit・既存 JSON/ログの後方互換を
+        壊さないため。端株は Alpaca が最大 9 桁小数まで受け付ける。
+        """
+        aq = self.abs_qty
+        if not self.is_fractional:
+            return int(round(aq))
+        return round(aq, 9)
 
 
 @dataclass(slots=True)
@@ -1181,7 +1233,7 @@ class PreparedExit:
 
     symbol: str
     system: str
-    qty: int
+    qty: float  # 整数株は int、端株は小数 (Alpaca は端株を成行DAYのみ受付)
     side: str  # "buy" (short cover) or "sell" (long close)
     order_type: str  # "market" / "stop" / "trailing_stop" / "limit"
     reason: str  # ExitReasonCode.*
@@ -1370,7 +1422,7 @@ def _build_time_exit(
     return PreparedExit(
         symbol=snap.symbol,
         system=snap.system or "unknown",
-        qty=snap.abs_qty,
+        qty=snap.exit_qty(),
         side=close_side,
         order_type="market",
         reason=ExitReasonCode.TIME,
@@ -1406,7 +1458,7 @@ def _build_spy_breakout_exit(
     return PreparedExit(
         symbol=snap.symbol,
         system=snap.system or "system7",
-        qty=snap.abs_qty,
+        qty=snap.exit_qty(),
         side=close_side,
         order_type="market",
         reason=ExitReasonCode.BREAKOUT,
@@ -1414,6 +1466,45 @@ def _build_spy_breakout_exit(
         client_order_id=coid,
         dry_run=True,
     )
+
+
+def _stop_price_for(
+    snap: PositionSnapshot, rules: Any, atr_value: float | None
+) -> float | None:
+    """ATR ベースの protective stop 価格。ATR 無し / rules 無しなら None。
+
+    long: entry - stop_dist (最低 0.01), short: entry + stop_dist。
+    native protection (整数株) と synthetic (端株) の双方から使う共通式。
+    """
+    if rules is None or atr_value is None or atr_value <= 0:
+        return None
+    stop_dist = float(atr_value) * float(rules.stop_atr_multiplier)
+    if snap.side == "long":
+        return max(0.01, snap.avg_entry_price - stop_dist)
+    return snap.avg_entry_price + stop_dist
+
+
+def _target_price_for(
+    snap: PositionSnapshot, rules: Any, atr_value: float | None
+) -> float | None:
+    """profit target 価格 (S2/S3/S6=%, S5=ATR)。target 未定義なら None。
+
+    native protection (整数株) と synthetic (端株) の双方から使う共通式。
+    """
+    if rules is None:
+        return None
+    ttype = getattr(rules, "profit_target_type", "none")
+    if ttype == "percentage" and rules.profit_target_value > 0:
+        mult = 1.0 + (float(rules.profit_target_value) / 100.0)
+        if snap.side == "long":
+            return snap.avg_entry_price * mult
+        return snap.avg_entry_price / mult
+    if ttype == "atr" and atr_value is not None and atr_value > 0:
+        dist = float(atr_value) * float(rules.profit_target_value)
+        if snap.side == "long":
+            return snap.avg_entry_price + dist
+        return snap.avg_entry_price - dist
+    return None
 
 
 def _build_protection_orders(
@@ -1445,7 +1536,7 @@ def _build_protection_orders(
                 PreparedExit(
                     symbol=snap.symbol,
                     system=snap.system,
-                    qty=snap.abs_qty,
+                    qty=snap.exit_qty(),
                     side=close_side,
                     order_type="trailing_stop",
                     reason=ExitReasonCode.PROTECT_TRAIL,
@@ -1458,12 +1549,8 @@ def _build_protection_orders(
             )
 
     # stop-loss (全 system): ATR ベース。ATR 値が無いと計算できないので skip。
-    if atr_value is not None and atr_value > 0:
-        stop_dist = float(atr_value) * float(rules.stop_atr_multiplier)
-        if snap.side == "long":
-            stop_price = max(0.01, snap.avg_entry_price - stop_dist)
-        else:
-            stop_price = snap.avg_entry_price + stop_dist
+    stop_price = _stop_price_for(snap, rules, atr_value)
+    if stop_price is not None:
         coid = (
             f"protect-{snap.system}-{snap.symbol}-{entry_date_compact}-"
             f"{_PROTECT_STOP_SUFFIX}"
@@ -1473,7 +1560,7 @@ def _build_protection_orders(
                 PreparedExit(
                     symbol=snap.symbol,
                     system=snap.system,
-                    qty=snap.abs_qty,
+                    qty=snap.exit_qty(),
                     side=close_side,
                     order_type="stop",
                     reason=ExitReasonCode.PROTECT_STOP,
@@ -1486,20 +1573,7 @@ def _build_protection_orders(
             )
 
     # profit target (S2/S3/S6 = %, S5 = ATR)
-    target_price: float | None = None
-    ttype = getattr(rules, "profit_target_type", "none")
-    if ttype == "percentage" and rules.profit_target_value > 0:
-        mult = 1.0 + (float(rules.profit_target_value) / 100.0)
-        if snap.side == "long":
-            target_price = snap.avg_entry_price * mult
-        else:
-            target_price = snap.avg_entry_price / mult
-    elif ttype == "atr" and atr_value is not None and atr_value > 0:
-        dist = float(atr_value) * float(rules.profit_target_value)
-        if snap.side == "long":
-            target_price = snap.avg_entry_price + dist
-        else:
-            target_price = snap.avg_entry_price - dist
+    target_price = _target_price_for(snap, rules, atr_value)
     if target_price is not None and target_price > 0:
         coid = (
             f"protect-{snap.system}-{snap.symbol}-{entry_date_compact}-"
@@ -1510,7 +1584,7 @@ def _build_protection_orders(
                 PreparedExit(
                     symbol=snap.symbol,
                     system=snap.system,
-                    qty=snap.abs_qty,
+                    qty=snap.exit_qty(),
                     side=close_side,
                     order_type="limit",
                     reason=ExitReasonCode.PROTECT_TARGET,
@@ -1525,9 +1599,119 @@ def _build_protection_orders(
     return proposals
 
 
+def _build_synthetic_protection_orders(
+    snap: PositionSnapshot,
+    rules: Any,
+    *,
+    atr_value: float | None,
+    current_price: float | None,
+    today: str,
+    existing_exit_coids: set[str],
+) -> list[PreparedExit]:
+    """端株 (fractional) position 用の synthetic 保護 exit を返す。
+
+    Alpaca は端株に native な stop/limit/trailing を出せない (成行 DAY のみ)。
+    そこで日次 exit_check 時に現値が stop / target を突破していれば、成行 DAY の
+    **全数クローズを 1 件だけ** 発注する (synthetic stop / synthetic target)。
+    突破していなければ何も出さず、翌 run で再評価する。
+
+    設計上の割り切り:
+      - trailing stop は HWM 状態が必要で stateless では合成できないため、
+        ATR stop-loss で下方を代替する (S1/S4 の端株も ATR stop で保護)。
+      - stop と target が同時に突破することは無い (long: stop<entry<target、
+        short: target<entry<stop) ので、二重クローズは起きない。優先は stop。
+      - close は full qty・成行 DAY・決定的 coid。同日再 run は同一 coid で
+        Alpaca 側 422 duplicate となり二重発注しない (existing_exit_coids に
+        含まれていれば発注自体を skip する二重防止も併設)。
+      - 現値が不明 (market_value も rolling Close も無い) なら発注しない
+        (safe fallback = 何もしない。満期は time-exit が別途カバーする)。
+    """
+    if rules is None or snap.system is None:
+        return []
+    if current_price is None or current_price <= 0:
+        logger.debug(
+            "synthetic exit skip: %s 現値不明 (market_value/rolling Close 無し)",
+            snap.symbol,
+        )
+        return []
+
+    close_side = "sell" if snap.side == "long" else "buy"
+    qty = snap.exit_qty()
+    date_compact = today.replace("-", "")
+
+    # (1) synthetic stop (ATR ベース)。突破していれば即クローズ。
+    stop_price = _stop_price_for(snap, rules, atr_value)
+    if stop_price is not None:
+        breached = (
+            current_price <= stop_price
+            if snap.side == "long"
+            else current_price >= stop_price
+        )
+        if breached:
+            coid = (
+                f"exit-{snap.system}-{snap.symbol}-{date_compact}-"
+                f"{_EXIT_SYN_STOP_SUFFIX}"
+            )
+            if coid in existing_exit_coids:
+                return []
+            return [
+                PreparedExit(
+                    symbol=snap.symbol,
+                    system=snap.system,
+                    qty=qty,
+                    side=close_side,
+                    order_type="market",
+                    reason=ExitReasonCode.PROTECT_STOP,
+                    entry_date=snap.entry_date,
+                    stop_price=round(stop_price, 4),
+                    client_order_id=coid,
+                    dry_run=True,
+                    time_in_force="day",
+                )
+            ]
+
+    # (2) synthetic target。突破していれば即クローズ。
+    target_price = _target_price_for(snap, rules, atr_value)
+    if target_price is not None and target_price > 0:
+        breached = (
+            current_price >= target_price
+            if snap.side == "long"
+            else current_price <= target_price
+        )
+        if breached:
+            coid = (
+                f"exit-{snap.system}-{snap.symbol}-{date_compact}-"
+                f"{_EXIT_SYN_TARGET_SUFFIX}"
+            )
+            if coid in existing_exit_coids:
+                return []
+            return [
+                PreparedExit(
+                    symbol=snap.symbol,
+                    system=snap.system,
+                    qty=qty,
+                    side=close_side,
+                    order_type="market",
+                    reason=ExitReasonCode.PROTECT_TARGET,
+                    entry_date=snap.entry_date,
+                    limit_price=round(target_price, 4),
+                    client_order_id=coid,
+                    dry_run=True,
+                    time_in_force="day",
+                )
+            ]
+
+    return []
+
+
 # -----------------------------------------------------------------------
 # top-level: build all exit proposals from positions
 # -----------------------------------------------------------------------
+
+
+def _coid_already_open(po: PreparedExit, existing_exit_coids: set[str]) -> bool:
+    """既に同一 client_order_id の exit- 注文が open なら True (二重発注防止)。"""
+    return bool(po.client_order_id) and po.client_order_id in existing_exit_coids
 
 
 def build_exit_orders_from_positions(
@@ -1537,16 +1721,25 @@ def build_exit_orders_from_positions(
     tracker: dict[str, Any] | None = None,
     entry_orders_index: dict[str, dict[str, Any]] | None = None,
     existing_protect_coids: set[str] | None = None,
+    existing_exit_coids: set[str] | None = None,
     spy_high: float | None = None,
     spy_max70: float | None = None,
     atr_by_symbol: dict[str, dict[int, float]] | None = None,
+    price_by_symbol: dict[str, float] | None = None,
 ) -> list[PreparedExit]:
     """position snapshots から exit 発注案を build する pure function。
 
     - time-based (S2/S3/S5/S6): holding_days >= max_holding_days なら 成行 close
     - SPY breakout (S7): spy_high >= spy_max70 なら 翌寄成行 close
-    - protection: 未発注 (existing_protect_coids に無い) なら trailing/stop/target を発注
+    - protection (整数株): 未発注 (existing_protect_coids に無い) なら
+      trailing/stop/target を native で発注
+    - protection (端株): native 不可のため synthetic (現値が stop/target を
+      突破していれば成行 DAY 全数クローズ) を発注
     - S1/S4 は time-based 無いので protection のみ
+
+    現値は snapshot.current_price (market_value/qty) を優先し、無い場合は
+    price_by_symbol (rolling Close 等) を fallback に使う。existing_exit_coids
+    に既に open な exit- coid があれば time/breakout/synthetic を skip (二重防止)。
 
     副作用なし。dry_run=True で返す。実発注 / dry_run flag は呼び出し側が差し替える。
     """
@@ -1556,7 +1749,9 @@ def build_exit_orders_from_positions(
         entry_orders_index=entry_orders_index,
     )
     existing_coids = existing_protect_coids or set()
+    existing_exit = existing_exit_coids or set()
     atr_lookup = atr_by_symbol or {}
+    price_lookup = price_by_symbol or {}
 
     out: list[PreparedExit] = []
     for snap in snapshots:
@@ -1586,17 +1781,35 @@ def build_exit_orders_from_positions(
             atr_value = per_atr.get(int(rules.stop_atr_period))
         protection: list[PreparedExit] = []
         if rules is not None and time_exit is None and breakout_exit is None:
-            protection = _build_protection_orders(
-                snap,
-                rules,
-                atr_value=atr_value,
-                existing_protect_coids=existing_coids,
-            )
+            if snap.is_fractional:
+                # 端株: native stop/limit/trailing 不可 → synthetic
+                # (現値が stop/target を突破していれば成行 DAY 全数クローズ)。
+                cur_px = snap.current_price
+                if cur_px is None:
+                    cur_px = price_lookup.get(snap.symbol)
+                protection = _build_synthetic_protection_orders(
+                    snap,
+                    rules,
+                    atr_value=atr_value,
+                    current_price=cur_px,
+                    today=today,
+                    existing_exit_coids=existing_exit,
+                )
+            else:
+                protection = _build_protection_orders(
+                    snap,
+                    rules,
+                    atr_value=atr_value,
+                    existing_protect_coids=existing_coids,
+                )
 
-        # (3) 優先順位: time/breakout の close order > protection 発注
-        if time_exit is not None:
+        # (3) 優先順位: time/breakout の close order > protection 発注。
+        # 既に同一 exit- coid が open (existing_exit) なら二重発注しない。
+        if time_exit is not None and not _coid_already_open(time_exit, existing_exit):
             out.append(time_exit)
-        if breakout_exit is not None:
+        if breakout_exit is not None and not _coid_already_open(
+            breakout_exit, existing_exit
+        ):
             out.append(breakout_exit)
         out.extend(protection)
 
@@ -1619,9 +1832,19 @@ def submit_paper_exit_order(
 ) -> PreparedExit:
     """1 件の PreparedExit を Alpaca Paper に発注する。dry_run=True で送信 skip。"""
     if po.qty <= 0:
-        raise ValueError(f"exit qty は正の整数: {po.qty}")
+        raise ValueError(f"exit qty は正の数: {po.qty}")
     if po.side not in ("buy", "sell"):
         raise ValueError(f"exit side は 'buy'/'sell': {po.side!r}")
+    # 端株 (整数株でない qty) は Alpaca 上、成行 DAY でしか約定できない。native
+    # stop/limit/trailing を端株で送ると reject されるため、silent に落ちる前に
+    # fail-fast する (回帰ガード)。builder は端株を market/day のみで生成する。
+    _frac_qty = abs(float(po.qty) - round(float(po.qty))) > _QTY_WHOLE_TOL
+    if _frac_qty and (po.order_type != "market" or po.time_in_force.lower() != "day"):
+        raise ValueError(
+            "端株 exit は成行DAYのみ: "
+            f"{po.symbol} qty={po.qty} order_type={po.order_type} "
+            f"tif={po.time_in_force}"
+        )
 
     po.dry_run = dry_run
     if dry_run:
@@ -1657,7 +1880,7 @@ def submit_paper_exit_order(
     po.status = str(getattr(order, "status", "") or "")
     _audit_log({"event": "exit_submitted", **po.to_row()})
     logger.info(
-        "Paper exit submitted: %s %s x%d %s id=%s status=%s reason=%s",
+        "Paper exit submitted: %s %s x%s %s id=%s status=%s reason=%s",
         po.side,
         po.symbol,
         po.qty,
@@ -1721,6 +1944,29 @@ def fetch_existing_protect_coids(client: Any) -> set[str]:
     return out
 
 
+def fetch_existing_exit_coids(client: Any) -> set[str]:
+    """Alpaca の open orders から exit- (time/breakout/synthetic) coid を集める。
+
+    端株の synthetic クローズや time-exit の成行注文が同日再 run で二重発注
+    されないよう、既に open な ``exit-`` 系 coid を dedup 材料として返す。
+    エラー時は空集合 (safe fallback = Alpaca 側の 422 duplicate に委ねる)。
+    """
+    out: set[str] = set()
+    try:
+        orders = ba.get_open_orders(client)
+    except Exception as exc:  # pragma: no cover
+        logger.warning("open orders 取得失敗 (exit coids): %s", exc)
+        return out
+    for o in orders or []:
+        try:
+            coid = str(getattr(o, "client_order_id", "") or "")
+            if coid.startswith("exit-"):
+                out.add(coid)
+        except Exception:
+            continue
+    return out
+
+
 __all__ = [
     "PreparedOrder",
     "PreparedExit",
@@ -1758,4 +2004,5 @@ __all__ = [
     "submit_paper_exit_order",
     "submit_paper_exit_orders",
     "fetch_existing_protect_coids",
+    "fetch_existing_exit_coids",
 ]
