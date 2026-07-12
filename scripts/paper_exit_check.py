@@ -43,6 +43,7 @@ from common.alpaca_trading import (  # noqa: E402
     PreparedExit,
     assert_paper_env,
     build_exit_orders_from_positions,
+    fetch_existing_exit_coids,
     fetch_existing_protect_coids,
     fetch_position_snapshots,
     parse_entry_date_from_client_order_id,
@@ -201,6 +202,39 @@ def _load_atr_by_symbol(symbols: list[str]) -> dict[str, dict[int, float]]:
     return out
 
 
+def _load_price_by_symbol(symbols: list[str]) -> dict[str, float]:
+    """rolling CSV の latest Close を symbol 別に取得 (端株 synthetic の現値 fallback)。
+
+    通常は snapshot.current_price (market_value/qty) が優先されるが、Alpaca が
+    market_value を返さない場合の fallback に使う。取得不能な symbol は省く。
+    """
+    out: dict[str, float] = {}
+    rolling_dir = ROOT / "data_cache" / "rolling"
+    if not rolling_dir.exists():
+        return out
+    for sym in symbols:
+        f = rolling_dir / f"{sym}.csv"
+        if not f.exists():
+            continue
+        try:
+            df = pd.read_csv(f)
+        except Exception:
+            continue
+        if df.empty:
+            continue
+        tail = df.iloc[-1]
+        for col in ("Close", "close", "adj_close", "Adj Close"):
+            if col in df.columns:
+                try:
+                    val = float(tail.get(col, 0) or 0)
+                    if val > 0:
+                        out[sym] = val
+                        break
+                except (TypeError, ValueError):
+                    continue
+    return out
+
+
 # -------------------------------------------------------------------------
 # main
 # -------------------------------------------------------------------------
@@ -285,6 +319,7 @@ def main(argv: list[str] | None = None) -> int:
     client: Any | None = None
     snapshots: list[PositionSnapshot] = []
     existing_protect_coids: set[str] = set()
+    existing_exit_coids: set[str] = set()
 
     if not args.no_alpaca:
         if args.confirm:
@@ -302,16 +337,19 @@ def main(argv: list[str] | None = None) -> int:
     if client is not None:
         snapshots = fetch_position_snapshots(client)
         existing_protect_coids = fetch_existing_protect_coids(client)
+        existing_exit_coids = fetch_existing_exit_coids(client)
         _hydrate_from_alpaca_coids(snapshots, client)
 
     # --- 2) tracker / entry_orders_index --------------------------------
     tracker = load_tracker()
     entry_orders_index = _collect_entry_orders_index(results_dir)
 
-    # --- 3) context (SPY, ATR) ------------------------------------------
+    # --- 3) context (SPY, ATR, 現値) ------------------------------------
     spy_high, spy_max70 = _load_spy_context()
     symbols = [s.symbol for s in snapshots]
     atr_by_symbol = _load_atr_by_symbol(symbols) if symbols else {}
+    # 端株 synthetic の現値 fallback (snapshot.current_price を優先)。
+    price_by_symbol = _load_price_by_symbol(symbols) if symbols else {}
 
     # --- 4) build exit proposals ----------------------------------------
     exits = build_exit_orders_from_positions(
@@ -320,9 +358,11 @@ def main(argv: list[str] | None = None) -> int:
         tracker=tracker,
         entry_orders_index=entry_orders_index,
         existing_protect_coids=existing_protect_coids,
+        existing_exit_coids=existing_exit_coids,
         spy_high=spy_high,
         spy_max70=spy_max70,
         atr_by_symbol=atr_by_symbol,
+        price_by_symbol=price_by_symbol,
     )
 
     dry_run = not args.confirm
