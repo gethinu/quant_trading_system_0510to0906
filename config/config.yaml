@@ -20,7 +20,13 @@ risk:
     max_net_exposure_pct: 0.5    # |net|(|long$-short$|)/equity 上限。50/50 の意図を活かし
                                  # 方向性リスクを equity の 50% までに抑える (user 有効化 2026-07-07)
     # --- off-by-default (0 = 無効。値を入れると発火) ---
-    drawdown_flatten_pct: 0.0    # peak drawdown がこの割合で全 flatten (例 0.30)
+    # drawdown_flatten_pct: peak equity からの drawdown がこの割合を超えると全 flatten。
+    #   2026-07-12 に自動 flatten を配線 (open_auto_run の entry 前チェック +
+    #   scripts/drawdown_circuit_breaker.py。詳細 docs/MONITOR_SAFETY_NETS_20260712.md)。
+    #   0 の間は完全に no-op。有効化するなら保守的に 0.15 (=15%) 程度を提案。
+    #   誤発火防止: equity 履歴 >=5 点必須 / equity・peak 欠損時は発火せず /
+    #   実 flatten は --confirm (open-run は非 dry-run) が要る。
+    drawdown_flatten_pct: 0.0    # 例: 0.15 で peak から 15% 下落で全 flatten
     max_positions_per_sector: 0  # 1 sector あたり建玉数上限 (例 5)
 
 # ポジションサイジング方式 (2026-07-09)。詳細: docs/EQUITY_LINKED_SIZING_20260709.md。

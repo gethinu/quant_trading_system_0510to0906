@@ -275,7 +275,9 @@ class Runner:
         自作バグを避ける)。exit_orders.json は既存 schema (exits[].order_type/
         order_id/dry_run) で書き、wait_exit_fills がそのまま fill 監視できるようにする。
         """
-        self.log("[exit] --flatten-all: 全ポジションを market close + open order cancel (clean reset)")
+        self.log(
+            "[exit] --flatten-all: 全ポジションを market close + open order cancel (clean reset)"
+        )
         # 事前スナップショット (dry-run でも「何を閉じるか」を durable に残す)
         snaps: list = []
         try:
@@ -395,9 +397,17 @@ class Runner:
 
         client = self._client()
         deadline = time.monotonic() + float(self.args.poll_timeout)
-        working = {"new", "accepted", "pending_new", "partially_filled",
-                   "held", "accepted_for_bidding", "pending_replace",
-                   "calculated", "pending_cancel"}
+        working = {
+            "new",
+            "accepted",
+            "pending_new",
+            "partially_filled",
+            "held",
+            "accepted_for_bidding",
+            "pending_replace",
+            "calculated",
+            "pending_cancel",
+        }
         fills: dict[str, str] = {}
         while time.monotonic() < deadline:
             smap = get_orders_status_map(client, order_ids)
@@ -498,6 +508,86 @@ class Runner:
             self.log(f"[equity] 取得失敗 (無視): {exc}")
             return None
 
+    def circuit_breaker_check(self, eq: float | None) -> bool:
+        """drawdown サーキットブレーカ (config gated, default 無効)。
+
+        entry の **前** に equity ドローダウンを判定し、config
+        (risk.portfolio.drawdown_flatten_pct) で有効化されていて閾値超え & 全ガード
+        通過なら全ポジションを flatten して **run を ABORT** する (ドローダウン中に
+        新規建てしない = 安全弁)。config が 0 (既定) の間は完全に no-op。
+
+        戻り値: True = 発火して flatten 済 (呼び出し側は abort すべき)。
+                False = 無効 / 閾値内 / ガード抑止 / dry-run (通常継続)。
+        """
+        try:
+            from common.drawdown_breaker import (
+                assess,
+                flatten_all_paper,
+                load_equity_history,
+                resolve_peak_equity,
+            )
+            from common.portfolio_guard import load_guard_config
+        except Exception as exc:  # noqa: BLE001
+            self.log(f"[breaker] import 失敗 (skip): {exc}")
+            return False
+
+        threshold = float(load_guard_config().get("drawdown_flatten_pct", 0.0) or 0.0)
+        if threshold <= 0:
+            self.log("[breaker] disabled (drawdown_flatten_pct=0) -> skip")
+            self.record["breaker"] = "disabled"
+            return False
+
+        history = load_equity_history(self.results / "alpaca_equity_history.json")
+        peak, n_points = resolve_peak_equity(history, eq)
+        a = assess(eq, peak, threshold, n_history_points=n_points)
+        self.record["breaker"] = a.to_dict()
+        self.log(
+            f"[breaker] armed={a.armed} breached={a.breached} "
+            f"would_flatten={a.would_flatten} dd={a.drawdown_pct:.2%} "
+            f"threshold={a.threshold_pct:.2%} hist={n_points} reason={a.reason}"
+        )
+        if not a.would_flatten:
+            return False
+
+        body = (
+            f"peak drawdown {a.drawdown_pct:.2%} >= 閾値 {a.threshold_pct:.2%} "
+            f"(equity ${a.equity:,.0f} / peak ${a.peak_equity:,.0f})"
+        )
+        if self.dry_run:
+            self.log(f"[breaker] WOULD FLATTEN (dry-run のため未執行): {body}")
+            self._ntfy_warn(
+                f"DrawdownBreaker WOULD FIRE {self.date}",
+                "オープン run: ドローダウン閾値成立 (dry-run のため未執行)。\n" + body,
+            )
+            return False
+
+        # 実 run: paper 断言 → flatten → ABORT (新規建てしない)
+        try:
+            from common.alpaca_trading import assert_paper_env
+
+            assert_paper_env()
+            client = self._client()
+        except Exception as exc:  # noqa: BLE001
+            self.log(f"[breaker][SAFETY ABORT] paper 断言失敗、flatten 中止: {exc}")
+            self.record["breaker_error"] = str(exc)
+            return False
+
+        self.log(f"[breaker] FLATTEN 実行 (paper) & 新規建て中止: {body}")
+        result = flatten_all_paper(client)
+        self.record["breaker_flatten"] = result
+        self.record["abort"] = "drawdown_flatten"
+        self._dump(
+            "drawdown_flatten.json", {"assessment": a.to_dict(), "flatten": result}
+        )
+        self._ntfy_warn(
+            f"DrawdownBreaker FIRED {self.date}",
+            (
+                "オープン run: サーキットブレーカ発火。全ポジション flatten & 新規建て中止 (paper)。\n"
+                f"{body}\nclose ok={result.get('ok')} failed={result.get('failed')}"
+            ),
+        )
+        return True
+
     def notify(self, eq: float | None) -> None:
         # publish_execution_summary は既存 recon_<date>.json を優先ロードして
         # 再ビルドしない。06:00 daily が薄シグナル(0)状態で書いた stale recon が
@@ -541,7 +631,9 @@ class Runner:
             [str(ROOT / "scripts" / "export_alpaca_snapshot.py"), "--date", self.date],
         )
         if self.dry_run:
-            self.log("[publish] dry-run: Vercel publish (commit/push) skip。snapshot のみ生成")
+            self.log(
+                "[publish] dry-run: Vercel publish (commit/push) skip。snapshot のみ生成"
+            )
             return
         # 2) PRIMARY worktree から data/ を publish
         primary = Path(self.args.primary_root)
@@ -618,7 +710,9 @@ class Runner:
 
     # -- orchestration -----------------------------------------------------
     def main(self) -> int:
-        self.log(f"=== OPEN AUTO RUN start date={self.date} mode={self.record['mode']} ===")
+        self.log(
+            f"=== OPEN AUTO RUN start date={self.date} mode={self.record['mode']} ==="
+        )
         self.log(f"worktree={ROOT}")
 
         # 冪等ロック
@@ -635,6 +729,14 @@ class Runner:
             return 3
 
         eq = self.equity()
+        if self.circuit_breaker_check(eq):
+            # ドローダウン発火: flatten 済。新規建てせず、flat 状態を dashboard に反映して abort。
+            self.record_stage()
+            self.publish()
+            self.notify(eq)
+            self.finalize(aborted=True)
+            self.log("=== OPEN AUTO RUN aborted by drawdown breaker ===")
+            return 4
         market_ids = self.exit_stage()
         self.wait_exit_fills(market_ids)  # exit->entry 順の担保点
         self.entry_stage(eq)
@@ -648,7 +750,9 @@ class Runner:
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    p.add_argument("--date", default=None, help="対象日 YYYY-MM-DD (default: today local)")
+    p.add_argument(
+        "--date", default=None, help="対象日 YYYY-MM-DD (default: today local)"
+    )
     p.add_argument(
         "--min-signals",
         type=int,
