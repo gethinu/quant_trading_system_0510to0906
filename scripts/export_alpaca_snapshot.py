@@ -26,6 +26,7 @@ daily_pipeline.ps1 への配線は Phase 2 (別セッションと競合回避の
                    gross_cap_pct, net_cap_pct, by_system:{...}},
       "summary": {n_positions, n_long, n_short, n_winning, n_losing, win_rate_pct,
                   unrealized_pl_total, exit_soon_count, biggest_winner, biggest_loser},
+      # positions[].system: system1..7 / "delisted" (INACTIVE 非tradable) / "unknown"
       "positions": [ {symbol, system, side, qty, avg_entry_price, current_price,
                       lastday_price, market_value, cost_basis, unrealized_pl,
                       unrealized_pl_pct, intraday_pl, intraday_pl_pct, entry_date,
@@ -66,6 +67,10 @@ from common.trade_management import SYSTEM_TRADE_RULES  # noqa: E402
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA = "alpaca_snapshot/v1"
 PROVIDER = "alpaca-paper"
+
+# system tag が付かず、かつ Alpaca 上で INACTIVE / 非 tradable な asset を指す明示ラベル。
+# (上場廃止で API から close 不能: 事実を "unknown" ではなく "delisted" として表示する。)
+DELISTED_LABEL = "delisted"
 
 # paper endpoint 固定 (live URL は絶対に書かない: test_alpaca_no_live_url ガード)。
 PAPER_BASE = "https://paper-api.alpaca.markets"
@@ -150,6 +155,37 @@ def _fetch_orders_index(client: Any) -> dict[str, dict[str, Any]]:
         except Exception:
             continue
     return idx
+
+
+def _fetch_inactive_assets(client: Any, symbols: list[str]) -> set[str]:
+    """held symbols のうち Alpaca asset が INACTIVE または非 tradable のものを返す。
+
+    read-only の ``get_asset`` (GET) だけを使う。上場廃止 (delisted) 銘柄は
+    ``status=inactive`` / ``tradable=False`` を返すため、system tag が付かない
+    ポジションを ``unknown`` ではなく ``delisted`` に再分類する判定材料にする。
+
+    - 発注・cancel の類は一切しない (観測のみ)。
+    - API/SDK 失敗時は per-symbol で握り潰し、最終的に空集合へ縮退する
+      (= 誰も delisted 扱いにしない安全側。active 銘柄を誤って delisted にしない)。
+    """
+    out: set[str] = set()
+    if client is None:
+        return out
+    for sym in symbols:
+        s = str(sym or "").upper()
+        if not s:
+            continue
+        try:
+            asset = client.get_asset(s)
+        except Exception:
+            continue  # per-symbol 失敗は無視 (active 側に倒す)
+        status_raw = getattr(asset, "status", None)
+        status = str(getattr(status_raw, "value", status_raw) or "").lower()
+        # tradable 属性が欠落した場合は True 既定 (= active 扱い) で誤判定を避ける。
+        tradable = bool(getattr(asset, "tradable", True))
+        if status == "inactive" or not tradable:
+            out.add(s)
+    return out
 
 
 def _load_symbol_system_map() -> dict[str, str]:
@@ -269,6 +305,8 @@ def _estimate_stop_target(
 def _exit_type(system: str | None, rules: Any) -> str:
     if system == "system7":
         return "spy_hedge"
+    if system == DELISTED_LABEL:
+        return "delisted"  # 上場廃止で API から close 不能 (エグジット計画無し)
     if rules is None:
         return "unknown"
     if getattr(rules, "max_holding_days", 0) > 0:
@@ -497,6 +535,23 @@ def build_snapshot(client: Any, *, date_str: str, results_dir: Path, period: str
     symbols = [str(getattr(p, "symbol", "") or "").upper() for p in raw_positions]
     atr_by_symbol = _load_atr([s for s in symbols if s])
 
+    # system tag が解決できなかった held symbol だけ Alpaca asset status を引き、
+    # INACTIVE / 非 tradable (= 上場廃止で close 不能) なら "delisted" に分類する。
+    # tag 付きは照会不要なので API 呼び出しを最小化する (read-only GET のみ)。
+    untagged_symbols = [
+        s
+        for s in dict.fromkeys(s for s in symbols if s)  # 重複排除・順序保持
+        if _resolve_tags(
+            s,
+            orders_index=orders_index,
+            tracker=tracker,
+            symbol_map=symbol_map,
+            entry_file=entry_file,
+        )[0]
+        is None
+    ]
+    inactive_symbols = _fetch_inactive_assets(client, untagged_symbols)
+
     positions: list[dict[str, Any]] = []
     long_usd = short_usd = 0.0
     by_system: dict[str, dict[str, Any]] = {}
@@ -528,6 +583,9 @@ def build_snapshot(client: Any, *, date_str: str, results_dir: Path, period: str
             symbol_map=symbol_map,
             entry_file=entry_file,
         )
+        # tag 無し + Alpaca 上 INACTIVE/非tradable → "delisted" (事実ラベル)。
+        # rules は本物の system で引く (delisted は取引ルール無し)。
+        sys_label = system if system else (DELISTED_LABEL if sym in inactive_symbols else None)
         rules = SYSTEM_TRADE_RULES.get(system) if system else None
         max_hold = int(getattr(rules, "max_holding_days", 0)) if rules else 0
         holding_days = compute_holding_days(entry_date, date_str)
@@ -562,7 +620,7 @@ def build_snapshot(client: Any, *, date_str: str, results_dir: Path, period: str
 
         row = {
             "symbol": sym,
-            "system": system or "unknown",
+            "system": sys_label or "unknown",
             "side": side,
             "qty": round(qty, 6),
             "avg_entry_price": round(avg, 4),
@@ -579,7 +637,7 @@ def build_snapshot(client: Any, *, date_str: str, results_dir: Path, period: str
             "max_holding_days": max_hold,
             "days_remaining": days_remaining,
             "exit_date": exit_date,
-            "exit_type": _exit_type(system, rules),
+            "exit_type": _exit_type(sys_label, rules),
             "exit_expected": exit_expected,
             "stop_price_est": stop_est,
             "target_price_est": target_est,
@@ -606,7 +664,7 @@ def build_snapshot(client: Any, *, date_str: str, results_dir: Path, period: str
         if biggest_loss is None or upl < biggest_loss["pl"]:
             biggest_loss = {"symbol": sym, "pl": round(upl, 2), "pl_pct": row["unrealized_pl_pct"]}
 
-        sysk = system or "unknown"
+        sysk = sys_label or "unknown"
         b = by_system.setdefault(sysk, {"long_usd": 0.0, "short_usd": 0.0, "count": 0, "unrealized_pl": 0.0})
         b["count"] += 1
         b["unrealized_pl"] = round(b["unrealized_pl"] + upl, 2)

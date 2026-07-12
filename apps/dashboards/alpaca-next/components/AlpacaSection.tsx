@@ -51,6 +51,9 @@ const SYSTEM_COLOR: Record<string, string> = {
   system5: '#fbbf24',
   system6: '#fb7185',
   system7: '#94a3b8',
+  // 上場廃止 (INACTIVE / 非tradable) で API から close 不能なポジション。
+  // muted terracotta で「取引不能・要注意」を示し、system 各色とも被らない。
+  delisted: '#c08457',
   unknown: '#64748b',
 };
 const sysColor = (s: string) => SYSTEM_COLOR[s] ?? '#64748b';
@@ -333,7 +336,7 @@ function ExposureBlock({ snap }: { snap: AlpacaSnapshot }) {
           {systems.map(([sys, s]) => (
             <div key={sys} className="flex items-center gap-2">
               <span
-                className="text-[10px] tabular-nums w-9 shrink-0 font-medium"
+                className="text-[10px] tabular-nums min-w-9 shrink-0 font-medium whitespace-nowrap pr-1"
                 style={{ color: sysColor(sys) }}
               >
                 {sysShort(sys)}
@@ -431,6 +434,9 @@ function exitBadge(p: AlpacaPosition): { text: string; cls: string; sub?: string
   }
   if (p.exit_type === 'spy_hedge') {
     return { text: 'SPYヘッジ', cls: 'bg-sky-400/15 text-sky-300' };
+  }
+  if (p.exit_type === 'delisted' || p.system === 'delisted') {
+    return { text: '上場廃止', cls: 'bg-white/10 text-muted', sub: 'API close 不能' };
   }
   return { text: '—', cls: 'text-muted' };
 }
