@@ -86,6 +86,7 @@ function Kpi({
 // --------------------------------------------------------------------------
 function EquityChart({ curve }: { curve: EquityCurve }) {
   const pts = curve.points ?? [];
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
   if (pts.length < 2) {
     return (
       <div className="text-xs text-muted py-6 text-center">
@@ -134,6 +135,20 @@ function EquityChart({ curve }: { curve: EquityCurve }) {
     const i = Math.round((k / (nLabels - 1)) * (pts.length - 1));
     return { t: pts[i].t.slice(5), left: (i / (pts.length - 1)) * 100 };
   });
+
+  // hover/touch scrub → nearest point index (pointer events cover mouse + touch)
+  const pickIndex = (e: React.PointerEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const frac = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+    setHoverIdx(Math.round(frac * (pts.length - 1)));
+  };
+
+  const hp = hoverIdx != null ? pts[hoverIdx] : null;
+  const hoverLeft = hoverIdx != null ? (hoverIdx / (pts.length - 1)) * 100 : 0;
+  const hoverTop = hp ? (y(hp.equity) / H) * 100 : 0;
+  // clamp tooltip horizontally so it never overflows the card edges
+  const tipLeft = Math.min(88, Math.max(12, hoverLeft));
 
   return (
     <div>
@@ -188,6 +203,52 @@ function EquityChart({ curve }: { curve: EquityCurve }) {
           <circle cx={x(minIdx)} cy={y(yMin)} r="2.5" fill="#f87171" />
           <circle cx={x(pts.length - 1)} cy={y(last.equity)} r="3" fill={lineColor} />
         </svg>
+
+        {/* hover crosshair + point marker */}
+        {hp ? (
+          <>
+            <div
+              className="pointer-events-none absolute top-0 bottom-3 w-px bg-white/30"
+              style={{ left: `${hoverLeft}%` }}
+            />
+            <div
+              className="pointer-events-none absolute z-10 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-card shadow"
+              style={{ left: `${hoverLeft}%`, top: `${hoverTop}%` }}
+            />
+          </>
+        ) : null}
+
+        {/* pointer/touch capture layer (touch-action pan-y keeps vertical page scroll) */}
+        <div
+          className="absolute inset-0 cursor-crosshair"
+          style={{ touchAction: 'pan-y' }}
+          onPointerMove={pickIndex}
+          onPointerDown={pickIndex}
+          onPointerLeave={() => setHoverIdx(null)}
+          onPointerUp={() => setHoverIdx(null)}
+          onPointerCancel={() => setHoverIdx(null)}
+          role="presentation"
+        />
+
+        {/* tooltip: 日付 + equity (+ 日次 P&L / DD) */}
+        {hp ? (
+          <div
+            className="pointer-events-none absolute top-0 z-20 -translate-x-1/2 rounded-md border border-white/10 bg-black/80 px-2 py-1 text-[10px] leading-tight tabular-nums shadow-lg backdrop-blur-sm"
+            style={{ left: `${tipLeft}%` }}
+          >
+            <div className="text-muted">{hp.t}</div>
+            <div className="text-sm font-semibold text-cardfg">
+              {fmtUsd(hp.equity, 0)}
+            </div>
+            <div className="flex gap-2">
+              <span className={pnlText(hp.pl_pct)}>{fmtPct(hp.pl_pct)}</span>
+              {hp.dd_pct != null && hp.dd_pct < 0 ? (
+                <span className="text-fail">DD {fmtPct(hp.dd_pct)}</span>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+
         <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-between text-[9px] text-muted px-0.5">
           {xLabels.map((l, i) => (
             <span key={i} className="tabular-nums">
