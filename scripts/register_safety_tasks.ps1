@@ -21,7 +21,7 @@
 
 .PARAMETER WorktreeRoot
     Folder holding scripts/self_monitor_check.ps1 & exit_verify.ps1. Default is the
-    production run dir C:\tmp\qts-main-run — the safety-net branch must be merged into
+    production run dir C:\tmp\qts-main-run -- the safety-net branch must be merged into
     whatever that worktree tracks (git pull) first. For interim use before merging,
     pass the safety-nets worktree: -WorktreeRoot C:\tmp\qts-safety-nets.
 

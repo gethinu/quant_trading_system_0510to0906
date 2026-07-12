@@ -71,8 +71,11 @@ else {
 
 $env:PYTHONUTF8 = "1"
 $env:PYTHONIOENCODING = "utf-8"
+# Read the child python's UTF-8 stdout as UTF-8 so the launch log is not mojibake.
+try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
+$OutputEncoding = [System.Text.Encoding]::UTF8
 
-# results_csv/logs は junction 経由で primary を指すため PrimaryRoot 側を明示。
+# results_csv / logs are junction targets to the primary repo, so point at PrimaryRoot.
 $py = Join-Path $WorktreeRoot "scripts\exit_verify.py"
 $pyArgs = @(
     $py,

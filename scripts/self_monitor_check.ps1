@@ -71,6 +71,9 @@ else {
 # --- force UTF-8 for the child python ------------------------------------
 $env:PYTHONUTF8 = "1"
 $env:PYTHONIOENCODING = "utf-8"
+# Read the child python's UTF-8 stdout as UTF-8 so the launch log is not mojibake.
+try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
+$OutputEncoding = [System.Text.Encoding]::UTF8
 
 # --- build python args ---------------------------------------------------
 $py = Join-Path $WorktreeRoot "scripts\self_monitor_check.py"
