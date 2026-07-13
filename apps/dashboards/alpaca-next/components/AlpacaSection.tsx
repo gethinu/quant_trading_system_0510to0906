@@ -5,6 +5,7 @@ import type {
   AlpacaPosition,
   AlpacaSnapshot,
   EquityCurve,
+  SystemExposure,
 } from '@/lib/types';
 
 // --------------------------------------------------------------------------
@@ -304,10 +305,28 @@ function ExposureBlock({ snap }: { snap: AlpacaSnapshot }) {
   const gross = ex.gross_usd || 1;
   const longW = (long / gross) * 100;
 
-  const systems = Object.entries(ex.by_system).sort(
-    (a, b) => b[1].pct_of_gross - a[1].pct_of_gross,
+  // delisted は上場廃止・close 不能の死荷重（gross の大半を占め得る）。
+  // 「配分」の対象として不適切なのでこのチャートからは除外し、
+  // active(非delisted) gross を基準に % を再計算してスケールを是正する。
+  // 数値の実態（gross に delisted を含む）は上のエクスポージャ側で保持する。
+  const bucketGross = (s: SystemExposure) => s.long_usd + s.short_usd;
+  const delistedBucket = ex.by_system.delisted;
+  const activeEntries = Object.entries(ex.by_system).filter(
+    ([sys]) => sys !== 'delisted',
   );
-  const maxPct = Math.max(1, ...systems.map(([, s]) => s.pct_of_gross));
+  const activeGross =
+    activeEntries.reduce((sum, [, s]) => sum + bucketGross(s), 0) || 1;
+  const systems = activeEntries
+    .map(
+      ([sys, s]) =>
+        [sys, s, (bucketGross(s) / activeGross) * 100] as [
+          string,
+          SystemExposure,
+          number,
+        ],
+    )
+    .sort((a, b) => b[2] - a[2]);
+  const maxPct = Math.max(1, ...systems.map(([, , pct]) => pct));
 
   return (
     <div className="space-y-3">
@@ -331,9 +350,11 @@ function ExposureBlock({ snap }: { snap: AlpacaSnapshot }) {
       </div>
 
       <div>
-        <div className="text-[10px] text-muted mb-1">system 別配分（% of gross）</div>
+        <div className="text-[10px] text-muted mb-1">
+          system 別配分（% of active gross・delisted 除外）
+        </div>
         <div className="space-y-1">
-          {systems.map(([sys, s]) => (
+          {systems.map(([sys, s, pct]) => (
             <div key={sys} className="flex items-center gap-2">
               <span
                 className="text-[10px] tabular-nums min-w-9 shrink-0 font-medium whitespace-nowrap pr-1"
@@ -345,14 +366,14 @@ function ExposureBlock({ snap }: { snap: AlpacaSnapshot }) {
                 <div
                   className="h-full rounded"
                   style={{
-                    width: `${(s.pct_of_gross / maxPct) * 100}%`,
+                    width: `${(pct / maxPct) * 100}%`,
                     backgroundColor: sysColor(sys),
                     opacity: 0.75,
                   }}
                 />
               </div>
               <span className="text-[10px] text-muted tabular-nums w-24 text-right shrink-0">
-                {s.pct_of_gross.toFixed(1)}% · {s.count}
+                {pct.toFixed(1)}% · {s.count}
                 <span className={`ml-1 ${pnlText(s.unrealized_pl)}`}>
                   {fmtSignedUsd(s.unrealized_pl)}
                 </span>
@@ -360,6 +381,20 @@ function ExposureBlock({ snap }: { snap: AlpacaSnapshot }) {
             </div>
           ))}
         </div>
+        {delistedBucket ? (
+          <div className="mt-1.5 flex items-start gap-1.5 text-[9px] leading-snug text-muted/70">
+            <span
+              className="mt-[3px] inline-block w-2 h-2 rounded-sm shrink-0"
+              style={{ backgroundColor: sysColor('delisted'), opacity: 0.55 }}
+            />
+            <span>
+              delisted（close 不能）: {delistedBucket.count} pos ·{' '}
+              {fmtUsd(bucketGross(delistedBucket), 2)} · gross の{' '}
+              {delistedBucket.pct_of_gross.toFixed(1)}%
+              <span className="text-muted/50"> — 配分対象外（死荷重）</span>
+            </span>
+          </div>
+        ) : null}
       </div>
     </div>
   );
