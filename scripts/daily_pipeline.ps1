@@ -67,6 +67,7 @@ param(
     [string]$Date = "",
     [string]$Symbols = "",
     [switch]$SkipCache = $false,
+    [switch]$SkipRollingSync = $false,
     [switch]$SkipNarrator = $false,
     [switch]$SkipPublish = $false,
     [switch]$DryRunPublish = $false,
@@ -190,13 +191,44 @@ try {
         Write-Log "[cache] SkipCache 指定によりスキップ"
     }
     else {
+        # --auto-latest: 「今日」を要求して Polygon 403 (当日 EOD 前) で空振りするのを避け、
+        # full_backup 最新日の翌取引日〜直近 NYSE 取引日 (実際に取得可能な確定日) を対象にする。
+        # (旧実装 --start/--end $Date は 06:00 JST 時点で当日 EOD 未確定→403→full_backup が
+        #  一切前進せず rolling 凍結の主因になっていた。2026-07-14 修正)
         $cacheArgs = @(
             (Join-Path $ProjectRoot "scripts\cache_daily_polygon.py"),
-            "--start", $Date, "--end", $Date
+            "--auto-latest"
         )
         $c = Invoke-Step -Name "cache" -PyArgs $cacheArgs
         if ($c -ne 0) { $Failures += "cache(exit=$c)" }
     }
+
+    # --- Step 1b: rolling sync (full_backup/base -> rolling) -------------
+    # cache step は full_backup + base のみ更新し、signals が読む rolling は更新しない。
+    # 取得したばかりの確定日を signals に反映させるため rolling を同期する。
+    # (未同期だと rolling が古いままで最新営業日チェックが全銘柄を除外し 0 signals に、
+    #  あるいは古いスナップショットを毎日再計算する凍結状態になる。2026-07-14 修正)
+    if ($SkipRollingSync) {
+        Write-Log "[rolling_sync] SkipRollingSync 指定によりスキップ"
+    }
+    else {
+        $rsArgs = @(
+            (Join-Path $ProjectRoot "scripts\build_rolling_with_indicators.py")
+        )
+        $rs = Invoke-Step -Name "rolling_sync" -PyArgs $rsArgs
+        if ($rs -ne 0) { $Failures += "rolling_sync(exit=$rs)" }
+    }
+
+    # --- Step 1c: freshness guard (silent-freeze detector) --------------
+    # rolling が full_backup に対して前進しているかを検証。停滞 (exit=2) は $Failures に
+    # 積んで WARN 通知を発火させる。これが無いと「全 step OK」を出しつつ古いスナップショットを
+    # 毎日再計算する silent freeze (2026-07-12..14 のダッシュ凍結) を検知できない。
+    $fgArgs = @(
+        (Join-Path $ProjectRoot "scripts\check_rolling_freshness.py")
+    )
+    $fg = Invoke-Step -Name "freshness_guard" -PyArgs $fgArgs
+    if ($fg -eq 2) { $Failures += "freshness_guard(rolling_stale)" }
+    elseif ($fg -eq 1) { Write-Log "[freshness_guard] WARN: 検査自体が失敗 (exit=1)" }
 
     # --- Step 2: signals -------------------------------------------------
     $sigArgs = @(
