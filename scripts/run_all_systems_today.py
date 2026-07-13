@@ -4217,6 +4217,12 @@ def compute_today_signals(  # noqa: C901  # type: ignore[reportGeneralTypeIssues
 
     # フィルター開始前に各システムの進捗を0%にリセット
     try:
+        # sys7 (system7) は SPY ヘッジ専用 = ユニバースは SPY 1 銘柄。他 system と同じ
+        # len(symbols)(共通株ユニバース ~6,600) を Tgt(target) に載せると funnel の
+        # 母数が過大表示になる (dashboard bug 2026-07-12: sys7 Tgt=6652)。sys7 は
+        # 自systemの実ユニバース (SPY のみ) を母数にする。sys1-6 は従来どおり。
+        # SPY は _prepare_symbol_universe で symbols の先頭に必ず挿入されるため =1。
+        spy_universe = sum(1 for s in symbols if str(s).upper() == "SPY")
         for system_name in [
             "system1",
             "system2",
@@ -4226,7 +4232,8 @@ def compute_today_signals(  # noqa: C901  # type: ignore[reportGeneralTypeIssues
             "system6",
             "system7",
         ]:
-            _stage(system_name, 0, filter_count=len(symbols))
+            tgt = spy_universe if system_name == "system7" else len(symbols)
+            _stage(system_name, 0, filter_count=tgt)
     except Exception:
         pass
 

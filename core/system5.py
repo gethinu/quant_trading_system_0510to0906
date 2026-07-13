@@ -585,25 +585,32 @@ def generate_candidates_system5(
             mode_date = choose_mode_date_for_latest_only(date_counter)
             if mode_date is not None:
                 df_all = df_all[df_all["date"] == mode_date]
-            df_all = df_all.sort_values("adx7", ascending=False, kind="stable").head(
+            # STUpass (setup_predicate_count) は top_n cap の *前* に、mode date 上で
+            # setup を通過した全銘柄を数える。cap 後 (df_all=head(top_n)) で数えると
+            # STUpass が常に <= top_n となり、通過数が多い日でも top_n(=10) に張り付く
+            # (dashboard funnel bug 2026-07-12: sys3/4/5 の STUpass が真の通過数では
+            # なく cap 値 10 を表示していた)。TRDlist (ranked_top_n_count) は従来どおり
+            # cap 後の候補数のままにする。
+            df_setup = df_all
+            df_all = df_setup.sort_values("adx7", ascending=False, kind="stable").head(
                 top_n
             )
 
-            if "_setup_via" in df_all.columns:
-                via_series = df_all["_setup_via"].fillna("").astype(str)
+            if "_setup_via" in df_setup.columns:
+                via_series = df_setup["_setup_via"].fillna("").astype(str)
                 diagnostics["setup_predicate_count"] = int((via_series != "").sum())
 
-                if "_predicate_pass" in df_all.columns:
+                if "_predicate_pass" in df_setup.columns:
                     predicate_series = (
-                        df_all["_predicate_pass"].fillna(False).astype(bool)
+                        df_setup["_predicate_pass"].fillna(False).astype(bool)
                     )
                 else:
-                    predicate_series = pd.Series(False, index=df_all.index)
+                    predicate_series = pd.Series(False, index=df_setup.index)
 
-                if "_manual_pass" in df_all.columns:
-                    manual_series = df_all["_manual_pass"].fillna(False).astype(bool)
+                if "_manual_pass" in df_setup.columns:
+                    manual_series = df_setup["_manual_pass"].fillna(False).astype(bool)
                 else:
-                    manual_series = pd.Series(False, index=df_all.index)
+                    manual_series = pd.Series(False, index=df_setup.index)
 
                 predicate_only_mask = (via_series != "column") & (
                     predicate_series | manual_series
@@ -612,10 +619,10 @@ def generate_candidates_system5(
                     predicate_only_mask.sum()
                 )
             else:
-                diagnostics["setup_predicate_count"] = len(df_all)
+                diagnostics["setup_predicate_count"] = len(df_setup)
                 diagnostics["predicate_only_pass_count"] = 0
 
-            diagnostics["setup_unique_symbols"] = int(df_all["symbol"].nunique())
+            diagnostics["setup_unique_symbols"] = int(df_setup["symbol"].nunique())
 
             meta_cols = ["_setup_via", "_predicate_pass", "_manual_pass"]
             df_public = df_all.drop(

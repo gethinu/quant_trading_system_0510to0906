@@ -425,11 +425,17 @@ def build_pipeline_report(
 
     systems_out: dict[str, Any] = {}
     for sysname, phase_defs in SYSTEM_PIPELINE_PHASES.items():
+        # sys7 = SPY hedge 専用 → 母数は定義上 SPY 1 銘柄。grouped/funnel が共通株
+        # ユニバース (~6,600) を拾うため、spy_only は Tgt を 1 に矯正する
+        # (2026-07-12 dashboard bug: sys7 Tgt=6652)。sys1-6 は無影響。
+        is_spy_only = bool(SYSTEM_GATES.get(sysname, {}).get("spy_only"))
         measured = {} if empty else _measurable_counts_for_system(sysname, grouped_df, dv_cache)
         # Tgt: grouped 実測 (平日 ~12,330) を優先し、無ければ funnel target。
         universe_count = measured.get("Tgt")
         if universe_count is None:
             universe_count = _fnl(sysname, "Tgt")
+        if is_spy_only and (universe_count is None or universe_count > 1):
+            universe_count = 1
 
         phases_out: list[dict[str, Any]] = []
         prev_count: int | None = None
@@ -439,6 +445,10 @@ def build_pipeline_report(
             # grouped 実測を優先、無ければ signal engine funnel。
             count = grouped_count if grouped_count is not None else _fnl(sysname, name)
             measured_flag = grouped_count is not None
+            # spy_only の Tgt は funnel/grouped 由来だと共通株ユニバースになり得るので矯正。
+            if is_spy_only and name == "Tgt" and (count is None or count > 1):
+                count = 1
+                measured_flag = False
 
             phases_out.append(
                 {

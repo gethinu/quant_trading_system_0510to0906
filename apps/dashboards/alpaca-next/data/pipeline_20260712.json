@@ -370,7 +370,7 @@
           "name": "Tgt",
           "label": "Tgt",
           "condition": "ユニバース対象銘柄数",
-          "count": 6652,
+          "count": 1,
           "measured": false,
           "ratio_of_prev": null,
           "ratio_of_universe": 1.0
@@ -381,8 +381,8 @@
           "condition": "SPY 固定 (共通フィルター無し)",
           "count": 1,
           "measured": false,
-          "ratio_of_prev": 0.00015,
-          "ratio_of_universe": 0.00015
+          "ratio_of_prev": 1.0,
+          "ratio_of_universe": 1.0
         },
         {
           "name": "STUpass",

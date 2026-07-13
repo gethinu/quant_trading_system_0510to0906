@@ -432,19 +432,23 @@ def generate_candidates_system4(
             mode_date = choose_mode_date_for_latest_only(date_counter)
             if mode_date is not None:
                 df_all = df_all[df_all["date"] == mode_date]
-            df_all = df_all.sort_values("rsi4", ascending=True, kind="stable").head(
+            # STUpass (setup_predicate_count) は top_n cap の *前* に mode date 上の
+            # setup 通過全銘柄を数える。cap 後に数えると STUpass が top_n(=10) に
+            # 張り付く (dashboard funnel bug 2026-07-12)。TRDlist は従来どおり cap 後。
+            df_setup = df_all
+            df_all = df_setup.sort_values("rsi4", ascending=True, kind="stable").head(
                 top_n
             )
 
-            # Recalculate diagnostics from metadata
-            if "_setup_via" in df_all.columns:
-                via_series = df_all["_setup_via"].fillna("").astype(str)
+            # Recalculate diagnostics from metadata (pre-cap frame = df_setup)
+            if "_setup_via" in df_setup.columns:
+                via_series = df_setup["_setup_via"].fillna("").astype(str)
                 diagnostics["setup_predicate_count"] = int((via_series != "").sum())
 
                 predicate_series = (
-                    df_all["_predicate_pass"].fillna(False).astype(bool)
-                    if "_predicate_pass" in df_all.columns
-                    else pd.Series(False, index=df_all.index)
+                    df_setup["_predicate_pass"].fillna(False).astype(bool)
+                    if "_predicate_pass" in df_setup.columns
+                    else pd.Series(False, index=df_setup.index)
                 )
 
                 predicate_only_mask = (via_series != "column") & predicate_series
@@ -452,10 +456,10 @@ def generate_candidates_system4(
                     predicate_only_mask.sum()
                 )
             else:
-                diagnostics["setup_predicate_count"] = len(df_all)
+                diagnostics["setup_predicate_count"] = len(df_setup)
                 diagnostics["predicate_only_pass_count"] = 0
 
-            diagnostics["setup_unique_symbols"] = int(df_all["symbol"].nunique())
+            diagnostics["setup_unique_symbols"] = int(df_setup["symbol"].nunique())
 
             # Strip metadata before public return
             meta_cols = ["_setup_via", "_predicate_pass"]
