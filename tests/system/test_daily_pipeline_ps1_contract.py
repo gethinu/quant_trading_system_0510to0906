@@ -30,23 +30,22 @@ class TestDailyPipelineCliContract:
     """ps1 の中身から expected CLI 契約を抽出して固定する."""
 
     def test_step1_cache_command_shape(self, ps1_text: str):
-        """★ flatten bug トリガとなった step1 契約:
-        `scripts/cache_daily_polygon.py --start {Date} --end {Date}` の形態.
+        """★ step1 cache 契約: `scripts/cache_daily_polygon.py --auto-latest` の形態.
+
+        履歴: 旧契約は `--start {Date} --end {Date}` の 1 日 fetch だったが、
+        定例 06:00 JST run では「今日」が US EOD 前で Polygon 403 空振り → cache
+        exit=2 になっていた。#138 で ps1 を `--auto-latest` (full_backup 最新日の翌
+        取引日〜直近 NYSE 取引日を自動対象) に切替。この契約をここで固定する。
         """
         # 対応 python が呼ばれている
         assert (
             "scripts\\cache_daily_polygon.py" in ps1_text
             or "scripts/cache_daily_polygon.py" in ps1_text
         ), "step1 で cache_daily_polygon.py が呼ばれていない"
-        # --start / --end 両方指定
-        assert "--start" in ps1_text
-        assert "--end" in ps1_text
-        # $Date で 1 日 fetch (--start == --end 形態)
-        # NOTE: これが flatten bug のトリガだが, script 側 (_merge_with_existing_full_csv)
-        # で防御済み. その契約を明示的にここで固定する.
-        assert '"--start", $Date, "--end", $Date' in ps1_text, (
-            "1 日 fetch 形態 (--start == --end) が消失した. 変更が意図的なら "
-            "flatten regression の再チェックが必要"
+        # --auto-latest 形態 (今日固定 fetch をやめ、確定済み range を自動解決)
+        assert "--auto-latest" in ps1_text, (
+            "cache step が --auto-latest 形態でない。旧 --start/--end 形態に戻ると "
+            "06:00 JST 定例 run で当日 EOD 前 403 → cache exit=2 が再発する。"
         )
 
     def test_step2_signals_command_shape(self, ps1_text: str):

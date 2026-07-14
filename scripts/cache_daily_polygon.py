@@ -274,10 +274,105 @@ def _parse_date(s: str) -> date:
     return datetime.strptime(s, "%Y-%m-%d").date()
 
 
+def _full_backup_latest_date(settings: object, ref_symbol: str = "SPY") -> date | None:
+    """full_backup の市場基準銘柄 (既定 SPY) が保持する最新日を返す。無ければ None。"""
+    try:
+        full_dir = Path(settings.cache.full_dir)  # type: ignore[attr-defined]
+    except Exception:
+        return None
+    for name in (f"{ref_symbol}.csv", f"{ref_symbol}.parquet", f"{ref_symbol}.feather"):
+        p = full_dir / name
+        if not p.exists():
+            continue
+        try:
+            if p.suffix == ".csv":
+                df = pd.read_csv(p)
+            elif p.suffix == ".parquet":
+                df = pd.read_parquet(p)
+            else:
+                df = pd.read_feather(p)
+        except Exception:
+            continue
+        col = next((c for c in ("Date", "date", "DATE") if c in df.columns), None)
+        try:
+            if col is not None:
+                last = pd.to_datetime(df[col], errors="coerce").max()
+            else:
+                last = pd.to_datetime(df.index, errors="coerce").max()
+            if pd.isna(last):
+                continue
+            return pd.Timestamp(last).date()
+        except Exception:
+            continue
+    return None
+
+
+def resolve_auto_range(
+    settings: object, *, max_lookback_trading_days: int = 10
+) -> tuple[date, date] | None:
+    """「today 固定」でなく、実際に取得すべき確定取引日の range を決める。
+
+    start = full_backup 最新日の翌 NYSE 取引日 (gap を backfill)、
+    end   = 現時点 (システム時計) 以前の直近 NYSE 取引日。
+    end はベンダーが当日 EOD 前だと 403 を返し得るが、cache_daily は空日として
+    自動 skip するため、range に含めても害はなく、確定済みの最新日 (例 07-02) が
+    取得される。start > end (キャッシュ最新) の場合は None を返す (fetch 不要)。
+    休日・週末は NYSE カレンダーで自動的に飛ばされる。
+    max_lookback_trading_days で range 下限をガードし過剰 backfill を防ぐ。
+    """
+    from common.utils_spy import (
+        get_latest_nyse_trading_day,
+        get_next_nyse_trading_day,
+    )
+
+    now = pd.Timestamp.now(tz="America/New_York").tz_localize(None).normalize()
+    end_ts = pd.Timestamp(get_latest_nyse_trading_day(now)).normalize()
+
+    full_latest = _full_backup_latest_date(settings)
+    if full_latest is not None:
+        try:
+            start_ts = pd.Timestamp(
+                get_next_nyse_trading_day(pd.Timestamp(full_latest))
+            ).normalize()
+        except Exception:
+            start_ts = end_ts
+    else:
+        start_ts = end_ts
+
+    # 過剰 backfill ガード: end から max_lookback_trading_days 取引日より前には遡らない
+    floor_ts = end_ts
+    for _ in range(max(0, int(max_lookback_trading_days))):
+        try:
+            floor_ts = pd.Timestamp(
+                get_latest_nyse_trading_day(floor_ts - pd.Timedelta(days=1))
+            ).normalize()
+        except Exception:
+            break
+    if start_ts < floor_ts:
+        start_ts = floor_ts
+
+    if start_ts > end_ts:
+        return None
+    return start_ts.date(), end_ts.date()
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Polygon Grouped Daily backfill.")
-    p.add_argument("--start", required=True, type=_parse_date, help="start YYYY-MM-DD")
-    p.add_argument("--end", required=True, type=_parse_date, help="end YYYY-MM-DD")
+    p.add_argument(
+        "--start", type=_parse_date, help="start YYYY-MM-DD (omit with --auto-latest)"
+    )
+    p.add_argument(
+        "--end", type=_parse_date, help="end YYYY-MM-DD (omit with --auto-latest)"
+    )
+    p.add_argument(
+        "--auto-latest",
+        action="store_true",
+        help=(
+            "--start/--end を無視し、full_backup 最新日の翌取引日〜直近 NYSE 取引日を"
+            "自動で対象にする (ベンダーが当日 EOD 前で未提供な日や休日・週末は自動 skip)。"
+            "日次パイプラインが『今日』を要求して 403 で空振りするのを防ぐ。"
+        ),
+    )
     p.add_argument("--symbols", default=None, help="comma-separated symbol filter")
     p.add_argument(
         "--max-symbols", type=int, default=None, help="upper bound for symbols"
@@ -315,6 +410,23 @@ def main(argv: list[str] | None = None) -> int:
         level=args.log_level.upper(),
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
+
+    if getattr(args, "auto_latest", False):
+        from config.settings import get_settings
+
+        _settings = get_settings(create_dirs=True)
+        rng = resolve_auto_range(_settings)
+        if rng is None:
+            logger.info(
+                "auto-latest: full_backup は既に最新 (fetch 対象日なし)。skip。"
+            )
+            return 0
+        args.start, args.end = rng
+        logger.info("auto-latest: 対象 range = %s .. %s", args.start, args.end)
+    elif args.start is None or args.end is None:
+        logger.error("--start/--end は必須です (または --auto-latest を指定)")
+        return 1
+
     if args.end < args.start:
         logger.error("--end (%s) < --start (%s)", args.end, args.start)
         return 1
