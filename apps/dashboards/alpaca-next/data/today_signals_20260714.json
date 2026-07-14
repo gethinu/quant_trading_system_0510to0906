@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "date": "2026-07-14",
-  "generated_at": "2026-07-14T13:37:54+09:00",
+  "generated_at": "2026-07-14T22:53:06+09:00",
   "provider": "polygon",
   "systems": {
     "sys1": {
@@ -12,7 +12,7 @@
           "entry_price": 151.27,
           "weight": 0.0361,
           "rank": 1,
-          "reason": "ROC200が3位（全1469銘柄中）のため"
+          "reason": "ROC200が3位（全1551銘柄中）のため"
         },
         {
           "symbol": "ERAS",
@@ -20,7 +20,7 @@
           "entry_price": 17.9,
           "weight": 0.0203,
           "rank": 2,
-          "reason": "ROC200が5位（全1469銘柄中）のため"
+          "reason": "ROC200が5位（全1551銘柄中）のため"
         },
         {
           "symbol": "VEEE",
@@ -28,7 +28,7 @@
           "entry_price": 24.86,
           "weight": 0.0141,
           "rank": 3,
-          "reason": "ROC200が6位（全1469銘柄中）のため"
+          "reason": "ROC200が6位（全1551銘柄中）のため"
         },
         {
           "symbol": "SLS",
@@ -36,7 +36,7 @@
           "entry_price": 12.62,
           "weight": 0.0105,
           "rank": 4,
-          "reason": "ROC200が7位（全1469銘柄中）のため"
+          "reason": "ROC200が7位（全1551銘柄中）のため"
         },
         {
           "symbol": "SYRE",
@@ -44,7 +44,7 @@
           "entry_price": 93.73,
           "weight": 0.0168,
           "rank": 5,
-          "reason": "ROC200が9位（全1469銘柄中）のため"
+          "reason": "ROC200が9位（全1551銘柄中）のため"
         },
         {
           "symbol": "SPCX",
@@ -59,9 +59,9 @@
       "n_signals_output": 6,
       "gate_survival_ratio": 0.6,
       "funnel": {
-        "target": 5227,
-        "filter_pass": 1515,
-        "setup_pass": 686,
+        "target": 6592,
+        "filter_pass": 1602,
+        "setup_pass": 712,
         "candidate_count": 10,
         "entry_count": 6,
         "exit_count": null
@@ -134,18 +134,18 @@
           "reason": "モメンタムが強く過熱のため"
         },
         {
-          "symbol": "LYB",
+          "symbol": "NICE",
           "side": "SELL",
-          "entry_price": 58.32,
-          "weight": 0.0261,
+          "entry_price": 103.48,
+          "weight": 0.0247,
           "rank": 42,
           "reason": "モメンタムが強く過熱のため"
         },
         {
-          "symbol": "CNMD",
+          "symbol": "LYB",
           "side": "SELL",
-          "entry_price": 42.41,
-          "weight": 0.024,
+          "entry_price": 58.32,
+          "weight": 0.0243,
           "rank": 43,
           "reason": "モメンタムが強く過熱のため"
         }
@@ -154,9 +154,9 @@
       "n_signals_output": 10,
       "gate_survival_ratio": 1.0,
       "funnel": {
-        "target": 5227,
-        "filter_pass": 1539,
-        "setup_pass": 18,
+        "target": 6592,
+        "filter_pass": 1619,
+        "setup_pass": 19,
         "candidate_count": 10,
         "entry_count": 10,
         "exit_count": null
@@ -170,7 +170,7 @@
           "entry_price": 1.51,
           "weight": 0.008,
           "rank": 7,
-          "reason": "3日下落率が1位（全1072銘柄中）のため"
+          "reason": "3日下落率が1位（全1125銘柄中）のため"
         },
         {
           "symbol": "CLRO",
@@ -178,7 +178,7 @@
           "entry_price": 6.6,
           "weight": 0.0073,
           "rank": 8,
-          "reason": "3日下落率が2位（全1072銘柄中）のため"
+          "reason": "3日下落率が2位（全1125銘柄中）のため"
         },
         {
           "symbol": "RXT",
@@ -186,7 +186,7 @@
           "entry_price": 4.52,
           "weight": 0.0117,
           "rank": 9,
-          "reason": "3日下落率が6位（全1072銘柄中）のため"
+          "reason": "3日下落率が6位（全1125銘柄中）のため"
         },
         {
           "symbol": "DAIC",
@@ -194,7 +194,7 @@
           "entry_price": 1.39,
           "weight": 0.016,
           "rank": 10,
-          "reason": "3日下落率が7位（全1072銘柄中）のため"
+          "reason": "3日下落率が7位（全1125銘柄中）のため"
         },
         {
           "symbol": "NTLA",
@@ -202,7 +202,7 @@
           "entry_price": 13.02,
           "weight": 0.0252,
           "rank": 11,
-          "reason": "3日下落率が10位（全1072銘柄中）のため"
+          "reason": "3日下落率が10位（全1125銘柄中）のため"
         },
         {
           "symbol": "LESL",
@@ -210,7 +210,7 @@
           "entry_price": 5.6,
           "weight": 0.0102,
           "rank": 12,
-          "reason": "3日下落率が13位（全1072銘柄中）のため"
+          "reason": "3日下落率が13位（全1125銘柄中）のため"
         },
         {
           "symbol": "BNZI",
@@ -218,16 +218,16 @@
           "entry_price": 2.4,
           "weight": 0.0157,
           "rank": 13,
-          "reason": "3日下落率が15位（全1072銘柄中）のため"
+          "reason": "3日下落率が15位（全1125銘柄中）のため"
         }
       ],
       "n_candidates_input": 10,
       "n_signals_output": 7,
       "gate_survival_ratio": 0.7,
       "funnel": {
-        "target": 5227,
-        "filter_pass": 1073,
-        "setup_pass": 28,
+        "target": 6592,
+        "filter_pass": 1128,
+        "setup_pass": 10,
         "candidate_count": 10,
         "entry_count": 7,
         "exit_count": null
@@ -236,11 +236,19 @@
     "sys4": {
       "signals": [
         {
+          "symbol": "BTI",
+          "side": "BUY",
+          "entry_price": 58.95,
+          "weight": 0.0369,
+          "rank": 14,
+          "reason": "SPY上昇局面の押し目候補のため"
+        },
+        {
           "symbol": "MOG.A",
           "side": "BUY",
           "entry_price": 392.0,
-          "weight": 0.035,
-          "rank": 14,
+          "weight": 0.0234,
+          "rank": 15,
           "reason": "SPY上昇局面の押し目候補のため"
         },
         {
@@ -248,23 +256,31 @@
           "side": "BUY",
           "entry_price": 584.59,
           "weight": 0.0174,
-          "rank": 15,
+          "rank": 16,
           "reason": "SPY上昇局面の押し目候補のため"
         },
         {
           "symbol": "AZN",
           "side": "BUY",
           "entry_price": 169.47,
-          "weight": 0.0303,
-          "rank": 16,
+          "weight": 0.0253,
+          "rank": 17,
           "reason": "SPY上昇局面の押し目候補のため"
         },
         {
           "symbol": "HLT",
           "side": "BUY",
           "entry_price": 322.45,
-          "weight": 0.0288,
-          "rank": 17,
+          "weight": 0.0192,
+          "rank": 18,
+          "reason": "SPY上昇局面の押し目候補のため"
+        },
+        {
+          "symbol": "TEVA",
+          "side": "BUY",
+          "entry_price": 32.18,
+          "weight": 0.0249,
+          "rank": 19,
           "reason": "SPY上昇局面の押し目候補のため"
         },
         {
@@ -272,7 +288,7 @@
           "side": "BUY",
           "entry_price": 353.42,
           "weight": 0.0211,
-          "rank": 18,
+          "rank": 20,
           "reason": "SPY上昇局面の押し目候補のため"
         },
         {
@@ -280,7 +296,7 @@
           "side": "BUY",
           "entry_price": 585.64,
           "weight": 0.0175,
-          "rank": 19,
+          "rank": 21,
           "reason": "SPY上昇局面の押し目候補のため"
         },
         {
@@ -288,30 +304,14 @@
           "side": "BUY",
           "entry_price": 480.25,
           "weight": 0.0143,
-          "rank": 20,
+          "rank": 22,
           "reason": "SPY上昇局面の押し目候補のため"
         },
         {
           "symbol": "LUV",
           "side": "BUY",
           "entry_price": 47.92,
-          "weight": 0.02,
-          "rank": 21,
-          "reason": "SPY上昇局面の押し目候補のため"
-        },
-        {
-          "symbol": "BEN",
-          "side": "BUY",
-          "entry_price": 32.83,
-          "weight": 0.0186,
-          "rank": 22,
-          "reason": "SPY上昇局面の押し目候補のため"
-        },
-        {
-          "symbol": "WSM",
-          "side": "BUY",
-          "entry_price": 216.65,
-          "weight": 0.0129,
+          "weight": 0.0171,
           "rank": 23,
           "reason": "SPY上昇局面の押し目候補のため"
         }
@@ -320,9 +320,9 @@
       "n_signals_output": 10,
       "gate_survival_ratio": 1.0,
       "funnel": {
-        "target": 5227,
-        "filter_pass": 475,
-        "setup_pass": 327,
+        "target": 6592,
+        "filter_pass": 504,
+        "setup_pass": 10,
         "candidate_count": 10,
         "entry_count": 10,
         "exit_count": null
@@ -415,9 +415,9 @@
       "n_signals_output": 10,
       "gate_survival_ratio": 1.0,
       "funnel": {
-        "target": 5227,
-        "filter_pass": 1359,
-        "setup_pass": 15,
+        "target": 6592,
+        "filter_pass": 1423,
+        "setup_pass": 10,
         "candidate_count": 10,
         "entry_count": 10,
         "exit_count": null
@@ -429,8 +429,8 @@
       "n_signals_output": 0,
       "gate_survival_ratio": 0.0,
       "funnel": {
-        "target": 5227,
-        "filter_pass": 1008,
+        "target": 6592,
+        "filter_pass": 1101,
         "setup_pass": 0,
         "candidate_count": 0,
         "entry_count": 0,
@@ -443,7 +443,7 @@
       "n_signals_output": 0,
       "gate_survival_ratio": 0.0,
       "funnel": {
-        "target": 1,
+        "target": 6592,
         "filter_pass": 1,
         "setup_pass": 0,
         "candidate_count": 0,
@@ -454,14 +454,14 @@
   },
   "portfolio": {
     "total_signals": 43,
-    "total_notional_usd": 33553.98,
+    "total_notional_usd": 33555.51,
     "hedge": null,
-    "universe_target": 5227
+    "universe_target": 6592
   },
   "meta": {
     "cli_version": "0.1.0",
-    "run_id": "20260714_132227_105724",
-    "elapsed_seconds": 926.9,
+    "run_id": "20260714_223511_3239a9",
+    "elapsed_seconds": 1075.4,
     "status": "ok",
     "abort_reason": null
   }
