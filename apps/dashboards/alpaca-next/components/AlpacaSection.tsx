@@ -134,6 +134,19 @@ function EquityChart({ curve }: { curve: EquityCurve }) {
   const last = pts[pts.length - 1];
   const minIdx = equities.indexOf(yMin);
 
+  // 末尾 live 点が直近日次終値から大きく段差する場合の検出（日次終値ラグ / repricing）。
+  // 段差が通常の日次変動の中央値の 4 倍かつ $500 超なら「当日急騰」ではなく基準ずれと注記。
+  const lastReal = pts.length >= 2 ? pts[pts.length - 2] : null;
+  const tailStep = last.live && lastReal ? last.equity - lastReal.equity : 0;
+  const dailyMoves = pts
+    .filter((p) => p.pl != null)
+    .map((p) => Math.abs(p.pl as number))
+    .sort((m, n) => m - n);
+  const medMove = dailyMoves.length
+    ? dailyMoves[Math.floor(dailyMoves.length / 2)]
+    : 0;
+  const tailOutlier = Math.abs(tailStep) > Math.max(500, medMove * 4);
+
   const nLabels = 4;
   const xLabels = Array.from({ length: nLabels }, (_, k) => {
     const i = Math.round((k / (nLabels - 1)) * (pts.length - 1));
@@ -167,6 +180,12 @@ function EquityChart({ curve }: { curve: EquityCurve }) {
           <span className="text-fail">最大DD {fmtPct(curve.max_drawdown_pct)}</span>
         </span>
       </div>
+      {tailOutlier ? (
+        <div className="mb-1 text-[10px] leading-snug text-warn/90">
+          ⚠ 末尾はライブ equity。直近日次終値との段差 {fmtSignedUsd(tailStep)} は
+          日次終値ラグ由来（当日の急騰ではありません）。
+        </div>
+      ) : null}
       <div className="relative">
         <svg
           viewBox={`0 0 ${W} ${H}`}
@@ -653,11 +672,20 @@ function PositionsTable({ positions }: { positions: AlpacaPosition[] }) {
                   <td className="py-1.5 px-1.5">
                     <div className="flex items-center gap-1.5">
                       <span
-                        className={`inline-block w-1.5 h-1.5 rounded-full ${
-                          isLong ? 'bg-ok' : 'bg-fail'
-                        }`}
-                        title={isLong ? 'long' : 'short'}
-                      />
+                        className="inline-flex items-center justify-center w-4 h-4 rounded text-[9px] font-bold leading-none"
+                        style={
+                          isLong
+                            ? { color: '#38bdf8', backgroundColor: '#38bdf822' }
+                            : { color: '#fbbf24', backgroundColor: '#fbbf2422' }
+                        }
+                        title={
+                          isLong
+                            ? 'Long — 買い持ち（価格上昇で利益）'
+                            : 'Short — 売り持ち（価格上昇で損失。AVG→NOW 上昇＝赤字は正常）'
+                        }
+                      >
+                        {isLong ? 'L' : 'S'}
+                      </span>
                       <span className="font-medium">{p.symbol}</span>
                     </div>
                   </td>
@@ -752,6 +780,21 @@ export function AlpacaSection({ payload }: { payload: AlpacaSnapshot | null }) {
   const s = payload.summary;
   const up = (a.pnl_today_abs ?? 0) >= 0;
 
+  // 「今日」ヘッドライン (= equity − last_equity) の内訳検証。
+  // 保有ポジションの当日値洗い合計 (intraday_pl) と大きく乖離する場合は、
+  // last_equity(前日クローズ) が実質 equity より低く据え置かれた日次終値ラグの
+  // 疑い（データ凍結期の値洗い/repricing アーティファクト）。
+  const heldTodayMove = payload.positions.reduce(
+    (acc, p) => acc + (p.intraday_pl ?? 0),
+    0,
+  );
+  const todayAbs = a.pnl_today_abs ?? 0;
+  const residual = todayAbs - heldTodayMove;
+  const baselineSuspect =
+    Math.abs(a.pnl_today_pct ?? 0) >= 1.5 &&
+    Math.abs(heldTodayMove) < Math.abs(todayAbs) * 0.5 &&
+    Math.abs(residual) > 500;
+
   return (
     <div className="space-y-4">
       {/* hero: equity + today's P&L */}
@@ -785,12 +828,41 @@ export function AlpacaSection({ payload }: { payload: AlpacaSnapshot | null }) {
               className={`px-1.5 py-0.5 rounded font-medium ${
                 up ? 'bg-ok/15 text-ok' : 'bg-fail/15 text-fail'
               }`}
+              title={`今日 = 現在の equity − 前営業日クローズ equity (last_equity ${fmtUsd(
+                a.last_equity,
+                0,
+              )})`}
             >
               {fmtSignedUsd(a.pnl_today_abs)} ({fmtPct(a.pnl_today_pct)})
             </span>
-            <span className="text-muted">今日</span>
+            <span className="text-muted">
+              今日 <span className="text-muted/60 text-[11px]">vs 前日クローズ</span>
+            </span>
+            {baselineSuspect ? (
+              <span
+                className="text-warn text-xs cursor-help"
+                title="前日クローズ(last_equity)が実質 equity より低く据え置かれた日次終値ラグの疑い。下の注記を参照。"
+              >
+                ⚠
+              </span>
+            ) : null}
           </div>
         </div>
+
+        {baselineSuspect ? (
+          <div className="mb-3 rounded-lg border border-warn/25 bg-warn/[0.06] px-3 py-2 text-[11px] leading-relaxed text-muted">
+            <span className="text-warn font-medium">
+              ⚠ 「今日 {fmtSignedUsd(todayAbs)}」は当日の実損益ではなく基準ずれの可能性。
+            </span>{' '}
+            保有ポジションの当日値洗い (intraday) は{' '}
+            <span className={pnlText(heldTodayMove)}>{fmtSignedUsd(heldTodayMove)}</span>{' '}
+            のみ。ヘッドラインとの差{' '}
+            <span className="text-cardfg">{fmtSignedUsd(residual)}</span>{' '}
+            は前日クローズ (last_equity {fmtUsd(a.last_equity, 0)}) を基準にした差で、
+            Alpaca の日次終値が実質 equity ({fmtUsd(a.equity, 0)}) より低く据え置かれている場合に生じます
+            （データ凍結期の値洗いラグ由来。日次終値が更新されれば解消）。
+          </div>
+        ) : null}
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           <Kpi label="現金" value={fmtUsd(a.cash, 0)} />
