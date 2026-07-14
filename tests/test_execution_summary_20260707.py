@@ -14,7 +14,11 @@ from common.publishers.execution_summary import (  # noqa: E402
     build_title,
     format_execution_summary,
 )
-from common.publishers.ntfy import _sanitize_ascii_title  # noqa: E402
+from common.publishers.ntfy import (  # noqa: E402
+    NtfyPublisher,
+    _latin1_safe_headers,
+    _sanitize_ascii_title,
+)
 
 
 def _recon() -> dict:
@@ -117,3 +121,62 @@ def test_format_returns_tuple():
     title, body = format_execution_summary(_recon())
     assert isinstance(title, str) and isinstance(body, str)
     assert title and body
+
+
+def test_latin1_safe_headers_strips_emoji_title():
+    """emoji 入り X-Title は latin-1 エンコード可能に落とされること。
+
+    2026-07-13 regression: build_title は「⚠️ 07-13 exec …」のように先頭 emoji を
+    付ける。HTTP ヘッダーは latin-1 encode されるため、この title を素で
+    requests に渡すと 'latin-1' codec can't encode で送信が丸ごと失敗する。
+    """
+    title = build_title(_recon())  # entry_failed=1 → "⚠️ …"
+    # 素の title は latin-1 に載らない (バグの前提を固定)
+    import pytest
+
+    with pytest.raises(UnicodeEncodeError):
+        title.encode("latin-1")
+
+    safe = _latin1_safe_headers({"X-Title": title, "X-Tags": "bar_chart,warning"})
+    # 落とした後は latin-1 でエンコードでき、count 情報は残る
+    safe["X-Title"].encode("latin-1")  # raises しない
+    assert "sig49" in safe["X-Title"]
+    assert "entry27" in safe["X-Title"]
+    assert "exit14" in safe["X-Title"]
+    # ASCII tags はそのまま
+    assert safe["X-Tags"] == "bar_chart,warning"
+
+
+def test_send_text_emoji_title_does_not_raise(monkeypatch):
+    """send_text が emoji title でも例外を投げず ntfy へ POST できること。
+
+    修正前は requests.post のヘッダー encode で latin-1 例外が漏れ、
+    exec summary 通知が 4 retry 全滅していた (open_auto_run 2026-07-13)。
+    """
+    captured: dict = {}
+
+    class _Resp:
+        status_code = 200
+        text = "ok"
+
+    def _fake_post(url, data=None, headers=None, timeout=None):
+        # requests 本来の latin-1 ヘッダー encode を再現し、非 latin-1 が
+        # 残っていれば例外を投げる (= バグが再発したらここで落ちる)。
+        for value in (headers or {}).values():
+            str(value).encode("latin-1")
+        captured["headers"] = headers
+        captured["url"] = url
+        return _Resp()
+
+    import requests
+
+    monkeypatch.setattr(requests, "post", _fake_post)
+
+    pub = NtfyPublisher(topic="unit-test-topic")
+    title, body = format_execution_summary(_recon())  # title に emoji を含む
+    result = pub.send_text(title, body, tags="bar_chart,warning")
+
+    assert result.ok is True
+    assert result.status_code == 200
+    # POST に渡った X-Title は latin-1 safe
+    captured["headers"]["X-Title"].encode("latin-1")
