@@ -2500,6 +2500,27 @@ def _prepare_symbol_universe(
                 except Exception:
                     pass
 
+    # 2026-07-13: base universe を US 普通株 (Polygon type=CS) のみに絞る。
+    # 従来の pattern filter (is_common_stock_symbol) は dotted-suffix (FOO.W)
+    # しか弾けず、concatenated-suffix の実データ (FOOW) をほぼ素通しにしていたため
+    # base universe が ETF (~42%)/ADR/優先株/warrant 等で ~26-58% 汚染されていた。
+    # SPY は System7 ヘッジ用にこの直後で温存される。架空銘柄モードでは適用しない。
+    # CS セット取得不能時は pattern フォールバック (universe を潰さず現状動作を維持)。
+    if getattr(ctx, "test_mode", None) != "test_symbols":
+        try:
+            from common.symbol_universe import filter_to_common_stock
+
+            _pre_cs = len(symbols)
+            symbols = filter_to_common_stock(
+                symbols, settings=getattr(ctx, "settings", None)
+            )
+            _log(
+                f"🧮 普通株フィルタ (Polygon type=CS): {_pre_cs} → {len(symbols)} "
+                "銘柄 (ETF/ADR/優先株等を除外・SPYは温存)"
+            )
+        except Exception as exc:  # noqa: BLE001
+            _log(f"⚠️ 普通株フィルタをスキップ (エラー): {exc}")
+
     # Ensure SPY is the first symbol in today's universe (required by some systems)
     try:
         symbols = [s.upper() for s in symbols]

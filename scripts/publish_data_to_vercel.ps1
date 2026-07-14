@@ -150,9 +150,42 @@ if ($NoPush) {
     exit 0
 }
 
-& git push origin $Branch 2>&1 | ForEach-Object { Write-Log $_ }
-if ($LASTEXITCODE -ne 0) {
-    Write-Log "ERROR: git push 失敗 (exit=$LASTEXITCODE)"
+# 2026-07-14 fix (root cause B): local $Branch が origin より遅れていると push が
+# non-fast-forward で reject され、data commit は溜まる一方で Vercel には永遠に届かず
+# ダッシュが凍結する (07-12 で停止していた原因)。しかも daily_main_follow は
+# generate 側の exit code しか見ないため「push 失敗」が silent に握り潰されていた。
+# 対策: push が失敗したら fetch + rebase (autostash で dirty tree を退避) して origin
+# 先頭に data commit を載せ替え、1 回だけ retry する。それでも駄目なら LOUD に fail。
+function Invoke-PushWithRebaseHeal {
+    & git push origin $Branch 2>&1 | ForEach-Object { Write-Log $_ }
+    if ($LASTEXITCODE -eq 0) { return $true }
+
+    Write-Log "WARN: push rejected (likely non-fast-forward). fetch + rebase-onto-origin で自己修復を試行。"
+    & git fetch origin $Branch 2>&1 | ForEach-Object { Write-Log $_ }
+    # autostash で未コミット作業ツリーを退避しつつ、ローカルの data commit を origin 先頭へ rebase。
+    & git -c rebase.autostash=true rebase "origin/$Branch" 2>&1 | ForEach-Object { Write-Log $_ }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Log "ERROR: rebase 失敗 (conflict?)。abort して手動対応が必要。"
+        & git rebase --abort 2>&1 | ForEach-Object { Write-Log $_ }
+        return $false
+    }
+    Write-Log "rebase 成功。origin 先頭へ載せ替え済み。push を retry。"
+    & git push origin $Branch 2>&1 | ForEach-Object { Write-Log $_ }
+    return ($LASTEXITCODE -eq 0)
+}
+
+if (-not (Invoke-PushWithRebaseHeal)) {
+    Write-Log "ERROR: git push 失敗 (self-heal 後も未 push)。ダッシュボードは更新されません。"
+    # LOUD 通知: silent success を避ける。NTFY_TOPIC があれば WARN を飛ばす。
+    if ($env:NTFY_TOPIC) {
+        $base = if ($env:NTFY_URL) { $env:NTFY_URL.TrimEnd('/') } else { "https://ntfy.sh" }
+        try {
+            $h = @{ "X-Title" = "publish_data PUSH FAIL $Date"; "X-Priority" = "5"; "X-Tags" = "warning" }
+            Invoke-RestMethod -Uri "$base/$($env:NTFY_TOPIC)" -Method Post -Headers $h `
+                -Body "dashboard data push failed (non-FF/self-heal exhausted): $Branch $Date" | Out-Null
+        }
+        catch { Write-Log "ntfy WARN 送信失敗: $_" }
+    }
     exit 1
 }
 

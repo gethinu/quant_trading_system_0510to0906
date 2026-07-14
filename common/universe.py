@@ -14,9 +14,11 @@ def build_universe_from_cache(
     min_dollar_vol: float = 25_000_000.0,
     limit: int | None = 2000,
     prefer_base: bool = True,
+    common_only: bool = True,
 ) -> list[str]:
     """data_cache から最新行の Close と DollarVolume50 を見てユニバースを構築。
     prefer_base=True の場合は data_cache/base/*.csv を優先。
+    common_only=True の場合は US 普通株 (Polygon type=CS) のみに絞る (SPY は温存)。
     """
     settings = get_settings(create_dirs=True)
     cache_dir = Path(settings.DATA_CACHE_DIR)
@@ -53,6 +55,15 @@ def build_universe_from_cache(
             continue
         if limit and len(symbols) >= int(limit):
             break
+    # 2026-07-13: US 普通株のみに絞る (Polygon type=CS を正とする)。SPY は
+    # System7 ヘッジ用に温存。CS セット取得不能時は pattern フォールバック。
+    if common_only:
+        try:
+            from common.symbol_universe import filter_to_common_stock
+
+            symbols = filter_to_common_stock(symbols)
+        except Exception:
+            pass
     # 代表ETFを先頭に残す
     out = list(dict.fromkeys(["SPY"] + [s for s in symbols if s != "SPY"]))
     return out
@@ -120,10 +131,14 @@ def get_all_symbols_from_cache(cache_dir: str | Path | None = None) -> list[str]
 
 
 def save_universe_from_cache(
-    cache_dir: str | Path | None = None, out_path: str | Path | None = None
+    cache_dir: str | Path | None = None,
+    out_path: str | Path | None = None,
+    *,
+    common_only: bool = True,
 ) -> str:
     """
     data_cache フォルダ内の全CSVファイル名（拡張子除く）を universe_auto.txt に保存する。
+    common_only=True の場合は US 普通株 (Polygon type=CS) のみに絞る (SPY は温存)。
     """
     if cache_dir is None:
         settings = get_settings(create_dirs=True)
@@ -131,6 +146,13 @@ def save_universe_from_cache(
     else:
         cache_dir = Path(cache_dir)
     symbols = [f.stem.upper() for f in cache_dir.glob("*.csv") if f.is_file()]
+    if common_only:
+        try:
+            from common.symbol_universe import filter_to_common_stock
+
+            symbols = filter_to_common_stock(symbols)
+        except Exception:
+            pass
     # 代表ETFを先頭に
     out_syms = list(dict.fromkeys(["SPY"] + [s for s in symbols if s != "SPY"]))
     if out_path is None:

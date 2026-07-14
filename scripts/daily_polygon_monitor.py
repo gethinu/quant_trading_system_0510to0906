@@ -138,23 +138,33 @@ def fetch_grouped_daily(target_date: str) -> Any:
 
 
 def apply_common_stock_filter(grouped_df: Any) -> Any:
-    """grouped_df の index (symbol) を common stock pattern で絞り込む.
+    """grouped_df の index (symbol) を US 普通株 (Polygon type=CS) に絞り込む.
 
-    2026-07-02 hygiene: Polygon Grouped Daily は preferred/warrant/unit/rights
-    まで全部返す (~12,445 銘柄). trading universe (~6,981) と揃えるため
-    ここで pattern filter を適用する.
+    2026-07-13: 従来の pattern filter (is_common_stock_symbol) は dotted-suffix
+    (FOO.W) しか弾けず、concatenated-suffix の実データ (FOOW) をほぼ素通しに
+    していたため ETF (~42%)/ADR/優先株/warrant がユニバースに残っていた。
+    Polygon reference API (type=CS) を正とし、SPY (System7 ヘッジ) は温存する。
+    CS セット取得不能時は従来の pattern filter にフォールバック。
     """
     if grouped_df is None or getattr(grouped_df, "empty", True):
         return grouped_df
-    from common.symbol_universe import is_common_stock_symbol
+    from common.symbol_universe import get_common_stock_set, is_common_stock_symbol
 
     try:
         raw_n = int(getattr(grouped_df, "shape", [0])[0])
-        mask = [is_common_stock_symbol(sym) for sym in grouped_df.index]
+        cs_set = get_common_stock_set()
+        if cs_set:
+            keep = cs_set | {"SPY"}
+            mask = [str(sym).upper() in keep for sym in grouped_df.index]
+            mode = "Polygon type=CS"
+        else:
+            mask = [is_common_stock_symbol(sym) for sym in grouped_df.index]
+            mode = "pattern fallback"
         filtered = grouped_df[mask]
         kept = int(getattr(filtered, "shape", [0])[0])
         logger.info(
-            "universe filter: %d -> %d (common stock only, %d dropped)",
+            "universe filter (%s): %d -> %d (%d dropped)",
+            mode,
             raw_n,
             kept,
             raw_n - kept,
