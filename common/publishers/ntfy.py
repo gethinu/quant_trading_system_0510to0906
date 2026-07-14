@@ -116,6 +116,37 @@ def _sanitize_ascii_title(title: str) -> str:
     return out[:_TITLE_LIMIT]
 
 
+def _latin1_safe_headers(headers: dict[str, str]) -> dict[str, str]:
+    """HTTP ヘッダー値を latin-1 エンコード可能に落とす最終防波堤。
+
+    requests / urllib3 は HTTP ヘッダーを latin-1 でエンコードする。X-Title に
+    emoji 等の非 latin-1 文字が入ると ``requests.post`` が
+    ``'latin-1' codec can't encode`` を投げ、ntfy 送信が丸ごと失敗する。
+
+    2026-07-13 incident: open_auto_run の exec summary が title
+    「⚠️ 07-13 exec …」(先頭 emoji) で 4 retry 全滅し、通知が無音で消えた。
+    ``_sanitize_ascii_title`` は仕様上 emoji を保持する (build_title の
+    📊/⚠️ を残す) ため、送信直前のこの層で非 latin-1 文字を落とす。emoji の
+    視覚情報は X-Tags (shortcode = bar_chart/warning) 側が担うので、title から
+    emoji が落ちても通知アイコンは維持される。
+
+    非 latin-1 を含む値は印字可能 ASCII (0x20-0x7E) のみへ絞り、空白を圧縮する
+    (制御文字・改行はヘッダーに不正なため除外)。空になったら "notification"。
+    """
+    safe: dict[str, str] = {}
+    for key, value in headers.items():
+        s = str(value)
+        try:
+            s.encode("latin-1")
+            safe[key] = s
+            continue
+        except UnicodeEncodeError:
+            kept = "".join(ch for ch in s if 0x20 <= ord(ch) <= 0x7E)
+            cleaned = " ".join(kept.split())
+            safe[key] = cleaned or "notification"
+    return safe
+
+
 def _mask_topic(topic: str | None) -> str:
     """Return an unguessable-shape but useful-in-logs marker for the ntfy topic.
 
@@ -274,6 +305,10 @@ class NtfyPublisher(Publisher):
             )
 
         import requests
+
+        # 最終防波堤: 非 latin-1 (emoji 等) が X-Title に残っていると requests が
+        # ヘッダー encode で例外を投げ、送信が丸ごと落ちる (2026-07-13 incident)。
+        headers = _latin1_safe_headers(headers)
 
         last_detail = ""
         last_status: int | None = None
