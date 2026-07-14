@@ -320,10 +320,7 @@ def resolve_auto_range(
     休日・週末は NYSE カレンダーで自動的に飛ばされる。
     max_lookback_trading_days で range 下限をガードし過剰 backfill を防ぐ。
     """
-    from common.utils_spy import (
-        get_latest_nyse_trading_day,
-        get_next_nyse_trading_day,
-    )
+    from common.utils_spy import get_latest_nyse_trading_day, get_next_nyse_trading_day
 
     now = pd.Timestamp.now(tz="America/New_York").tz_localize(None).normalize()
     end_ts = pd.Timestamp(get_latest_nyse_trading_day(now)).normalize()
