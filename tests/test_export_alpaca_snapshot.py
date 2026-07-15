@@ -158,6 +158,81 @@ def test_latest_json_numeric_ordering(tmp_path):
     assert latest.name == "alpaca_snapshot_20260709.json"
 
 
+# --- freeze-aware today baseline (pure) -----------------------------------
+# 実データ (2026-07-14 snapshot / live probe) の値で回帰を固定する。
+_FREEZE = dict(
+    equity=106024.72,  # 07-14 snapshot equity (実勢)
+    last_equity=101812.81,  # 07-13 daily-close (凍結ラグで低く据え置き)
+    prev_intraday=105825.56,  # 07-13 intraday 最終 (実勢, 1H/ext 実測)
+)
+
+
+def test_baseline_freeze_lag_switches_to_intraday():
+    """凍結ラグ日: daily-close が intraday より ~$4,013 低い → intraday 基準に補正。
+
+    phantom (+$4,211 / +4.14%) が消え、実勢の小さな当日差になること。
+    """
+    baseline, basis, gap = ex.resolve_today_baseline(
+        _FREEZE["equity"], _FREEZE["last_equity"], _FREEZE["prev_intraday"]
+    )
+    assert basis == "freeze_adjusted"
+    assert baseline == pytest.approx(105825.56, abs=0.01)
+    assert gap == pytest.approx(105825.56 - 101812.81, abs=0.01)  # +4012.75
+    # 補正後の当日 P&L は phantom($4,211)でなく実勢(~$199, <0.3%)
+    adj_abs = round(_FREEZE["equity"] - baseline, 2)
+    adj_pct = round((_FREEZE["equity"] - baseline) / baseline * 100.0, 3)
+    assert adj_abs == pytest.approx(199.16, abs=0.01)
+    assert abs(adj_pct) < 0.3
+    # raw(未補正)は依然 phantom を示す (透明性)
+    raw_pct = (
+        (_FREEZE["equity"] - _FREEZE["last_equity"]) / _FREEZE["last_equity"] * 100
+    )
+    assert raw_pct == pytest.approx(4.137, abs=0.01)
+
+
+def test_baseline_normal_day_unchanged():
+    """平常日 (intraday ≈ daily-close): last_equity 基準のまま挙動不変。"""
+    # 前日 intraday が daily-close とほぼ一致 (乖離 $12 = 閾値未満)
+    baseline, basis, gap = ex.resolve_today_baseline(
+        equity=101200.0, last_equity=101000.0, prev_intraday_equity=101012.0
+    )
+    assert basis == "last_equity"
+    assert baseline == 101000.0
+    assert gap is None
+
+
+def test_baseline_no_intraday_falls_back():
+    """intraday 取得不可 (None) → last_equity 基準に安全 fallback。"""
+    baseline, basis, gap = ex.resolve_today_baseline(
+        equity=106000.0, last_equity=101800.0, prev_intraday_equity=None
+    )
+    assert basis == "last_equity"
+    assert baseline == 101800.0
+    assert gap is None
+
+
+def test_baseline_threshold_pct_gate():
+    """乖離が equity 比 1% 未満なら補正しない (境界)。"""
+    eq = 100000.0
+    # gap = $900 (<$1000 かつ <1%) → 補正なし
+    _, basis_lo, _ = ex.resolve_today_baseline(eq, 100000.0, 100900.0)
+    assert basis_lo == "last_equity"
+    # gap = $1500 (>$1000 かつ >1%) → 補正
+    _, basis_hi, _ = ex.resolve_today_baseline(eq, 100000.0, 101500.0)
+    assert basis_hi == "freeze_adjusted"
+
+
+def test_baseline_missing_equity_is_safe():
+    """equity / last_equity が欠損でも例外を出さず last_equity 基準を返す。"""
+    assert ex.resolve_today_baseline(None, 101000.0, 105000.0)[1] == "last_equity"
+    assert ex.resolve_today_baseline(106000.0, None, 105000.0) == (
+        None,
+        "last_equity",
+        None,
+    )
+    assert ex.resolve_today_baseline(106000.0, 0.0, 105000.0)[1] == "last_equity"
+
+
 # --- ledger reconciliation (pure) -----------------------------------------
 def test_ledger_recon_all_consistent():
     """position が台帳ネットと一致すれば desync_free、mismatch 0。"""
