@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
+from decimal import ROUND_HALF_UP, Decimal
 import json
 import logging
 import math
@@ -65,6 +66,51 @@ TIER_NOTIONAL_USD: dict[str, float] = {
 def resolve_tier_notional(tier: str) -> float:
     key = (tier or "").strip().lower()
     return TIER_NOTIONAL_USD.get(key, TIER_NOTIONAL_USD["small"])
+
+
+# -----------------------------------------------------------------------
+# price tick rounding (Alpaca sub-penny guard)
+# -----------------------------------------------------------------------
+#
+# Alpaca は US equity の limit / stop 価格に「最小刻み (tick)」制約を課す:
+#   - price >= $1.00  ->  $0.01 刻み (小数2桁)
+#   - price <  $1.00  ->  $0.0001 刻み (小数4桁)
+# これに反する sub-penny 価格 (>=$1 なのに小数3桁以上) を native limit/stop で
+# 発注すると ``sub-penny increment does not fulfill minimum pricing criteria``
+# (code 42210000) で全拒否される。
+#
+# 従来の native protection order 生成は stop/target を一律 ``round(price, 4)``
+# して発注していたため、>=$1 銘柄 (例: BABA 109.4519 / GSHD 52.0288) の
+# stop/target が 4桁のまま code 42210000 で reject され resting 保護が置けなか
+# った。native limit/stop 価格を Alpaca へ渡す前に必ず本ヘルパーを通すこと。
+#
+# NOTE: 端株 (fractional) の synthetic 保護 exit は order_type="market" であり
+# stop_price/limit_price は audit 用フィールドに過ぎない (Alpaca は成行の価格を
+# 無視する)。よって synthetic 側の丸めは本 tick 制約の対象外で、端株の挙動は
+# 変えない (端株の native stop 不可対応は別管轄)。
+_TICK_ABOVE_1 = Decimal("0.01")
+_TICK_BELOW_1 = Decimal("0.0001")
+
+
+def round_to_alpaca_tick(price: float | None) -> float | None:
+    """native stop / limit 価格を Alpaca の最小 tick に丸める (nearest tick)。
+
+    Alpaca tick ルール:
+        price >= $1.00 -> $0.01   (小数2桁)
+        price <  $1.00 -> $0.0001 (小数4桁)
+
+    - ``ROUND_HALF_UP`` (最寄り tick) で丸めるので stop/target が意図した水準
+      からずれない (最大でも 0.5 tick)。方向丸めはしない。
+    - ``None`` / 非正 (<=0) の入力はそのまま返す (caller 側で下限を別途 guard 済)。
+    """
+    if price is None:
+        return None
+    p = float(price)
+    if p <= 0:
+        # long stop は max(0.01, ...) 等で caller が下限保証済。負値・0 は触らない。
+        return p
+    tick = _TICK_ABOVE_1 if p >= 1.0 else _TICK_BELOW_1
+    return float(Decimal(str(p)).quantize(tick, rounding=ROUND_HALF_UP))
 
 
 # =========================================================================
@@ -619,7 +665,10 @@ def signals_to_orders(
             raw_px = row.get("entry_price")
             try:
                 if raw_px not in (None, ""):
-                    limit_price = float(raw_px)
+                    # sub-penny guard: >=$1 の limit entry を小数4桁のまま
+                    # 発注すると Alpaca が code 42210000 で拒否するため、native
+                    # protection order と同じ tick ルールで丸める。
+                    limit_price = round_to_alpaca_tick(float(raw_px))
             except (TypeError, ValueError):
                 limit_price = None
             if limit_price is None:
@@ -1565,7 +1614,7 @@ def _build_protection_orders(
                     order_type="stop",
                     reason=ExitReasonCode.PROTECT_STOP,
                     entry_date=snap.entry_date,
-                    stop_price=round(stop_price, 4),
+                    stop_price=round_to_alpaca_tick(stop_price),
                     client_order_id=coid,
                     dry_run=True,
                     time_in_force="gtc",
@@ -1589,7 +1638,7 @@ def _build_protection_orders(
                     order_type="limit",
                     reason=ExitReasonCode.PROTECT_TARGET,
                     entry_date=snap.entry_date,
-                    limit_price=round(target_price, 4),
+                    limit_price=round_to_alpaca_tick(target_price),
                     client_order_id=coid,
                     dry_run=True,
                     time_in_force="gtc",
