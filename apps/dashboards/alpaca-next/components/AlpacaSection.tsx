@@ -780,20 +780,23 @@ export function AlpacaSection({ payload }: { payload: AlpacaSnapshot | null }) {
   const s = payload.summary;
   const up = (a.pnl_today_abs ?? 0) >= 0;
 
-  // 「今日」ヘッドライン (= equity − last_equity) の内訳検証。
-  // 保有ポジションの当日値洗い合計 (intraday_pl) と大きく乖離する場合は、
-  // last_equity(前日クローズ) が実質 equity より低く据え置かれた日次終値ラグの
-  // 疑い（データ凍結期の値洗い/repricing アーティファクト）。
+  // freeze-aware baseline の provenance (新 exporter)。pnl_today_abs/pct は補正後の値。
+  const basis = a.pnl_today_basis ?? null;
+  const isFreezeAdjusted = basis === 'freeze_adjusted';
+  const hasProvenance = basis != null;
+
+  // legacy: provenance を持たない旧 snapshot 用の凍結ラグ検出（後方互換の保険）。
+  // 保有ポジションの当日値洗い合計 (intraday_pl) とヘッドラインが大きく乖離すれば疑い。
   const heldTodayMove = payload.positions.reduce(
     (acc, p) => acc + (p.intraday_pl ?? 0),
     0,
   );
   const todayAbs = a.pnl_today_abs ?? 0;
-  const residual = todayAbs - heldTodayMove;
-  const baselineSuspect =
+  const legacySuspect =
+    !hasProvenance &&
     Math.abs(a.pnl_today_pct ?? 0) >= 1.5 &&
     Math.abs(heldTodayMove) < Math.abs(todayAbs) * 0.5 &&
-    Math.abs(residual) > 500;
+    Math.abs(todayAbs - heldTodayMove) > 500;
 
   return (
     <div className="space-y-4">
@@ -828,17 +831,37 @@ export function AlpacaSection({ payload }: { payload: AlpacaSnapshot | null }) {
               className={`px-1.5 py-0.5 rounded font-medium ${
                 up ? 'bg-ok/15 text-ok' : 'bg-fail/15 text-fail'
               }`}
-              title={`今日 = 現在の equity − 前営業日クローズ equity (last_equity ${fmtUsd(
-                a.last_equity,
-                0,
-              )})`}
+              title={
+                isFreezeAdjusted
+                  ? `今日 = 現在の equity − 前営業日 intraday equity (${fmtUsd(
+                      a.pnl_today_baseline,
+                      0,
+                    )})。日次終値ラグを補正した基準。`
+                  : `今日 = 現在の equity − 前営業日クローズ equity (last_equity ${fmtUsd(
+                      a.last_equity,
+                      0,
+                    )})`
+              }
             >
               {fmtSignedUsd(a.pnl_today_abs)} ({fmtPct(a.pnl_today_pct)})
             </span>
             <span className="text-muted">
-              今日 <span className="text-muted/60 text-[11px]">vs 前日クローズ</span>
+              今日{' '}
+              <span className="text-muted/60 text-[11px]">
+                {isFreezeAdjusted
+                  ? 'vs 前営業日 equity · freeze-adjusted'
+                  : 'vs 前日クローズ'}
+              </span>
             </span>
-            {baselineSuspect ? (
+            {isFreezeAdjusted ? (
+              <span
+                className="text-xs cursor-help"
+                style={{ color: '#38bdf8' }}
+                title="日次終値ラグを検出し、前営業日の intraday 整合 equity を基準に補正済み。生の基準値は下の注記。"
+              >
+                ℹ
+              </span>
+            ) : legacySuspect ? (
               <span
                 className="text-warn text-xs cursor-help"
                 title="前日クローズ(last_equity)が実質 equity より低く据え置かれた日次終値ラグの疑い。下の注記を参照。"
@@ -849,7 +872,28 @@ export function AlpacaSection({ payload }: { payload: AlpacaSnapshot | null }) {
           </div>
         </div>
 
-        {baselineSuspect ? (
+        {isFreezeAdjusted ? (
+          <div
+            className="mb-3 rounded-lg border px-3 py-2 text-[11px] leading-relaxed text-muted"
+            style={{ borderColor: '#38bdf840', backgroundColor: '#38bdf80f' }}
+          >
+            <span className="font-medium" style={{ color: '#7dd3fc' }}>
+              ℹ 日次終値ラグを補正しました（freeze-adjusted）。
+            </span>{' '}
+            生の daily-close 基準（last_equity {fmtUsd(a.last_equity, 0)}）だと{' '}
+            <span className="text-cardfg">
+              {fmtSignedUsd(a.pnl_today_abs_raw)} ({fmtPct(a.pnl_today_pct_raw)})
+            </span>{' '}
+            の phantom になりますが、前営業日クローズが実勢より{' '}
+            <span className="text-cardfg">{fmtSignedUsd(a.freeze_lag_gap)}</span>{' '}
+            低く据え置かれていたため、前営業日の intraday equity（
+            {fmtUsd(a.pnl_today_baseline, 0)}）を基準に補正 →{' '}
+            <span className={pnlText(a.pnl_today_abs)}>
+              {fmtSignedUsd(a.pnl_today_abs)} ({fmtPct(a.pnl_today_pct)})
+            </span>{' '}
+            が実勢の当日 P&amp;L。equity・保有・unrealized 等の実報告値は不変。
+          </div>
+        ) : legacySuspect ? (
           <div className="mb-3 rounded-lg border border-warn/25 bg-warn/[0.06] px-3 py-2 text-[11px] leading-relaxed text-muted">
             <span className="text-warn font-medium">
               ⚠ 「今日 {fmtSignedUsd(todayAbs)}」は当日の実損益ではなく基準ずれの可能性。
@@ -857,7 +901,7 @@ export function AlpacaSection({ payload }: { payload: AlpacaSnapshot | null }) {
             保有ポジションの当日値洗い (intraday) は{' '}
             <span className={pnlText(heldTodayMove)}>{fmtSignedUsd(heldTodayMove)}</span>{' '}
             のみ。ヘッドラインとの差{' '}
-            <span className="text-cardfg">{fmtSignedUsd(residual)}</span>{' '}
+            <span className="text-cardfg">{fmtSignedUsd(todayAbs - heldTodayMove)}</span>{' '}
             は前日クローズ (last_equity {fmtUsd(a.last_equity, 0)}) を基準にした差で、
             Alpaca の日次終値が実質 equity ({fmtUsd(a.equity, 0)}) より低く据え置かれている場合に生じます
             （データ凍結期の値洗いラグ由来。日次終値が更新されれば解消）。

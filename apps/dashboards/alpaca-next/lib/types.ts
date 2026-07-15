@@ -112,6 +112,16 @@ export interface AlpacaAccount {
   short_market_value: number | null;
   pnl_today_abs: number | null;
   pnl_today_pct: number | null;
+  /** freeze-aware baseline の provenance (新 exporter のみ; 旧 snapshot では欠落)。
+   *  pnl_today_abs/pct は基準補正後の値。raw は補正前 (daily-close 基準)。 */
+  pnl_today_abs_raw?: number | null;
+  pnl_today_pct_raw?: number | null;
+  /** "last_equity" (平常) | "freeze_adjusted" (凍結ラグ補正)。 */
+  pnl_today_basis?: string | null;
+  /** pnl_today の差の基準に使った equity。 */
+  pnl_today_baseline?: number | null;
+  /** 補正時のみ: 前営業日 intraday − last_equity (据え置き幅)。 */
+  freeze_lag_gap?: number | null;
   unrealized_pl_total: number | null;
   status: string;
   trading_blocked: boolean;
