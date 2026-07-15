@@ -249,8 +249,12 @@ class TestMergeWithExistingFullCsv:
 
         # current: warning ログを出しつつ new のみ返す
         assert len(merged) == 1
+        # 本テストの本質は「読取失敗を silent に握り潰さず loud に WARNING する」こと。
+        # 実装の message は英語 "read failure ... new only." (旧: 日本語フレーズ) のため、
+        # 言語非依存に「WARNING レベル + 該当ファイルへの言及」で loudness を固定する。
         assert any(
-            "履歴失う危険" in rec.message for rec in caplog.records
+            rec.levelname == "WARNING" and csv_path.name in rec.message
+            for rec in caplog.records
         ), "既存 CSV 読取失敗時に WARNING が出ていない = silent path"
 
 

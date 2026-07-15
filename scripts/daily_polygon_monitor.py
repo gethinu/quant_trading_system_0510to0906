@@ -419,6 +419,18 @@ def build_pipeline_report(
 
     trdlist_counts: dict[str, int] = {}
     entry_counts: dict[str, int] = {}
+    # signals エンジンが today_signals.funnel に既に確定させた Tgt/FILpass/STUpass/Exit。
+    # coverage step の grouped-daily 実測は「今日」を要求するため 06:00 JST の定例 run では
+    # 当日 EOD 前で 403 → grouped 空 → measured={} で Tgt/FIL/STU が silent に null 化し、
+    # ダッシュボードが「未計測」に逆戻りする。grouped が空/欠損のときは、signals が実際に
+    # 使った anchored ユニバース上の funnel を fallback ソースとして採用する。
+    funnel_counts: dict[str, dict[str, int]] = {}
+    _FUNNEL_TO_PHASE = {
+        "target": "Tgt",
+        "filter_pass": "FILpass",
+        "setup_pass": "STUpass",
+        "exit_count": "Exit",
+    }
     if signals_dir is not None:
         sig_path = signals_dir / f"today_signals_{target_date.replace('-', '')}.json"
         if sig_path.exists():
@@ -431,6 +443,14 @@ def build_pipeline_report(
                         trdlist_counts[sysname] = int(ci)
                     if isinstance(so, (int, float)):
                         entry_counts[sysname] = int(so)
+                    fn = entry.get("funnel") or {}
+                    fc = {
+                        phase: int(fn[src])
+                        for src, phase in _FUNNEL_TO_PHASE.items()
+                        if isinstance(fn.get(src), (int, float))
+                    }
+                    if fc:
+                        funnel_counts[sysname] = fc
             except Exception as exc:  # pragma: no cover
                 logger.warning("today_signals 読込失敗 (%s): %s", sig_path, exc)
 
@@ -444,7 +464,9 @@ def build_pipeline_report(
             return trdlist_counts.get(sysname)
         if name == "Entry":
             return entry_counts.get(sysname)
-        return None
+        # Tgt/FILpass/STUpass/Exit: grouped-daily 実測が無い場合の fallback として
+        # signals エンジンの funnel を採用する (定例 06:00 run の 403 空振り対策)。
+        return (funnel_counts.get(sysname) or {}).get(name)
 
     systems_out: dict[str, Any] = {}
     for sysname, phase_defs in SYSTEM_PIPELINE_PHASES.items():
@@ -453,7 +475,11 @@ def build_pipeline_report(
             if empty
             else _measurable_counts_for_system(sysname, grouped_df, dv_cache)
         )
-        universe_count = measured.get("Tgt", 0)
+        # ratio_of_universe の分母。grouped 実測 Tgt が無ければ funnel fallback の Tgt を使う。
+        universe_count = measured.get("Tgt")
+        if universe_count is None:
+            universe_count = _signal_fill(sysname, "Tgt")
+        universe_count = universe_count or 0
 
         phases_out: list[dict[str, Any]] = []
         prev_count: int | None = None
@@ -491,7 +517,9 @@ def build_pipeline_report(
         "systems": systems_out,
         "notes": [
             "phases are reference counts, not evaluation criteria.",
-            "monitor measures Tgt / FILpass only; STUpass/Exit are unmeasured (null).",
+            "measured=true は grouped-daily 実測 (Tgt/FILpass) を意味する。",
+            "grouped が空 (当日 EOD 前 403 等) の場合、Tgt/FILpass/STUpass/Exit は "
+            "today_signals.funnel から補完する (measured=false のまま count は非null)。",
             "ratio_of_prev = count / previous measured phase; ratio_of_universe = count / Tgt.",
         ],
     }
