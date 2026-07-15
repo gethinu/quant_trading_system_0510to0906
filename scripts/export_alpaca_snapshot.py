@@ -18,6 +18,8 @@ daily_pipeline.ps1 への配線は Phase 2 (別セッションと競合回避の
       "provider": "alpaca-paper",
       "account": {equity, last_equity, cash, buying_power, long_market_value,
                   short_market_value, pnl_today_abs, pnl_today_pct,
+                  pnl_today_abs_raw, pnl_today_pct_raw, pnl_today_basis,
+                  pnl_today_baseline, freeze_lag_gap,
                   unrealized_pl_total, status, trading_blocked, pattern_day_trader},
       "equity_curve": {timeframe, period, base_value, points:[{t,equity,pl,pl_pct,
                        peak,dd_pct}], peak_equity, max_drawdown_pct,
@@ -399,6 +401,99 @@ def _augment_curve(
         )
     else:
         curve["period_return_pct"] = None
+
+
+# ---------------------------------------------------------------------------
+# freeze-aware "today" baseline
+# ---------------------------------------------------------------------------
+# Alpaca が報告する ``last_equity`` は前営業日の *日次終値* (regular-session close)。
+# データ凍結期には日次終値系列が実勢 (intraday) equity より大きく低く据え置かれる
+# ことがあり (2026-07 の観測: gap ~$4,285 / 約4%)、``pnl_today = equity - last_equity``
+# が当日の実損益でなく基準ずれ (phantom) を出す。ここでは前営業日の *intraday*
+# equity と last_equity を突合し、乖離が大きい時のみ intraday 整合の基準に置換する。
+# 平常日 (乖離が小さい) は last_equity をそのまま使い挙動不変。
+#
+# 重要: 補正するのは pnl_today の *基準のみ*。equity / cash / positions /
+# unrealized 等 ledger_reconciliation が使う Alpaca 実報告値は一切改変しない。
+# last_equity 自体も raw のまま残す (透明性 + recon を汚さない)。
+FREEZE_GAP_ABS_MIN = 1000.0  # 補正発火の $ 下限
+FREEZE_GAP_PCT_MIN = 0.01  # 補正発火の equity 比下限 (1%)
+
+
+def resolve_today_baseline(
+    equity: float | None,
+    last_equity: float | None,
+    prev_intraday_equity: float | None,
+    *,
+    gap_abs_min: float = FREEZE_GAP_ABS_MIN,
+    gap_pct_min: float = FREEZE_GAP_PCT_MIN,
+) -> tuple[float | None, str, float | None]:
+    """今日 P&L の基準 equity を決める (pure / offline-testable)。
+
+    Returns ``(baseline, basis, gap)``:
+      - ``baseline`` : pnl_today の差の基準に使う equity
+      - ``basis``    : ``"last_equity"`` (平常) | ``"freeze_adjusted"`` (凍結ラグ補正)
+      - ``gap``      : 補正時のみ ``prev_intraday_equity - last_equity`` (それ以外 None)
+
+    前営業日の intraday equity が daily-close 基準 (last_equity) より閾値を超えて
+    乖離している時だけ、intraday 値を基準に採用する (=phantom 除去)。
+    intraday 値が無い / 乖離が小さい場合は last_equity をそのまま返す (挙動不変)。
+    """
+    if equity is None or not last_equity:
+        return (last_equity, "last_equity", None)
+    if prev_intraday_equity is None or prev_intraday_equity <= 0:
+        return (last_equity, "last_equity", None)
+    gap = prev_intraday_equity - last_equity
+    threshold = max(gap_abs_min, abs(equity) * gap_pct_min)
+    if abs(gap) > threshold:
+        return (round(prev_intraday_equity, 2), "freeze_adjusted", round(gap, 2))
+    return (last_equity, "last_equity", None)
+
+
+def _fetch_prev_session_intraday_equity() -> float | None:
+    """前営業日 (直近完了セッション) の *intraday* 最終 equity を取得。
+
+    portfolio_history を intraday (1H, extended) で引き、ET 日付でグルーピング。
+    最新日=当日セッションとみなし、その一つ前の日の最終 intraday equity を返す。
+    取得失敗・データ不足時は None (=補正しない)。GET only / read-only / paper。
+    """
+    import requests
+
+    headers = {
+        "APCA-API-KEY-ID": os.getenv("APCA_API_KEY_ID", ""),
+        "APCA-API-SECRET-KEY": os.getenv("APCA_API_SECRET_KEY", ""),
+    }
+    try:
+        r = requests.get(
+            f"{PAPER_BASE}/v2/account/portfolio/history",
+            headers=headers,
+            params={"period": "7D", "timeframe": "1H", "extended_hours": "true"},
+            timeout=20,
+        )
+        j = r.json() if r.content else {}
+    except Exception:  # pragma: no cover - network
+        return None
+
+    ts = j.get("timestamp") or []
+    eq = j.get("equity") or []
+    by_day: dict[str, float] = {}  # ET date -> その日の最終 intraday equity
+    for i, t in enumerate(ts):
+        e = _f(eq[i]) if i < len(eq) else None
+        if e is None or e <= 0:
+            continue
+        try:
+            day = str(
+                pd.Timestamp(int(t), unit="s", tz="UTC")
+                .tz_convert("America/New_York")
+                .date()
+            )
+        except Exception:
+            continue
+        by_day[day] = round(e, 2)  # timestamp 昇順なので後勝ち=その日最後
+    if len(by_day) < 2:
+        return None
+    prev_day = sorted(by_day)[-2]  # 最新=当日, その前=前営業日
+    return by_day.get(prev_day)
 
 
 def _accumulate_equity(results_dir: Path, today: str, equity: float | None) -> None:
@@ -808,10 +903,27 @@ def build_snapshot(
     acct_long_mv = _f(getattr(account, "long_market_value", None))
     acct_short_mv = _f(getattr(account, "short_market_value", None))
 
+    # pnl_today: 既定は Alpaca 報告の daily-close 基準 (equity - last_equity)。
+    # 凍結ラグ検出時のみ intraday 整合基準に置換 (下記)。raw は透明性のため常に保持。
     pnl_today_abs = pnl_today_pct = None
+    pnl_today_abs_raw = pnl_today_pct_raw = None
+    pnl_today_basis = "last_equity"
+    pnl_today_baseline = last_equity
+    freeze_lag_gap = None
     if equity is not None and last_equity:
-        pnl_today_abs = round(equity - last_equity, 2)
-        pnl_today_pct = round((equity - last_equity) / last_equity * 100.0, 3)
+        pnl_today_abs_raw = round(equity - last_equity, 2)
+        pnl_today_pct_raw = round((equity - last_equity) / last_equity * 100.0, 3)
+        prev_intraday = _fetch_prev_session_intraday_equity()
+        pnl_today_baseline, pnl_today_basis, freeze_lag_gap = resolve_today_baseline(
+            equity, last_equity, prev_intraday
+        )
+        if pnl_today_baseline:
+            pnl_today_abs = round(equity - pnl_today_baseline, 2)
+            pnl_today_pct = round(
+                (equity - pnl_today_baseline) / pnl_today_baseline * 100.0, 3
+            )
+        else:
+            pnl_today_abs, pnl_today_pct = pnl_today_abs_raw, pnl_today_pct_raw
 
     net_cap_pct, gross_cap_pct = _load_net_cap()
     gross_usd = long_usd + short_usd
@@ -848,6 +960,14 @@ def build_snapshot(
             ),
             "pnl_today_abs": pnl_today_abs,
             "pnl_today_pct": pnl_today_pct,
+            # provenance: 凍結ラグ補正の透明化 (display 専用。recon 非使用)。
+            "pnl_today_abs_raw": pnl_today_abs_raw,
+            "pnl_today_pct_raw": pnl_today_pct_raw,
+            "pnl_today_basis": pnl_today_basis,
+            "pnl_today_baseline": (
+                round(pnl_today_baseline, 2) if pnl_today_baseline is not None else None
+            ),
+            "freeze_lag_gap": freeze_lag_gap,
             "unrealized_pl_total": round(unrealized_total, 2),
             "status": str(
                 getattr(
