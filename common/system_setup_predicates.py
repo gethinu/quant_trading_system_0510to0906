@@ -345,6 +345,16 @@ def system7_setup_predicate(row: pd.Series) -> bool:
         return False
 
 
+# --- System8 (Long overnight FOMC pre-drift) ---------------------------------
+# 条件: その日が予定 FOMC 声明日の前営業日 T-1（= prepare_data で付与された
+# ``setup`` 列が True）。カレンダー駆動のため指標条件は持たない。
+def system8_setup_predicate(row: pd.Series) -> bool:
+    try:
+        return bool(row.get("setup", False))
+    except Exception:
+        return False
+
+
 # --- System6 (Short momentum) ------------------------------------------------
 # 条件: return_6d > 0.20 and uptwodays == True
 def system6_setup_predicate(row: pd.Series) -> bool:
@@ -375,6 +385,8 @@ SETUP_PREDICATES: Mapping[str, Callable[..., bool]] = {
     "System6": system6_setup_predicate,
     "7": system7_setup_predicate,
     "System7": system7_setup_predicate,
+    "8": system8_setup_predicate,
+    "System8": system8_setup_predicate,
 }
 
 
@@ -395,6 +407,7 @@ __all__ = [
     "system5_setup_predicate",
     "system6_setup_predicate",
     "system7_setup_predicate",
+    "system8_setup_predicate",
     "get_system_setup_predicate",
     "SETUP_PREDICATES",
     "DEFAULT_ATR_PCT_THRESHOLD",

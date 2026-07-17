@@ -162,6 +162,8 @@ def submit_orders_df(
         "system2": "limit",
         "system6": "limit",
         "system7": "limit",
+        # System8: MOC エントリー / MOO エグジット。既定は市場成行扱い。
+        "system8": "market",
     }
     sys_map = (system_order_type or {}) | default_sys_map  # defaultを下敷き
 

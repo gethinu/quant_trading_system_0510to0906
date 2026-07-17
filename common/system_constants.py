@@ -20,6 +20,7 @@ MIN_ROWS_SYSTEM4 = 200  # SMA200 + HV50 必要
 MIN_ROWS_SYSTEM5 = 150  # ADX7 + ATR ベース
 MIN_ROWS_SYSTEM6 = 100  # 比較的短期指標
 MIN_ROWS_SYSTEM7 = 150  # SPY専用、基本指標
+MIN_ROWS_SYSTEM8 = 150  # SPY専用、イベント駆動（指標不要）
 
 # === System1 (Long ROC200) 定数 ===
 SYSTEM1_ROC_PERIOD = 200
@@ -80,6 +81,15 @@ SYSTEM6_DOLLAR_VOLUME_PERIOD = 50
 # === System7 (SPY short catastrophe hedge) 定数 ===
 SYSTEM7_SYMBOL = "SPY"  # 固定シンボル
 SYSTEM7_MIN_ROWS = 150
+
+# === System8 (SPY overnight FOMC pre-drift) 定数 ===
+# イベント駆動（予定 FOMC 声明日の前営業日にロング, T 寄りで手仕舞い）。
+# 指標は使わず、data/events/fomc.csv の予定声明日から setup を決める。
+# 出所: 別リポジトリ n0150_fomc_macro_event_drift_spy (rules_frozen.md v03)。
+SYSTEM8_SYMBOL = "SPY"  # 固定シンボル（ロング専用）
+SYSTEM8_MIN_ROWS = 150
+# 往復コスト（bp）: Alpaca 手数料 $0 + SPY スプレッド ~0.5-1bp/片道 = 2bp RT。
+SYSTEM8_COST_BPS_ROUNDTRIP = 2.0
 
 # === エントリー対象から除外するヘッジ/インデックス銘柄 (systems 1-6) ===
 # docs/systems/INDEX.md: システム7 は「SPY 固定のヘッジ戦略（変更禁止）」、
@@ -166,6 +176,10 @@ SYSTEM7_REQUIRED_INDICATORS = [
     "max_70",  # Max_70 - 70日の最高価格
 ]
 
+# System8 はイベント駆動（FOMC カレンダー）で指標を必要としない。
+# setup は prepare_data が data/events/fomc.csv から付与する（OHLC のみ使用）。
+SYSTEM8_REQUIRED_INDICATORS: list[str] = []
+
 # === システム別設定マッピング ===
 SYSTEM_CONFIGS = {
     "system1": {
@@ -219,6 +233,13 @@ SYSTEM_CONFIGS = {
         "min_rows": MIN_ROWS_SYSTEM7,
         "required_indicators": SYSTEM7_REQUIRED_INDICATORS,
         "symbol": SYSTEM7_SYMBOL,
+    },
+    "system8": {
+        "min_rows": MIN_ROWS_SYSTEM8,
+        "required_indicators": SYSTEM8_REQUIRED_INDICATORS,
+        "symbol": SYSTEM8_SYMBOL,
+        # 往復コスト（bp）。EA/約定側で参照可能なメタ。
+        "cost_bps_roundtrip": SYSTEM8_COST_BPS_ROUNDTRIP,
     },
 }
 
@@ -352,6 +373,7 @@ __all__ = [
     "MIN_ROWS_SYSTEM5",
     "MIN_ROWS_SYSTEM6",
     "MIN_ROWS_SYSTEM7",
+    "MIN_ROWS_SYSTEM8",
     # システム別必須指標
     "SYSTEM1_REQUIRED_INDICATORS",
     "SYSTEM2_REQUIRED_INDICATORS",
@@ -360,8 +382,11 @@ __all__ = [
     "SYSTEM5_REQUIRED_INDICATORS",
     "SYSTEM6_REQUIRED_INDICATORS",
     "SYSTEM7_REQUIRED_INDICATORS",
+    "SYSTEM8_REQUIRED_INDICATORS",
     # ヘッジ/インデックス除外 (systems 1-6 エントリー universe)
     "SYSTEM7_SYMBOL",
+    "SYSTEM8_SYMBOL",
+    "SYSTEM8_COST_BPS_ROUNDTRIP",
     "HEDGE_INDEX_SYMBOLS",
     # 設定管理
     "SYSTEM_CONFIGS",

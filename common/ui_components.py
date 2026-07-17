@@ -783,7 +783,8 @@ def run_backtest_app(
         st.success(tr("cache cleared"))
 
     # シンボル選択処理（サイドバーで定義済みの変数を使用）
-    if system_name == "System7":
+    # System7（SPY ヘッジ）と System8（SPY FOMC ドリフト）はどちらも SPY 単一銘柄。
+    if system_name in ("System7", "System8"):
         symbols = ["SPY"]
     elif use_auto:
         if st.session_state.get(f"{system_name}_use_all_common", False):

@@ -101,6 +101,17 @@ strategies:
     single_mode: false
     # 当日抽出の上限（SPY 単一想定だが整合性のため設定）
     top_n_rank: 10
+  system8:
+    # System8: SPY オーバーナイト FOMC プレドリフト（イベント駆動・ロング専用）。
+    # 出所リポジトリ n0150_fomc_macro_event_drift_spy の凍結ルール v03。
+    # ストップなし・等ノーショナル・往復 2bp。指標は使わず data/events/fomc.csv 駆動。
+    cost_bps_roundtrip: 2.0  # 往復コスト（bp）
+    # 等ノーショナルの建玉割合（現在資本 × position_pct、[0,1] にクランプ＝無レバレッジ）。
+    # 単一銘柄・同時1ポジションのため既定は満額（1.0）。バックテスト/デモの検証用に調整可。
+    position_pct: 1.0
+    top_n_rank: 1  # SPY 単一・イベントごと最大1件
+    # 注: 実資金配分ウェイト（long_allocations / short_allocations）には *意図的に*
+    # 未登録。配分参加は repo オーナーの経営判断。docs/SYSTEM8_FOMC_DRIFT_MIGRATION_20260716.md 参照。
 
 data:
   vendor: EODHD
