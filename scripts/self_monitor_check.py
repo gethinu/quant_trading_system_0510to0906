@@ -10,6 +10,12 @@
     1. [daily]     06:00 デイリー (main 追従) が走ったか。
                    today_signals_YYYYMMDD.json / pipeline_YYYYMMDD.json の当日更新有無・mtime。
                    最新ファイルが古い (mtime age > --max-age-hours) → CRIT。
+    1b.[pipeline]  daily_pipeline_*.log を解析し cache step が exit=0 で完走したか +
+                   pipeline が『完了』まで到達したか (途中 stall = silent hang を検出)。
+                   --auto-latest cache の本番実証に使う (走行 worktree 側の log を見る)。
+    1c.[data_fresh] full_backup / rolling の参照銘柄最新日を NYSE 最新取引日と突合。
+                   freshness_guard の盲点 (rolling/full_backup 同時凍結を fresh と誤判定)
+                   を補い、cache 凍結を絶対 staleness で検出 (>4 営業日遅れ → CRIT)。
     2. [signals]   シグナルが潤沢か。portfolio.total_signals が 0 → CRIT、
                    閾値 (--min-signals) 未満 → WARN (データ鮮度異常の疑い)。
     3. [publish]   Vercel publish が成功したか。monitor-webapp ブランチに当日 commit があるか
@@ -29,6 +35,7 @@ from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 from typing import Any
@@ -308,6 +315,150 @@ def check_open_run(
     )
 
 
+def check_pipeline_run(daily_log_dir: Path, max_age_hours: float) -> CheckResult:
+    """最新 daily_pipeline_*.log を解析し、cache step の exit と pipeline 完走を判定。
+
+    07-19 の --auto-latest 初本番実証で必要な (a) cache step が exit=0 で完走したか +
+    pipeline が『完了』まで到達したか (途中 stall=07-18 の silent hang を検出) を見る。
+    daily_pipeline のログは走行 worktree (既定 C:\\tmp\\qts-daily-main\\logs) 側に出る。
+    """
+    if not daily_log_dir.exists():
+        return CheckResult("pipeline", "skip", f"daily log dir 不在: {daily_log_dir}")
+    logs = [p for p in daily_log_dir.glob("daily_pipeline_*.log")]
+    if not logs:
+        return CheckResult(
+            "pipeline", "crit", "daily_pipeline_*.log が無い (デイリー未実行の疑い)"
+        )
+    newest = max(logs, key=lambda p: p.stat().st_mtime)
+    age = _mtime_age_hours(newest)
+    try:
+        text = newest.read_text(encoding="utf-8-sig", errors="replace")
+    except Exception as exc:  # noqa: BLE001
+        return CheckResult(
+            "pipeline", "warn", f"log 読取失敗: {exc}", {"log": newest.name}
+        )
+    m_cache = re.search(r"\[cache\]\s*終了\s*\(exit=(-?\d+)\)", text)
+    cache_exit = int(m_cache.group(1)) if m_cache else None
+    completed = "Daily Pipeline 完了" in text
+    steps = re.findall(r"-----\s*\[([^\]]+)\]\s*(?:開始|終了)", text)
+    last_step = steps[-1] if steps else None
+    data = {
+        "log": newest.name,
+        "age_hours": round(age, 1) if age is not None else None,
+        "cache_exit": cache_exit,
+        "completed": completed,
+        "last_step": last_step,
+    }
+    if age is not None and age > max_age_hours:
+        return CheckResult(
+            "pipeline",
+            "crit",
+            f"🔴 最新 daily_pipeline log が {age:.1f}h 前 (> {max_age_hours:.0f}h): "
+            "06:00 デイリーが走っていない疑い",
+            data,
+        )
+    if not completed:
+        return CheckResult(
+            "pipeline",
+            "crit",
+            f"🔴 {newest.name} が『完了』未到達 (stall at [{last_step}]) "
+            "= silent hang の疑い",
+            data,
+        )
+    if cache_exit is None:
+        return CheckResult(
+            "pipeline", "warn", "pipeline 完了だが cache exit を検出できず", data
+        )
+    if cache_exit != 0:
+        return CheckResult(
+            "pipeline",
+            "warn",
+            f"pipeline 完了だが cache exit={cache_exit} "
+            "(--auto-latest 未完走 / 旧コード or fetch 失敗の疑い)",
+            data,
+        )
+    return CheckResult(
+        "pipeline",
+        "ok",
+        "🟢 --auto-latest cache 完走 (exit=0) + pipeline 完了",
+        data,
+    )
+
+
+def _csv_last_date(path: Path) -> str | None:
+    """CSV の最終行 (= 最新日) から YYYY-MM-DD を末尾読みで安価に取得。
+
+    full_backup は Date が第1列、rolling は index,Date,... と列順が異なるため、
+    列位置ではなく日付パターンで拾う (どちらの schema でも正しく取れる)。
+    """
+    try:
+        with path.open("rb") as fh:
+            fh.seek(0, 2)
+            size = fh.tell()
+            fh.seek(max(0, size - 4096))
+            tail = fh.read().decode("utf-8", errors="replace").strip().splitlines()
+        if not tail:
+            return None
+        m = re.search(r"\d{4}-\d{2}-\d{2}", tail[-1])
+        return m.group(0) if m else tail[-1].split(",")[0].strip()
+    except Exception:
+        return None
+
+
+def check_data_advance(data_cache_dir: Path, ref: str = "SPY") -> CheckResult:
+    """full_backup / rolling の参照銘柄最新日を NYSE 最新取引日と突合 (frozen cache 検出)。
+
+    freshness_guard は rolling vs full_backup しか比較せず、両者が同時凍結すると
+    『fresh』と誤判定する盲点がある。ここで full_backup vs 実市場 (NYSE 最新取引日) の
+    絶対 staleness を補い、(c) rolling/full_backup が前進したかを直接見る。
+    """
+    fb = data_cache_dir / "full_backup" / f"{ref}.csv"
+    rl = data_cache_dir / "rolling" / f"{ref}.csv"
+    fb_date = _csv_last_date(fb)
+    rl_date = _csv_last_date(rl)
+    data = {"ref": ref, "full_backup_last": fb_date, "rolling_last": rl_date}
+    if fb_date is None:
+        return CheckResult(
+            "data_fresh", "skip", f"full_backup/{ref}.csv を読めない", data
+        )
+    try:
+        import pandas as pd
+
+        from common.utils_spy import get_latest_nyse_trading_day
+
+        now = pd.Timestamp.now(tz="America/New_York").tz_localize(None).normalize()
+        latest_nyse = pd.Timestamp(get_latest_nyse_trading_day(now)).normalize()
+        fb_ts = pd.Timestamp(fb_date).normalize()
+        lag = max(0, int(pd.bdate_range(fb_ts, latest_nyse).size) - 1)
+        data["latest_nyse"] = str(latest_nyse.date())
+        data["lag_business_days"] = lag
+    except Exception as exc:  # noqa: BLE001
+        return CheckResult(
+            "data_fresh",
+            "info",
+            f"full_backup {ref}={fb_date} / rolling={rl_date} (NYSE 突合不可: {exc})",
+            data,
+        )
+    tail = f"full_backup {ref}={fb_date} / rolling={rl_date} / 市場最新={latest_nyse.date()}"
+    if lag <= 1:
+        return CheckResult(
+            "data_fresh", "ok", f"データ前進 OK ({tail}, lag {lag} 営業日)", data
+        )
+    if lag <= 4:
+        return CheckResult(
+            "data_fresh",
+            "warn",
+            f"full_backup が市場より {lag} 営業日遅れ (cache 停滞疑い) — {tail}",
+            data,
+        )
+    return CheckResult(
+        "data_fresh",
+        "crit",
+        f"🔴 full_backup が市場より {lag} 営業日遅れ (cache 凍結) — {tail}",
+        data,
+    )
+
+
 # --------------------------------------------------------------------------
 # aggregate + notify
 # --------------------------------------------------------------------------
@@ -386,6 +537,11 @@ def main(argv: list[str] | None = None) -> int:
         default="claude/monitor-webapp",
         help="Vercel publish 先ブランチ",
     )
+    parser.add_argument(
+        "--daily-log-dir",
+        default=os.getenv("QTS_DAILY_LOG_DIR", r"C:\tmp\qts-daily-main\logs"),
+        help="daily_pipeline_*.log の出力先 (走行 worktree 側。cache exit 判定に使う)",
+    )
     parser.add_argument("--output-json", default=None, help="判定サマリ JSON の出力先")
     parser.add_argument(
         "--dry-run", action="store_true", help="ntfy を送らず本文を表示"
@@ -400,9 +556,13 @@ def main(argv: list[str] | None = None) -> int:
     results_dir = repo / "results_csv"
     logs_dir = repo / "logs"
     data_dir = repo / "apps" / "dashboards" / "alpaca-next" / "data"
+    daily_log_dir = Path(args.daily_log_dir)
+    data_cache_dir = repo / "data_cache"
 
     results = [
         check_daily(results_dir, args.max_age_hours),
+        check_pipeline_run(daily_log_dir, args.max_age_hours),
+        check_data_advance(data_cache_dir),
         check_signals(results_dir, args.min_signals),
         check_publish(repo, args.monitor_branch, args.max_age_hours, data_dir),
         check_open_run(logs_dir, results_dir, args.openrun_max_age_hours),
@@ -414,7 +574,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"=> worst={worst.upper()}")
 
     record = {
-        "version": "1.0",
+        "version": "1.1",
         "date": date_str,
         "generated_at": _now().isoformat(timespec="seconds"),
         "repo_root": str(repo),
