@@ -26,6 +26,7 @@ from common.alpaca_trading import (
     hydrate_system_tags,
     parse_entry_date_from_client_order_id,
     parse_system_from_client_order_id,
+    round_to_alpaca_tick,
     submit_paper_exit_order,
 )
 
@@ -318,6 +319,129 @@ class TestBuildExitOrders:
     def test_zero_qty_is_skipped(self):
         snap = _snap("AAPL", "system1", "long", 0, 195.0, "2026-07-01")
         exits = build_exit_orders_from_positions([snap], today="2026-07-02")
+        assert exits == []
+
+
+# -------------------------------------------------------------------------
+# Alpaca tick rounding (sub-penny native-protection reject guard)
+#
+# 回帰 (2026-07-15): native protection の stop/target を一律 round(price, 4)
+# して発注していたため、>=$1 銘柄の 4桁価格 (BABA 109.4519 / GSHD 52.0288) が
+# code 42210000 (sub-penny) で全拒否され resting 保護ストップが置けなかった。
+# 修正後は tick ルール (>=$1 -> 2桁 / <$1 -> 4桁) で丸めて必ず valid tick に
+# なることを固定する。端株の synthetic (market) 保護は対象外で挙動不変。
+# -------------------------------------------------------------------------
+
+
+def _is_valid_alpaca_tick(price) -> bool:
+    """Alpaca tick ルールに適合するか: >=$1 は 2桁、<$1 は 4桁刻み。"""
+    if price is None:
+        return False
+    if price >= 1.0:
+        return round(price, 2) == pytest.approx(price)
+    return round(price, 4) == pytest.approx(price)
+
+
+class TestRoundToAlpacaTick:
+    def test_baba_stop_becomes_valid_penny_tick(self):
+        # 今夜拒否された実値: BABA stop 109.4519 -> 109.45 (2桁)
+        assert round_to_alpaca_tick(109.4519) == pytest.approx(109.45)
+        assert _is_valid_alpaca_tick(round_to_alpaca_tick(109.4519))
+
+    def test_gshd_stop_becomes_valid_penny_tick(self):
+        # GSHD 52.0288 -> 52.03 (2桁, HALF_UP で切り上げ)
+        assert round_to_alpaca_tick(52.0288) == pytest.approx(52.03)
+        assert _is_valid_alpaca_tick(round_to_alpaca_tick(52.0288))
+
+    def test_at_or_above_one_dollar_is_two_decimals(self):
+        assert round_to_alpaca_tick(1.00) == pytest.approx(1.0)
+        assert round_to_alpaca_tick(1.005) == pytest.approx(1.01)  # HALF_UP
+        assert round_to_alpaca_tick(250.0) == pytest.approx(250.0)
+
+    def test_below_one_dollar_keeps_four_decimals(self):
+        # <$1 は 4桁刻みが許される -> 精度を落とさない
+        assert round_to_alpaca_tick(0.5432) == pytest.approx(0.5432)
+        assert round_to_alpaca_tick(0.54329) == pytest.approx(0.5433)  # 4桁 HALF_UP
+        # 2桁に丸めてはいけない (情報損失の回帰防止)
+        assert round_to_alpaca_tick(0.5432) != pytest.approx(0.54)
+
+    def test_uses_half_up_not_bankers_rounding(self):
+        # round(52.025, 2) は banker's/float で 52.02 になり得る。
+        # tick ヘルパーは Decimal + HALF_UP なので 52.03 に固定。
+        assert round_to_alpaca_tick(52.025) == pytest.approx(52.03)
+
+    def test_none_and_non_positive_passthrough(self):
+        assert round_to_alpaca_tick(None) is None
+        assert round_to_alpaca_tick(0.0) == pytest.approx(0.0)
+        assert round_to_alpaca_tick(-3.14) == pytest.approx(-3.14)
+
+
+class TestNativeProtectionTickCompliance:
+    def test_stop_price_sub_penny_is_rounded_to_valid_tick(self):
+        # system1 long: stop = avg_entry - 5*ATR20
+        #   149.4519 - 5*8.0 = 109.4519 (今夜の BABA と同じ 4桁 raw stop)
+        snap = _snap("BABA", "system1", "long", 12, 149.4519, "2026-07-14")
+        exits = build_exit_orders_from_positions(
+            [snap],
+            today="2026-07-15",
+            atr_by_symbol={"BABA": {20: 8.0}},
+        )
+        stop = [e for e in exits if e.reason == ExitReasonCode.PROTECT_STOP]
+        assert len(stop) == 1
+        # BEFORE(bug): 109.4519 (code 42210000 で拒否)  AFTER: 109.45 (valid)
+        assert stop[0].order_type == "stop"  # native resting stop
+        assert stop[0].stop_price == pytest.approx(109.45)
+        assert _is_valid_alpaca_tick(stop[0].stop_price)
+
+    def test_target_price_sub_penny_is_rounded_to_valid_tick(self):
+        # system5 long: target = avg_entry + 1*ATR10
+        #   50.0288 + 1*2.0 = 52.0288 (GSHD と同じ 4桁 raw target)
+        snap = _snap("GSHD", "system5", "long", 6, 50.0288, "2026-07-14")
+        exits = build_exit_orders_from_positions(
+            [snap],
+            today="2026-07-15",
+            atr_by_symbol={"GSHD": {10: 2.0}},
+        )
+        target = [e for e in exits if e.reason == ExitReasonCode.PROTECT_TARGET]
+        assert len(target) == 1
+        assert target[0].order_type == "limit"  # native resting limit
+        assert target[0].limit_price == pytest.approx(52.03)
+        assert _is_valid_alpaca_tick(target[0].limit_price)
+        # 同ポジションの stop も valid tick であること
+        stop = [e for e in exits if e.reason == ExitReasonCode.PROTECT_STOP]
+        assert len(stop) == 1
+        assert _is_valid_alpaca_tick(stop[0].stop_price)
+
+    def test_sub_dollar_stop_keeps_four_decimals(self):
+        # <$1 銘柄: 0.9432 - 5*0.08 = 0.5432 -> 4桁を維持 (2桁に丸めない)
+        snap = _snap("PENNY", "system1", "long", 100, 0.9432, "2026-07-14")
+        exits = build_exit_orders_from_positions(
+            [snap],
+            today="2026-07-15",
+            atr_by_symbol={"PENNY": {20: 0.08}},
+        )
+        stop = [e for e in exits if e.reason == ExitReasonCode.PROTECT_STOP]
+        assert len(stop) == 1
+        assert stop[0].stop_price == pytest.approx(0.5432)
+        assert _is_valid_alpaca_tick(stop[0].stop_price)
+        # 2桁丸めだったら 0.54 に潰れる -> 4桁維持を確認
+        assert stop[0].stop_price != pytest.approx(0.54)
+
+    def test_existing_protect_coid_still_dedups_after_tick_fix(self):
+        # held_for_orders(40310000) 相当の重複防止 = existing coid skip は
+        # tick 修正後も挙動不変であること (sub-penny を生む価格でも skip)。
+        snap = _snap("BABA", "system1", "long", 12, 149.4519, "2026-07-14")
+        existing = {
+            "protect-system1-BABA-20260714-protect-trail",
+            "protect-system1-BABA-20260714-protect-stop",
+        }
+        exits = build_exit_orders_from_positions(
+            [snap],
+            today="2026-07-15",
+            atr_by_symbol={"BABA": {20: 8.0}},
+            existing_protect_coids=existing,
+        )
+        # system1 は trailing + stop のみ。両 coid が既存なら新規発注ゼロ。
         assert exits == []
 
 
