@@ -233,6 +233,62 @@ def test_baseline_missing_equity_is_safe():
     assert ex.resolve_today_baseline(106000.0, 0.0, 105000.0)[1] == "last_equity"
 
 
+# --- baseline session pick (off-by-one regression, pure) -------------------
+# 実データ (2026-07-19 live probe, Sunday premarket run) で回帰を固定する。
+# 1D(daily-close) は 1H(intraday) より恒常的に ~$4,285 低い (Alpaca paper の
+# short 計上差と観測)。real-time equity は 1H と整合するため 1D が異常値。
+_D1 = {  # ET date -> daily-close (1D)
+    "2026-07-15": 102020.82,
+    "2026-07-16": 101130.14,
+    "2026-07-17": 100665.12,  # == account.last_equity (直近完了セッション)
+}
+_H1 = {  # ET date -> last intraday equity (1H/ext)
+    "2026-07-15": 106192.77,
+    "2026-07-16": 105703.75,
+    "2026-07-17": 104922.86,  # 07-17 の intraday 整合 close (正しい基準)
+}
+
+
+def test_pick_baseline_anchors_to_last_equity_session():
+    """off-by-one 回帰: 寄り前/週末実行でも last_equity の指すセッションを選ぶ。
+
+    旧 sorted[-2] は 07-16 (105703.75) を誤選択し phantom -$752 を出していた。
+    修正後は last_equity(=07-17 daily-close)にアンカーして 07-17 intraday
+    (104922.86) を返す → 当日 P&L はほぼ flat になる。
+    """
+    picked = ex._pick_baseline_intraday_equity(100665.12, _D1, _H1)
+    assert picked == pytest.approx(104922.86, abs=0.01)  # 07-17, NOT 07-16
+    # このセッション基準なら当日 P&L は実勢 (~$28, flat)。phantom(-$752)ではない。
+    equity_now = 104950.99
+    assert round(equity_now - picked, 2) == pytest.approx(28.13, abs=0.5)
+
+
+def test_pick_baseline_ignores_partial_today_daily_point():
+    """intraday 実行で 1D に当日 partial 点が混ざっても last_equity で正しく同定。"""
+    d1 = dict(_D1)
+    d1["2026-07-20"] = 105200.0  # 当日 partial (高い) が混ざるケース
+    h1 = dict(_H1)
+    h1["2026-07-20"] = 105100.0
+    # last_equity は依然 07-17 (前営業日 close)。当日 partial に釣られない。
+    picked = ex._pick_baseline_intraday_equity(100665.12, d1, h1)
+    assert picked == pytest.approx(104922.86, abs=0.01)  # 07-17
+
+
+def test_pick_baseline_fallback_latest_when_no_daily():
+    """1D 取得不可 (空) → intraday 最新日 (直近完了セッション) に fallback。
+
+    旧 [-2] ではなく [-1]: 寄り前/週末は最新 intraday 日が直近完了セッション。
+    """
+    picked = ex._pick_baseline_intraday_equity(100665.12, {}, _H1)
+    assert picked == pytest.approx(104922.86, abs=0.01)  # 最新 = 07-17
+
+
+def test_pick_baseline_empty_or_missing_is_safe():
+    """intraday 空 / last_equity 欠損なら None (=補正しない)。"""
+    assert ex._pick_baseline_intraday_equity(100665.12, _D1, {}) is None
+    assert ex._pick_baseline_intraday_equity(None, _D1, _H1) is None
+
+
 # --- ledger reconciliation (pure) -----------------------------------------
 def test_ledger_recon_all_consistent():
     """position が台帳ネットと一致すれば desync_free、mismatch 0。"""

@@ -1377,13 +1377,24 @@ def _snapshot_from_alpaca_position(p: Any) -> PositionSnapshot | None:
         return None
 
 
-def fetch_position_snapshots(client: Any) -> list[PositionSnapshot]:
-    """Alpaca client から現 positions を取得し、PositionSnapshot list を返す。"""
+def fetch_position_snapshots(
+    client: Any, *, raise_on_error: bool = False
+) -> list[PositionSnapshot]:
+    """Alpaca client から現 positions を取得し、PositionSnapshot list を返す。
+
+    ``raise_on_error=True`` の場合、``get_all_positions`` の失敗を silent ``[]`` に
+    畳まず ``PositionsFetchError`` を raise する。exit_check が「取得失敗 (broker
+    unreachable)」と「本当に空 (flat book)」を区別できるようにするため
+    (entry 側 ``_fetch_open_positions`` と同じ fail-closed 方針)。default False は
+    既存 caller (``paper_trading_status``) の挙動を保つ。
+    """
     out: list[PositionSnapshot] = []
     try:
         raw = client.get_all_positions()
-    except Exception as exc:  # pragma: no cover
+    except Exception as exc:
         logger.warning("get_all_positions 失敗: %s", exc)
+        if raise_on_error:
+            raise PositionsFetchError(f"Alpaca positions fetch failed: {exc}") from exc
         return out
     for p in raw or []:
         snap = _snapshot_from_alpaca_position(p)

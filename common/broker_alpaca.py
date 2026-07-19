@@ -440,6 +440,53 @@ def cancel_all_orders(client) -> None:
         client.cancel_all_orders()
 
 
+def cancel_open_orders_for_symbols(client, symbols: Iterable[str]) -> dict[str, Any]:
+    """指定 symbol の *未約定注文だけ* を cancel する (GET → 個別 cancel by id)。
+
+    なぜ必要か: time-based の full-close (成行) を出す前に、その銘柄の resting
+    protective 注文 (stop/limit/trailing) が position qty を握っていると、Alpaca は
+    ``code 40310000 (insufficient qty available / held_for_orders)`` で成行 close を
+    reject し、position が exit できず期限超過として滞留する。close 対象銘柄の保護
+    注文を先に外すことで qty を解放する。**保有継続する銘柄の保護注文は触らない**。
+
+    - ``cancel_all_orders`` (全消し) と違い、渡した symbol にスコープを限定する。
+    - 個別 cancel の失敗は握り潰し (best-effort)。返り値でカウントを返す。
+    - paper / read-then-cancel。position 自体は触らない。
+    """
+    want = {str(s).upper() for s in symbols if str(s).strip()}
+    result: dict[str, Any] = {"canceled": 0, "symbols": [], "want": sorted(want)}
+    if not want:
+        return result
+    try:
+        open_orders = get_open_orders(client)
+    except Exception:
+        return result
+    touched: list[str] = []
+    for o in open_orders or []:
+        sym = str(getattr(o, "symbol", "") or "").upper()
+        if sym not in want:
+            continue
+        oid = getattr(o, "id", None)
+        if oid is None:
+            continue
+        ok = False
+        for meth in ("cancel_order_by_id", "cancel_order"):
+            fn = getattr(client, meth, None)
+            if fn is None:
+                continue
+            try:
+                fn(oid)
+                ok = True
+                break
+            except Exception:
+                continue
+        if ok:
+            result["canceled"] += 1
+            touched.append(sym)
+    result["symbols"] = sorted(set(touched))
+    return result
+
+
 def subscribe_order_updates(client, log_callback=None):
     """注文更新の WebSocket を購読して即時実行（ブロッキング）。"""
     _require_sdk()
