@@ -12,12 +12,15 @@ from pathlib import Path
 import sys
 import time
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts.self_monitor_check import (  # noqa: E402
     check_daily,
+    check_data_advance,
     check_open_run,
     check_publish,
     check_signals,
@@ -27,6 +30,22 @@ from scripts.self_monitor_check import (  # noqa: E402
 def _write(path: Path, obj) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(obj, ensure_ascii=False), encoding="utf-8")
+
+
+def _write_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _latest_nyse_or_skip():
+    """Resolve the real latest NYSE trading day; skip if the dep is unavailable."""
+    pd = pytest.importorskip("pandas")
+    try:
+        from common.utils_spy import get_latest_nyse_trading_day
+    except Exception:  # noqa: BLE001
+        pytest.skip("common.utils_spy unavailable")
+    now = pd.Timestamp.now(tz="America/New_York").tz_localize(None).normalize()
+    return pd, pd.Timestamp(get_latest_nyse_trading_day(now)).normalize()
 
 
 # --- daily freshness -------------------------------------------------------
@@ -53,6 +72,42 @@ def test_daily_crit_when_stale(tmp_path: Path):
     os.utime(f, (old, old))
     r = check_daily(rd, max_age_hours=26)
     assert r.status == "crit"
+
+
+# --- data_fresh (full_backup absolute staleness) ---------------------------
+def test_data_fresh_ok_ignores_stale_rolling_spy(tmp_path: Path):
+    """full_backup が新鮮なら、rolling/SPY.csv が古くても OK。
+
+    SPY は non-universe ETF で rolling へは同期されない (毎日 stale drift)。
+    verdict は full_backup 基準なので rolling SPY の陳腐化に釣られてはいけない
+    (2026-07-19 の恒久 fix: 火曜以降も再発しないことの固定化)。
+    """
+    _pd, latest = _latest_nyse_or_skip()
+    dc = tmp_path / "data_cache"
+    _write_text(dc / "full_backup" / "SPY.csv", f"Date,Close\n{latest.date()},700\n")
+    # rolling SPY は意図的に大幅 stale (半年前) にしておく
+    _write_text(dc / "rolling" / "SPY.csv", "index,Date,Close\n0,2026-01-02,600\n")
+    r = check_data_advance(dc)
+    assert r.status == "ok", r.detail
+    # honest display: 誤解を招く rolling 値を出さない
+    assert "rolling" not in r.detail
+    assert "rolling_last" not in r.data
+
+
+def test_data_fresh_crit_when_fullbackup_stale(tmp_path: Path):
+    """full_backup 自体が市場より大きく遅れていれば CRIT (cache 凍結を正しく検出)。"""
+    _latest_nyse_or_skip()
+    dc = tmp_path / "data_cache"
+    _write_text(dc / "full_backup" / "SPY.csv", "Date,Close\n2026-01-02,600\n")
+    r = check_data_advance(dc)
+    assert r.status == "crit", r.detail
+
+
+def test_data_fresh_skip_when_fullbackup_missing(tmp_path: Path):
+    dc = tmp_path / "data_cache"
+    (dc / "full_backup").mkdir(parents=True)
+    r = check_data_advance(dc)
+    assert r.status == "skip"
 
 
 # --- signals abundance -----------------------------------------------------

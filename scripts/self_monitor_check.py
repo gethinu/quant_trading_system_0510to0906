@@ -13,9 +13,11 @@
     1b.[pipeline]  daily_pipeline_*.log を解析し cache step が exit=0 で完走したか +
                    pipeline が『完了』まで到達したか (途中 stall = silent hang を検出)。
                    --auto-latest cache の本番実証に使う (走行 worktree 側の log を見る)。
-    1c.[data_fresh] full_backup / rolling の参照銘柄最新日を NYSE 最新取引日と突合。
+    1c.[data_fresh] full_backup 参照銘柄 (SPY) の最新日を NYSE 最新取引日と突合。
+                   full_backup は日次 fetch の着地点なので、その絶対 staleness を見れば
                    freshness_guard の盲点 (rolling/full_backup 同時凍結を fresh と誤判定)
-                   を補い、cache 凍結を絶対 staleness で検出 (>4 営業日遅れ → CRIT)。
+                   も含め cache 凍結を検出できる (>4 営業日遅れ → CRIT)。rolling の前進は
+                   universe scoped な freshness_guard の担当 (下記 check_data_advance 参照)。
     2. [signals]   シグナルが潤沢か。portfolio.total_signals が 0 → CRIT、
                    閾値 (--min-signals) 未満 → WARN (データ鮮度異常の疑い)。
     3. [publish]   Vercel publish が成功したか。monitor-webapp ブランチに当日 commit があるか
@@ -406,17 +408,22 @@ def _csv_last_date(path: Path) -> str | None:
 
 
 def check_data_advance(data_cache_dir: Path, ref: str = "SPY") -> CheckResult:
-    """full_backup / rolling の参照銘柄最新日を NYSE 最新取引日と突合 (frozen cache 検出)。
+    """full_backup 参照銘柄 (SPY) の最新日を NYSE 最新取引日と突合 (frozen cache 検出)。
 
-    freshness_guard は rolling vs full_backup しか比較せず、両者が同時凍結すると
-    『fresh』と誤判定する盲点がある。ここで full_backup vs 実市場 (NYSE 最新取引日) の
-    絶対 staleness を補い、(c) rolling/full_backup が前進したかを直接見る。
+    ``full_backup`` は日次 fetch の着地点で、SPY を含む全銘柄が必ずここへ更新される。
+    その絶対 staleness (full_backup vs 実市場 = NYSE 最新取引日) を見れば、freshness_guard
+    の盲点 (rolling/full_backup 同時凍結を『fresh』と誤判定) も含めて cache 停滞を検出できる
+    ── full_backup が凍結すれば必ずここで拾える。
+
+    rolling の前進 (rolling vs full_backup) は universe scoped な freshness_guard
+    (check_rolling_freshness.py) の担当。ここでは **敢えて rolling を読まない**:
+    SPY は non-universe ETF で rolling へは再構築されず毎日 stale drift するため、
+    rolling/SPY.csv を参照すると恒常的な誤 WARN 表示になっていた (2026-07-19 の是正)。
+    full_backup 基準なら SPY を含む非 universe 参照銘柄でも正しく前進を確認できる。
     """
     fb = data_cache_dir / "full_backup" / f"{ref}.csv"
-    rl = data_cache_dir / "rolling" / f"{ref}.csv"
     fb_date = _csv_last_date(fb)
-    rl_date = _csv_last_date(rl)
-    data = {"ref": ref, "full_backup_last": fb_date, "rolling_last": rl_date}
+    data: dict[str, Any] = {"ref": ref, "full_backup_last": fb_date}
     if fb_date is None:
         return CheckResult(
             "data_fresh", "skip", f"full_backup/{ref}.csv を読めない", data
@@ -436,10 +443,10 @@ def check_data_advance(data_cache_dir: Path, ref: str = "SPY") -> CheckResult:
         return CheckResult(
             "data_fresh",
             "info",
-            f"full_backup {ref}={fb_date} / rolling={rl_date} (NYSE 突合不可: {exc})",
+            f"full_backup {ref}={fb_date} (NYSE 突合不可: {exc})",
             data,
         )
-    tail = f"full_backup {ref}={fb_date} / rolling={rl_date} / 市場最新={latest_nyse.date()}"
+    tail = f"full_backup {ref}={fb_date} / 市場最新={latest_nyse.date()}"
     if lag <= 1:
         return CheckResult(
             "data_fresh", "ok", f"データ前進 OK ({tail}, lag {lag} 営業日)", data
