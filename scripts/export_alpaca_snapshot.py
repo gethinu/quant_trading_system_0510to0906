@@ -450,12 +450,10 @@ def resolve_today_baseline(
     return (last_equity, "last_equity", None)
 
 
-def _fetch_prev_session_intraday_equity() -> float | None:
-    """前営業日 (直近完了セッション) の *intraday* 最終 equity を取得。
+def _history_by_day(period: str, timeframe: str, *, extended: bool) -> dict[str, float]:
+    """portfolio_history を引き、ET 日付 -> その日の *最終* equity にまとめる。
 
-    portfolio_history を intraday (1H, extended) で引き、ET 日付でグルーピング。
-    最新日=当日セッションとみなし、その一つ前の日の最終 intraday equity を返す。
-    取得失敗・データ不足時は None (=補正しない)。GET only / read-only / paper。
+    GET only / read-only / paper。取得失敗時は空 dict (=呼び出し側で補正しない)。
     """
     import requests
 
@@ -467,16 +465,20 @@ def _fetch_prev_session_intraday_equity() -> float | None:
         r = requests.get(
             f"{PAPER_BASE}/v2/account/portfolio/history",
             headers=headers,
-            params={"period": "7D", "timeframe": "1H", "extended_hours": "true"},
+            params={
+                "period": period,
+                "timeframe": timeframe,
+                "extended_hours": "true" if extended else "false",
+            },
             timeout=20,
         )
         j = r.json() if r.content else {}
     except Exception:  # pragma: no cover - network
-        return None
+        return {}
 
     ts = j.get("timestamp") or []
     eq = j.get("equity") or []
-    by_day: dict[str, float] = {}  # ET date -> その日の最終 intraday equity
+    by_day: dict[str, float] = {}  # ET date -> その日の最終 equity
     for i, t in enumerate(ts):
         e = _f(eq[i]) if i < len(eq) else None
         if e is None or e <= 0:
@@ -490,10 +492,59 @@ def _fetch_prev_session_intraday_equity() -> float | None:
         except Exception:
             continue
         by_day[day] = round(e, 2)  # timestamp 昇順なので後勝ち=その日最後
-    if len(by_day) < 2:
+    return by_day
+
+
+def _pick_baseline_intraday_equity(
+    last_equity: float | None,
+    daily_by_day: dict[str, float],
+    intraday_by_day: dict[str, float],
+) -> float | None:
+    """last_equity が指す完了セッションの *intraday 整合* equity を返す (pure)。
+
+    ``last_equity`` は Alpaca が報告する前営業日の *日次終値*。同じセッションを
+    daily(1D) 系列から value-match で特定し、その日の intraday(1H) 終値を基準候補
+    として返す。
+
+    off-by-one 回避: 日次パイプラインは **寄り付き前** (06:00 JST ≈ 前日夕方 ET)
+    に走り、週末/休場もあるため「intraday 系列の最新日」は当日ではなく **既に完了
+    した直近セッション** であることが多い。旧実装の ``sorted[-2]`` はこれを当日と
+    誤認し 1 セッション古い日を基準にしていた (phantom の原因)。last_equity に
+    アンカーすることで実行時刻・曜日に依らず正しい基準日を選ぶ。
+    """
+    if last_equity is None or not intraday_by_day:
         return None
-    prev_day = sorted(by_day)[-2]  # 最新=当日, その前=前営業日
-    return by_day.get(prev_day)
+    # 1) last_equity に一致する daily-close の日付を特定 (完了セッションの同定)。
+    target_day: str | None = None
+    if daily_by_day:
+        best: tuple[float, str] | None = None
+        for day, close in daily_by_day.items():
+            d = abs(close - last_equity)
+            if best is None or d < best[0]:
+                best = (d, day)
+        # last_equity は過去の完了セッション close と一致するはず (許容誤差内)。
+        if best is not None and best[0] <= max(1.0, abs(last_equity) * 0.001):
+            target_day = best[1]
+    # 2) 同定した日の intraday 終値を返す。
+    if target_day is not None and target_day in intraday_by_day:
+        return intraday_by_day[target_day]
+    # フォールバック: value-match 不成立時は intraday 系列の *最新* 完了日を採用。
+    # (旧 [-2] ではなく [-1]: 寄り前/週末では最新 intraday 日が直近完了セッション。)
+    return intraday_by_day[sorted(intraday_by_day)[-1]]
+
+
+def _fetch_prev_session_intraday_equity(last_equity: float | None) -> float | None:
+    """last_equity が指す完了セッションの intraday 整合 equity を取得。
+
+    daily(1D) と intraday(1H, extended) の両系列を引き、last_equity にアンカーして
+    正しい基準セッションを選ぶ。取得失敗・データ不足時は None (=補正しない)。
+    GET only / read-only / paper。
+    """
+    intraday_by_day = _history_by_day("7D", "1H", extended=True)
+    if not intraday_by_day:
+        return None
+    daily_by_day = _history_by_day("10D", "1D", extended=False)
+    return _pick_baseline_intraday_equity(last_equity, daily_by_day, intraday_by_day)
 
 
 def _accumulate_equity(results_dir: Path, today: str, equity: float | None) -> None:
@@ -913,7 +964,7 @@ def build_snapshot(
     if equity is not None and last_equity:
         pnl_today_abs_raw = round(equity - last_equity, 2)
         pnl_today_pct_raw = round((equity - last_equity) / last_equity * 100.0, 3)
-        prev_intraday = _fetch_prev_session_intraday_equity()
+        prev_intraday = _fetch_prev_session_intraday_equity(last_equity)
         pnl_today_baseline, pnl_today_basis, freeze_lag_gap = resolve_today_baseline(
             equity, last_equity, prev_intraday
         )
