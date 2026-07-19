@@ -1,5 +1,5 @@
 {
-  "date": "2026-07-08",
+  "date": "2026-07-20",
   "provider": "polygon_grouped_daily",
   "n_candidates_total": 0,
   "survival_by_system": {
@@ -72,5 +72,7 @@
     "sys6": 0,
     "sys7": 0
   },
-  "notes": []
+  "notes": [
+    "first_run=true (no_previous_report; delta=0)"
+  ]
 }
