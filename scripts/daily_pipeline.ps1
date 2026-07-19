@@ -320,6 +320,7 @@ try {
         $ec = Invoke-Step -Name "exit_check" -PyArgs $ecArgs
         if ($ec -eq 1) { $Failures += "exit_check(exit=1)" }
         elseif ($ec -eq 2) { $Failures += "exit_check(safety_abort)" }
+        elseif ($ec -eq 3) { $Failures += "exit_check(broker_unreachable)" }
     }
 
     # --- Step 5d: execution summary (submit 後の実発注サマリを recon 化 + 通知) ---

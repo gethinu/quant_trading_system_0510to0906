@@ -41,6 +41,7 @@ from common import broker_alpaca as ba  # noqa: E402
 from common.alpaca_trading import (  # noqa: E402
     ExitReasonCode,
     LiveAccountGuardError,
+    PositionsFetchError,
     PositionSnapshot,
     PreparedExit,
     assert_paper_env,
@@ -336,6 +337,9 @@ def main(argv: list[str] | None = None) -> int:
     snapshots: list[PositionSnapshot] = []
     existing_protect_coids: set[str] = set()
     existing_exit_coids: set[str] = set()
+    # broker が到達不能で positions を取れなかった場合、「0 exits = 成功」と誤認
+    # させないための anomaly フラグ (--no-alpaca の意図的 offline とは区別する)。
+    broker_unreachable = False
 
     if not args.no_alpaca:
         if args.confirm:
@@ -349,12 +353,22 @@ def main(argv: list[str] | None = None) -> int:
         except Exception as exc:
             print(f"[warn] Alpaca client 取得失敗 (offline mode で継続): {exc}")
             client = None
+            broker_unreachable = True
 
     if client is not None:
-        snapshots = fetch_position_snapshots(client)
-        existing_protect_coids = fetch_existing_protect_coids(client)
-        existing_exit_coids = fetch_existing_exit_coids(client)
-        _hydrate_from_alpaca_coids(snapshots, client)
+        try:
+            snapshots = fetch_position_snapshots(client, raise_on_error=True)
+        except PositionsFetchError as exc:
+            # client は取れたが positions fetch が失敗 (transient outage 等)。
+            # silent [] に畳むと「flat book」と区別できず exit が全 skip されても
+            # exit0 で成功に見える → anomaly として surface する。
+            print(f"[warn] positions 取得失敗 (broker unreachable): {exc}")
+            snapshots = []
+            broker_unreachable = True
+        else:
+            existing_protect_coids = fetch_existing_protect_coids(client)
+            existing_exit_coids = fetch_existing_exit_coids(client)
+            _hydrate_from_alpaca_coids(snapshots, client)
 
     # --- 2) tracker / entry_orders_index --------------------------------
     tracker = load_tracker()
@@ -433,6 +447,7 @@ def main(argv: list[str] | None = None) -> int:
             "count": len(exits),
             "submitted": submitted_ok,
             "failed": submit_failed,
+            "broker_unreachable": broker_unreachable,
             "spy_high": spy_high,
             "spy_max70": spy_max70,
             "systems": {
@@ -458,6 +473,17 @@ def main(argv: list[str] | None = None) -> int:
         f"mode={mode} submitted={submitted_ok} failed={submit_failed}"
     )
     print(f"[write] {output_path}")
+    # broker 到達不能で positions を確認できなかった場合、exit が 0 件でも「成功
+    # (flat book)」と誤認させない。distinct code 3 で daily_pipeline に surface
+    # する (entry 側の no_orders_generated=3 と同じ観測性方針)。市場が閉じた後の
+    # 沈黙 exit 失敗 = position 滞留の温床なので必ず flag する。
+    if broker_unreachable:
+        print(
+            "[WARN] broker (Alpaca) に到達できず現保有 positions を確認できませんでした。"
+            "exit 判定は行われていません (0 exits は flat book ではなく取得失敗)。"
+            "接続を確認し、必要なら再実行してください。"
+        )
+        return 3
     return 0 if submit_failed == 0 else 1
 
 
