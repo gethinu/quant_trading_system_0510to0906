@@ -467,7 +467,14 @@ function ReconStrip({ snap }: { snap: AlpacaSnapshot }) {
 // --------------------------------------------------------------------------
 function exitBadge(p: AlpacaPosition): { text: string; cls: string; sub?: string } {
   if (p.exit_expected === 'time_based') {
-    return { text: '本日手仕舞い', cls: 'bg-fail/20 text-fail' };
+    // days_remaining = max_hold - holding_days: 0 = 本日満期, <0 = 期限超過。
+    // exit_expected='time_based' は days_remaining<=0 で必ず立つため、以前は
+    // 超過分を区別できず全部「本日手仕舞い」に潰れていた (超過 Nd が dead code)。
+    const d = p.days_remaining;
+    if (d != null && d < 0) {
+      return { text: `超過 ${-d}d`, cls: 'bg-fail/30 text-fail', sub: p.exit_date ?? undefined };
+    }
+    return { text: '本日手仕舞い', cls: 'bg-fail/20 text-fail', sub: p.exit_date ?? undefined };
   }
   if (p.exit_type === 'time' && p.days_remaining != null) {
     const d = p.days_remaining;
