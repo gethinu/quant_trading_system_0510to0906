@@ -29,6 +29,7 @@ from common.cache_freshness import (  # noqa: E402
     modal_last_date,
     symbols_behind_upstream,
 )
+from common.utils_spy import get_latest_nyse_trading_day  # noqa: E402
 
 
 def _load_universe(path: Path | None) -> set[str] | None:
@@ -101,6 +102,21 @@ def main(argv: list[str] | None = None) -> int:
         help="signal universe (one symbol/line); scopes the freeze check "
         "so non-universe ETFs are not counted. default data/universe_auto.txt",
     )
+    p.add_argument(
+        "--max-abs-lag-bdays",
+        type=int,
+        default=2,
+        help="WARN if upstream (full_backup) newest date lags the latest NYSE "
+        "trading day by more than this many business days (total-freeze "
+        "detector; catches rolling+upstream both frozen, which the relative "
+        "check reads as fresh). Generous default avoids vendor EOD-lag noise.",
+    )
+    p.add_argument(
+        "--today",
+        default=None,
+        help="reference 'today' (YYYY-MM-DD, ET) for the absolute-staleness "
+        "check; default = now in America/New_York. Mainly for tests.",
+    )
     args = p.parse_args(argv)
 
     try:
@@ -141,6 +157,37 @@ def main(argv: list[str] | None = None) -> int:
         f"[freshness] rolling modal={r_mode} (max={max_last_date(rolling)}, {len(rolling)} files) | "
         f"upstream modal={u_mode} (max={max_last_date(upstream)}, {len(upstream)} files)"
     )
+
+    # --- absolute-staleness (total-freeze) check ---------------------------
+    # 既存の rolling-vs-upstream 比較は「両方同時に凍結」を検知できない (lag=0 で
+    # fresh に見える)。upstream(full_backup) 自体が NYSE カレンダーの直近取引日から
+    # どれだけ遅れているかを絶対評価し、多日フリーズを surface する。
+    # 2026-07-12..14 のダッシュ凍結 (cache step が確定日を取れず全体停滞) は、
+    # この経路なら検知できた。exit 2 は soft WARN (pipeline は継続、$Failures に計上)。
+    try:
+        import pandas as pd  # local import: 起動コストを絶対チェック時のみに限定
+
+        ref = (
+            pd.Timestamp(args.today)
+            if args.today
+            else pd.Timestamp.now(tz="America/New_York").tz_localize(None)
+        )
+        latest_trading = get_latest_nyse_trading_day(ref)
+        latest_iso = latest_trading.date().isoformat()
+        u_max = max_last_date(upstream)
+        abs_lag = lag_business_days(u_max, latest_iso)
+        if abs_lag is not None and abs_lag > args.max_abs_lag_bdays:
+            print(
+                f"[freshness] WARN: upstream(full_backup) newest={u_max} は直近 NYSE "
+                f"取引日 ({latest_iso}) から {abs_lag} 営業日遅れています "
+                f"(> {args.max_abs_lag_bdays})。キャッシュ全体が凍結している疑い "
+                "(cache step が確定日を取得できていない)。cache_daily_polygon.py の "
+                "実行と Polygon 接続を確認してください。"
+            )
+            return 2
+    except Exception as exc:  # noqa: BLE001
+        # 絶対チェックは best-effort。失敗しても既存の相対チェックは実行する。
+        print(f"[freshness] (absolute-staleness check skipped: {exc})")
 
     if universe:
         behind = symbols_behind_upstream(rolling, upstream, universe=universe)
