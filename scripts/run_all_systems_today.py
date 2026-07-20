@@ -2068,14 +2068,30 @@ def _subset_data(
     return out
 
 
+class PositionReconcileError(RuntimeError):
+    """現保有ポジションの取得に失敗したことを表す (fail-closed 用, P1 fix 2026-07-21)。
+
+    「口座が flat ([])」と「取得に失敗した」を区別できるようにするための例外。
+    従来は _fetch_positions_and_symbol_map が fetch 例外を握り潰して [] を返し、
+    呼び出し側が flat と誤認して per-run cap only で新規を出していた (silent 縮退)。
+    """
+
+
 def _fetch_positions_and_symbol_map() -> tuple[list[Any], dict[str, str]]:
-    """Fetch Alpaca positions and cached symbol-to-system mapping once."""
+    """Fetch Alpaca positions and cached symbol-to-system mapping once.
+
+    P1 fix (2026-07-21): position fetch の失敗は **握り潰さず raise** する。
+    silent [] は「flat 口座」と区別できず、held 未反映で新規を積み増す原因だった。
+    symbol_system_map の読み込み失敗は従来通り寛容 (``{}``)。
+    """
 
     try:
         client = ba.get_client(paper=True)
         positions = list(client.get_all_positions())
-    except Exception:
-        positions = []
+    except Exception as exc:  # noqa: BLE001
+        raise PositionReconcileError(
+            f"Alpaca 現保有ポジション取得に失敗: {exc}"
+        ) from exc
 
     try:
         symbol_system_map = load_symbol_system_map()
@@ -2094,12 +2110,17 @@ def _resolve_positions_for_allocation() -> tuple[list[Any] | None, Any | None]:
     従来は active_positions=None で突合が実質無効だった (fable5 audit item7/8) のを
     ここで配線し、finalize_allocation(positions=...) に渡して available_slots に反映する。
 
-    安全策 (fail-open = 従来挙動へ縮退):
+    fetch を試みない安全策 (fail-open = 従来挙動へ縮退。口座に触れない環境の保護):
     - env ``ALLOCATION_RECONCILE_POSITIONS`` が偽値 (0/false/no/off) なら突合無効。
     - APCA creds 未設定なら Alpaca に触れず None (test/CI/backtest 保護)。
-    - fetch 失敗時も None にフォールバック。allocation 段は best-effort で良い
-      (submit 段 signals_json_to_orders / signals_to_orders の held-check が
-       duplicate exposure の hard guard)。
+
+    P1 fix (2026-07-21) — **fetch 失敗は fail-CLOSED**:
+    - creds があり fetch を試みて失敗した場合、silent に None へ縮退すると held が
+      available_slots に反映されず per-run cap only になり、日跨ぎで積み増す原因になる
+      (audit 🔴P1 root-cause A)。既定 (``ALLOCATION_RECONCILE_FAILCLOSED`` truthy) では
+      ``PositionReconcileError`` を raise し、呼び出し側が「この run は新規を出さない」
+      判断をする (既存ポジションには触れない)。
+    - opt-out (``ALLOCATION_RECONCILE_FAILCLOSED=0``) で従来の WARN+None (fail-open)。
     """
     try:
         symbol_system_map: Any = load_symbol_system_map()
@@ -2114,10 +2135,23 @@ def _resolve_positions_for_allocation() -> tuple[list[Any] | None, Any | None]:
         # creds 無し = 口座に触れない環境。従来通り突合しない。
         return None, symbol_system_map
 
+    fail_closed = os.environ.get(
+        "ALLOCATION_RECONCILE_FAILCLOSED", "1"
+    ).strip().lower() not in ("0", "false", "no", "off")
     try:
         positions, fetched_map = _fetch_positions_and_symbol_map()
     except Exception as exc:  # noqa: BLE001
-        _log(f"⚠️ 現保有ポジション取得に失敗、突合なしで継続: {exc}", level="WARNING")
+        if fail_closed:
+            _log(
+                "🔒 現保有ポジション取得に失敗 → fail-closed。"
+                f"本 run は新規エントリを生成しません: {exc}",
+                level="ERROR",
+            )
+            raise PositionReconcileError(str(exc)) from exc
+        _log(
+            f"⚠️ 現保有ポジション取得に失敗、突合なしで継続 (fail-open opt-out): {exc}",
+            level="WARNING",
+        )
         return None, symbol_system_map
 
     if not symbol_system_map and fetched_map:
@@ -5456,6 +5490,27 @@ def compute_today_signals(  # noqa: C901  # type: ignore[reportGeneralTypeIssues
             market_data_dict=ctx.basic_data,
             signal_date=ctx.today,
             include_trade_management=True,
+        )
+    except PositionReconcileError as e:
+        # P1 fail-closed: 現保有を確認できないので新規は一切出さない。
+        # 既存ポジションには触れない (read 失敗であって write ではない)。
+        _log(
+            "🔒 現保有ポジション未確認 (fail-closed) → 本 run は新規エントリ 0 件。"
+            f" 既存ポジションは不変: {e}",
+            level="ERROR",
+        )
+        final_df = pd.DataFrame()
+        from core.final_allocation import (
+            AllocationSummary as _AS,  # local import to avoid cycle
+        )
+
+        allocation_summary = _AS(
+            mode="reconcile_failed",
+            long_allocations={},
+            short_allocations={},
+            active_positions={},
+            available_slots={},
+            final_counts={},
         )
     except Exception as e:
         _log(f"❌ finalize_allocation 失敗: {e}")

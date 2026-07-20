@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
@@ -25,6 +26,7 @@ from typing import Any
 import pandas as pd
 
 from common import broker_alpaca as ba
+from common.symbol_map import resolve_primary_system
 
 logger = logging.getLogger(__name__)
 
@@ -921,6 +923,209 @@ def fetch_open_order_state(client: Any) -> tuple[dict[str, set[str]], set[str]]:
     return open_sides, open_coids
 
 
+# =========================================================================
+# Per-system standing cap (P1 fix, 2026-07-21)
+# =========================================================================
+# 根因 (logs/audit_20260719/AUDIT_REPORT.md 🔴P1): 発注境界には per-symbol の
+# ``already_held`` しか無く、**別銘柄で同一 system の保有数が上限 (max_positions=10)
+# を超えて積み上がる**のを止められなかった。07-13 の 10 銘柄 + 07-14 の別 10 銘柄が
+# 両方通り system 別 20 に。finalize_allocation の slot cap は open_auto_run 経路
+# (JSON→paper_trading_submit) を通らないので効かない。ここが両経路共通の発注直前点=
+# **最終防波堤**。詳細 docs/POSITION_MANAGEMENT_P1_STANDING_CAP_20260721.md。
+#
+# cap 値は新規でなく既存 spec の実効化:
+#   per-system=risk.max_positions(=10, docs/systems S1/S2 明記/他 global 既定)
+#   total     =risk.portfolio.max_total_positions(=70, PHASE5 §2.1)
+# per-run TOP_N=10 (1 run の候補生成数) とは別概念 (こちらは日跨ぎの同時保有残高)。
+
+
+@dataclass(slots=True)
+class HeldPositionCounts:
+    """standing cap 判定用の現保有集計。
+
+    per_system: system 帰属できた保有数 (coid → symbol_system_map)。
+    unmapped: system 帰属できない nonzero 保有 (delisted/orphan, 例 FOLD/CDTX)。
+    total: nonzero 保有総数 (unmapped 含む)。long_total/short_total は qty 符号で。
+    """
+
+    per_system: dict[str, int]
+    unmapped: int
+    total: int
+    long_total: int
+    short_total: int
+
+
+def _fetch_entry_coid_by_symbol(client: Any) -> dict[str, str]:
+    """直近 Alpaca orders から entry 由来 client_order_id を symbol 別に引く (read-only)。
+
+    exit 経路 ``_hydrate_from_alpaca_coids`` と同じ信頼できる帰属源。取得失敗は
+    握り潰して空 dict (best-effort。position fetch 自体は別で fail-closed 済)。
+    """
+    out: dict[str, str] = {}
+    try:
+        from alpaca.trading.enums import QueryOrderStatus
+        from alpaca.trading.requests import GetOrdersRequest
+
+        raw = client.get_orders(
+            filter=GetOrdersRequest(status=QueryOrderStatus.ALL, limit=500)
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("standing cap: 直近 orders 取得失敗、coid 帰属を skip: %s", exc)
+        return out
+    for o in raw or []:
+        try:
+            sym = str(getattr(o, "symbol", "") or "").upper()
+            coid = str(getattr(o, "client_order_id", "") or "")
+            if not sym or not coid:
+                continue
+            if parse_system_from_client_order_id(coid) is None:
+                continue  # entry 由来 (system... prefix) のみ
+            out.setdefault(sym, coid)  # 最初にヒット (新しい fill から返る想定)
+        except Exception:
+            continue
+    return out
+
+
+def count_held_positions_by_system(
+    client: Any,
+    *,
+    open_positions: dict[str, float],
+    symbol_system_map: Mapping[str, Any] | None = None,
+    coid_by_symbol: Mapping[str, str] | None = None,
+) -> HeldPositionCounts:
+    """現保有を system 別に集計する (standing cap の分母)。
+
+    ``open_positions`` は ``{symbol: signed_qty}`` (``_fetch_open_positions`` 由来)。
+    帰属優先順位 = entry order の client_order_id (``system{N}-…``) → symbol_system_map。
+    どちらでも帰属できない nonzero 保有は delisted/orphan として ``unmapped`` に積む
+    (total/side には算入するが per-system には入れない = docs の設計判断)。
+    """
+    ssm: dict[str, str] = {}
+    if symbol_system_map:
+        for k, v in symbol_system_map.items():
+            try:
+                sym = str(k).strip().upper()
+            except Exception:
+                continue
+            prim = resolve_primary_system(v)
+            if not prim:
+                try:
+                    prim = str(v).strip().lower() or None
+                except Exception:
+                    prim = None
+            if sym and prim:
+                ssm[sym] = str(prim).strip().lower()
+
+    coids: Mapping[str, str] = coid_by_symbol if coid_by_symbol is not None else {}
+    if coid_by_symbol is None and client is not None:
+        coids = _fetch_entry_coid_by_symbol(client)
+
+    per_system: dict[str, int] = {}
+    unmapped = total = long_total = short_total = 0
+    for sym_raw, qty_raw in (open_positions or {}).items():
+        try:
+            qty = float(qty_raw or 0.0)
+        except (TypeError, ValueError):
+            qty = 0.0
+        if qty == 0.0:
+            continue
+        sym = str(sym_raw).strip().upper()
+        total += 1
+        if qty >= 0:
+            long_total += 1
+        else:
+            short_total += 1
+
+        system = parse_system_from_client_order_id(coids.get(sym))
+        if not system:
+            system = ssm.get(sym)
+        if not system and sym == "SPY" and qty < 0:
+            system = "system7"  # SPY short = catastrophe hedge
+        if system:
+            key = str(system).strip().lower()
+            per_system[key] = per_system.get(key, 0) + 1
+        else:
+            unmapped += 1  # delisted/orphan (帰属不能)
+
+    return HeldPositionCounts(
+        per_system=per_system,
+        unmapped=unmapped,
+        total=total,
+        long_total=long_total,
+        short_total=short_total,
+    )
+
+
+def evaluate_standing_cap(
+    *,
+    system: str,
+    held_by_system: Mapping[str, int],
+    total_held: int,
+    batch_by_system: Mapping[str, int],
+    batch_total: int,
+    per_system_cap: int,
+    total_cap: int,
+) -> str | None:
+    """新規 1 件が standing cap に触れるなら skip 理由を返す (pure, なければ None)。
+
+    total_held / batch_total は delisted 含む口座全体。held_by_system は帰属済保有。
+    """
+    if total_cap > 0 and (total_held + batch_total) >= total_cap:
+        return (
+            f"standing_cap:portfolio_total_held={total_held}"
+            f"+batch={batch_total}>=cap={total_cap}"
+        )
+    key = (system or "").strip().lower()
+    if per_system_cap > 0 and key:
+        held = int(held_by_system.get(key, 0))
+        batch = int(batch_by_system.get(key, 0))
+        if (held + batch) >= per_system_cap:
+            return f"standing_cap:{key}_held={held}+batch={batch}>=cap={per_system_cap}"
+    return None
+
+
+def _resolve_standing_caps() -> tuple[bool, int, int]:
+    """(enforce, per_system_cap, total_cap) を config + env から解決する。
+
+    既定は docs 通り (per-system=risk.max_positions=10 / total=
+    risk.portfolio.max_total_positions=70)。新しいリスク値は入れない。
+    env で ops 上書き / 無効化可 (docs §4)。
+    """
+
+    def _flag(name: str, default: str = "1") -> bool:
+        return os.environ.get(name, default).strip().lower() not in (
+            "0",
+            "false",
+            "no",
+            "off",
+        )
+
+    def _int_env(name: str, fallback: int) -> int:
+        try:
+            raw = os.environ.get(name)
+            return int(raw) if raw not in (None, "") else fallback
+        except (TypeError, ValueError):
+            return fallback
+
+    per_system = 10
+    total = 70
+    try:
+        from config.settings import get_settings
+
+        risk = get_settings().risk
+        per_system = int(getattr(risk, "max_positions", 10))
+        total = int(
+            getattr(getattr(risk, "portfolio", None), "max_total_positions", 70)
+        )
+    except Exception:
+        pass
+
+    enforce = _flag("SUBMIT_ENFORCE_STANDING_CAP", "1")
+    per_system = _int_env("SUBMIT_MAX_POSITIONS_PER_SYSTEM", per_system)
+    total = _int_env("SUBMIT_MAX_TOTAL_POSITIONS", total)
+    return enforce, max(0, per_system), max(0, total)
+
+
 def signals_json_to_orders(
     json_data: dict[str, Any],
     tier: str,
@@ -958,9 +1163,12 @@ def signals_json_to_orders(
         entry_date = str(json_data.get("date") or "")
     date_compact = entry_date.replace("-", "").replace(" ", "")[:8]
 
-    # dedup (sym, system) を先に確定してから予算配分する。件数 cap / max_positions は
-    # 上流 (final_allocation) で today_signals 生成時に既に効いているので、ここでは
-    # per-name/gross/net の dollar cap のみを予算の内側で適用する。
+    # dedup (sym, system) を先に確定してから予算配分する。dollar cap
+    # (per-name/gross/net) は予算の内側でここで適用する。
+    # NOTE (P1 fix 2026-07-21): **件数 cap / max_positions は上流 finalize_allocation
+    # で必ず効く、という旧前提は誤り** (audit 🔴P1)。open_auto_run 経路は finalize を
+    # 通らず JSON→ここへ直行するため、per-system の保有件数上限は下の実発注ループで
+    # standing cap として enforce する (最終防波堤)。
     deduped: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
     for s in signals:
@@ -1057,6 +1265,35 @@ def signals_json_to_orders(
     # raise して fail-closed (silent {} で既保有に重ねて buy しない = P0#7 の設計)。
     open_positions = _fetch_open_positions(client)
 
+    # --- per-system standing cap の分母を一度だけ集計 (P1 fix 2026-07-21) ---
+    # already_held は同一銘柄しか止めない。別銘柄で system の保有数が上限を超えて
+    # 積み上がる (07-13 の 10 + 07-14 の別 10 = 20) のを、ここで held+batch を数えて
+    # 弾く。これが finalize を経ない open_auto_run 経路の最終防波堤。
+    enforce_cap, per_system_cap, total_cap = _resolve_standing_caps()
+    if enforce_cap:
+        try:
+            from common.symbol_map import load_symbol_system_map
+
+            ssm = load_symbol_system_map()
+        except Exception:
+            ssm = {}
+        held_counts = count_held_positions_by_system(
+            client, open_positions=open_positions, symbol_system_map=ssm
+        )
+        logger.info(
+            "standing cap 有効: per_system<=%d total<=%d (現保有 total=%d "
+            "unmapped/delisted=%d per_system=%s)",
+            per_system_cap,
+            total_cap,
+            held_counts.total,
+            held_counts.unmapped,
+            held_counts.per_system,
+        )
+    else:
+        held_counts = HeldPositionCounts({}, 0, 0, 0, 0)
+    batch_by_system: dict[str, int] = {}
+    batch_total = 0
+
     submitted: list[PreparedOrder] = []
     for po in prepared:
         # pre-generation で既に skip 判定済 (min_notional 未満 / 整数株サイズ不能)
@@ -1078,6 +1315,32 @@ def signals_json_to_orders(
             logger.info("skip (既保有 %s): %s qty=%s", po.side, po.symbol, held)
             submitted.append(po)
             continue
+
+        # (0.5) per-system standing cap + portfolio total cap (P1 fix 2026-07-21):
+        #     already_held を通っても、別銘柄で system の保有が max_positions を超える
+        #     新規はここで弾く。実 submit 成功時のみ batch を積むので、skip/失敗は
+        #     cap 予算を消費しない。既存ポジションには一切触れない (新規を止めるだけ)。
+        if enforce_cap:
+            cap_reason = evaluate_standing_cap(
+                system=po.system or "",
+                held_by_system=held_counts.per_system,
+                total_held=held_counts.total,
+                batch_by_system=batch_by_system,
+                batch_total=batch_total,
+                per_system_cap=per_system_cap,
+                total_cap=total_cap,
+            )
+            if cap_reason:
+                po.skip_reason = cap_reason
+                _audit_log({"event": "skip_standing_cap", **po.to_row()})
+                logger.info(
+                    "skip (standing cap): %s %s %s",
+                    po.symbol,
+                    po.system,
+                    cap_reason,
+                )
+                submitted.append(po)
+                continue
 
         # (1) 冪等性: 同一 client_order_id が既に open なら二重 submit しない
         if po.client_order_id and po.client_order_id in open_coids:
@@ -1154,6 +1417,11 @@ def signals_json_to_orders(
             open_sides.setdefault(po.symbol, set()).add(po.side)
             if po.client_order_id:
                 open_coids.add(po.client_order_id)
+            # standing cap: 実 submit 成功分のみ batch に計上 (skip/失敗は消費しない)
+            batch_total += 1
+            _sys_key = (po.system or "").strip().lower()
+            if _sys_key:
+                batch_by_system[_sys_key] = batch_by_system.get(_sys_key, 0) + 1
             submitted.append(po)
         except Exception as exc:  # noqa: BLE001
             po.error = str(exc)
@@ -2052,6 +2320,9 @@ __all__ = [
     "plan_order_execution",
     "get_asset_fractionable",
     "fetch_open_order_state",
+    "HeldPositionCounts",
+    "count_held_positions_by_system",
+    "evaluate_standing_cap",
     "EXEC_NOTIONAL",
     "EXEC_QTY",
     "EXEC_SKIP",
