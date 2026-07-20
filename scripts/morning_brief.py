@@ -35,6 +35,7 @@ from datetime import date, datetime
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 
@@ -45,8 +46,24 @@ MT5_ROOT_DEFAULT = r"C:\Repos\mt5_Bundle-of-edges"
 TRIBE_ROOT_DEFAULT = r"C:\Repos\swimmy-fx-tribe"
 
 # 天気: 平日=東京・国際展示場駅周辺(江東区有明) / 週末=千葉県千葉市
-WEEKDAY_LOC = ("東京・有明(国際展示場)", 35.6297, 139.7936)
+#
+# 座標について: 国際展示場駅(実測 139.7939)は open-meteo/JMA グリッドでは東京湾側
+# のセル(丸め先 139.8125)に落ち、海洋影響で日中最高気温を ~3℃ 過小評価する
+# (実測 36℃ の日に湾側セルは 30.3℃、江東区の陸側セル=139.75 は 33.0℃ と、陸側が
+# 実測にも Yahoo/tenki 等の陸上予報にも近い)。ラベルは「有明」のまま、代表点だけ
+# 江東区の陸側グリッドへわずかに内陸へ寄せる (経度 139.775 → 139.75 セル)。
+WEEKDAY_LOC = ("東京・有明(国際展示場)", 35.635, 139.775)
 WEEKEND_LOC = ("千葉市", 35.6073, 140.1063)
+
+# open-meteo の既定 (best_match) は JMA の気温/天気コードに *別モデルの* 降水確率を
+# 継ぎ接ぎするため、「晴れ(code 1)なのに降水100%」という自己矛盾を吐く(実際に
+# 2026-07-21 の配信で発生)。日本域は JMA モデルに固定し、天気コード・気温・降水を
+# 1 つの整合したモデルから取る。JMA は降水確率(%)を持たず precipitation_sum(mm)を
+# 返すので、雨は mm ベースで表示する。JMA が欠測なら降水確率を持つ単一モデル
+# (gfs_seamless)へフォールバック(それでもモデルを跨いで継ぎ接ぎはしない)。
+_WEATHER_MODELS = ("jma_seamless", "gfs_seamless")
+# 「晴れ/快晴/晴れ時々曇」= WMO 0..2。ここに強い降水シグナルが同居したら矛盾。
+_CLEAR_CODES = frozenset({0, 1, 2})
 
 # WMO weather_code -> 短い日本語 (open-meteo daily.weather_code)
 _WMO = {
@@ -357,59 +374,198 @@ def adapter_mt5(mt5_root: Path, zombie_timeout: float) -> ProjectStatus:
 
 
 # --------------------------------------------------------------------------
-# tribe / 家族ボード アダプタ — ソース未接続 (正直に gap を報告)
+# tribe アダプタ — swimmy-fx-tribe の forward Go/No-Go を1行で
 # --------------------------------------------------------------------------
-def adapter_tribe(tribe_root: Path) -> ProjectStatus:
-    """swimmy-fx-tribe。構造化ステータス源が無いので当面 best-effort。
+def _parse_forward_status(text: str) -> dict | None:
+    """forward_status.txt を1行ステータス用の dict へ。
 
-    誤検知(偽の赤)を出さないため、ここでは available=False として PJ 行に出さず、
-    「ソース未接続」を note として最終報告にだけ残す。tribe 側が status.json 等の
-    決定的ステータスを吐くようになったら本アダプタを実装する。
+    1 行目の形式は安定 (生成元: swimmy-fx-tribe の
+    ``src/lisp/school/school-validation.lisp`` の format 文字列)::
+
+        Forward Go/No-Go: LIVE_READY=0 RUNNING=7 FAIL=0 BLOCKED_OOS=48 total=55 | ...
+        updated: 07/21 08:27 JST / 23:27 UTC reason: report
+
+    LIVE_READY が「live 昇格済/候補」数 = deploy シグナル。0 なら「deploy 無し」。
+    """
+    if "Forward Go/No-Go" not in text:
+        return None
+
+    def _int(key: str) -> int | None:
+        m = re.search(rf"\b{key}=(\d+)", text)
+        return int(m.group(1)) if m else None
+
+    out: dict = {
+        "live_ready": _int("LIVE_READY"),
+        "running": _int("RUNNING"),
+        "blocked_oos": _int("BLOCKED_OOS"),
+        "total": _int("total"),
+    }
+    m = re.search(r"updated:\s*(.+?)(?:\s+reason:|$)", text, flags=re.MULTILINE)
+    if m:
+        out["updated"] = m.group(1).strip()
+    return out
+
+
+def adapter_tribe(tribe_root: Path, today: date) -> ProjectStatus:
+    """swimmy-fx-tribe。forward の Go/No-Go を決定的な1行に落とす。
+
+    ソース = ``data/reports/forward_status.txt`` (host-local, tribe の forward job が
+    毎日更新)。read-only・tribe repo は一切変更しない。ライブ swimmy.db は触らない。
     """
     st = ProjectStatus(key="tribe", label="tribe")
-    st.available = False
-    st.note = "決定的ステータス源が未接続 (swimmy-fx-tribe に status ファイルなし)。要接続方針"
+    status_path = tribe_root / "data" / "reports" / "forward_status.txt"
+    if not status_path.exists():
+        st.note = "forward_status.txt 未検出 (data/reports は host-local) — forward job を確認"
+        return st
+    try:
+        text = status_path.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        st.note = "forward_status.txt 読取失敗"
+        return st
+    parsed = _parse_forward_status(text)
+    if not parsed or parsed.get("live_ready") is None:
+        st.note = "forward_status.txt 形式想定外 (Forward Go/No-Go 行なし)"
+        return st
+
+    st.available = True
+    live = int(parsed["live_ready"])
+    running = parsed.get("running")
+    blocked = parsed.get("blocked_oos")
+    total = parsed.get("total")
+
+    # 鮮度: mtime が数日古ければ stale と正直に注記(数値の信頼度を落とす)。
+    stale_days = 0
+    try:
+        mdate = date.fromtimestamp(status_path.stat().st_mtime)
+        stale_days = (today - mdate).days
+    except Exception:
+        stale_days = 0
+
+    # LIVE_READY>0 = forward が live 昇格候補を提示 → deploy 判断が要る (warn)。
+    # 定常(=0)は「deploy 無し・flag OFF」でノイズ無し。
+    if live > 0:
+        st.alerts.append(
+            f"[tribe] 🟡 LIVE_READY={live} — forward が live 昇格候補を提示 (deploy 判断)"
+        )
+
+    deploy_txt = f"live {live}" + ("(deploy無)" if live == 0 else "")
+    funnel = f"forward RUN{running}/blkOOS{blocked}/total{total}"
+    stale_txt = f" ⚠{stale_days}d古" if stale_days >= 2 else ""
+    st.status_line = f"{deploy_txt} · {funnel}{stale_txt}"
+    if stale_days >= 2:
+        st.note = f"forward_status.txt が {stale_days}d 未更新 (値が最新でない可能性)"
     return st
 
 
+# --------------------------------------------------------------------------
+# 家族ボード アダプタ — 実体(読めるソース)がまだ無い PJ
+# --------------------------------------------------------------------------
+# ソースが決まったらここに読取を実装し note/status_line を埋めれば復活する。
+FAMILY_BOARD_SOURCE: str | None = (
+    None  # 例: 共有ボードの API URL / ローカル export path
+)
+
+
 def adapter_family() -> ProjectStatus:
-    """家族ボード。ローカルに読めるソースが無い (外部ボード想定)。"""
+    """家族ボード。実体が無いうちは *沈黙* する。
+
+    毎朝「ソース無し」を出すのは純粋なノイズなので、available=False かつ note="" に
+    して行ごと抑止する (gaps の正直注記にも出さない)。FAMILY_BOARD_SOURCE が設定
+    されたら読取を実装する。
+    """
     st = ProjectStatus(key="family", label="家族ボード")
     st.available = False
-    st.note = "ローカル読取可能なソース無し (外部ボード想定)。API/場所が判れば接続"
+    st.note = ""  # 実体ができるまで沈黙 (毎朝の「ソース無し」ノイズを止める)
     return st
 
 
 # --------------------------------------------------------------------------
 # 天気 — open-meteo (無料・キー不要)
 # --------------------------------------------------------------------------
+def _weather_consistent(code: int, pop: float | None, psum: float | None) -> bool:
+    """天気コードと降水シグナルが内部矛盾していないか。
+
+    信頼を落とす最大の失敗は「晴れなのに降水100%」。天気コードが晴れ系(0..2)
+    なのに降水確率が高い/降水量が多い場合は矛盾とみなす(数値を出さない判断に使う)。
+    """
+    if code in _CLEAR_CODES:
+        if pop is not None and pop >= 70:
+            return False
+        if psum is not None and psum >= 5.0:
+            return False
+    return True
+
+
+def _format_weather(
+    name: str,
+    code: int | None,
+    tmax: float | None,
+    tmin: float | None,
+    pop: float | None,
+    psum: float | None,
+) -> str | None:
+    """生の日次値から 1 行を組む(HTTP しない純関数=テスト可能)。
+
+    矛盾を検知したら数値を伏せて「整合性エラー」を正直に返す。晴れ/雨いずれの
+    表示も同一モデル由来なので、best_match のような継ぎ接ぎ矛盾は構造的に起きない。
+    """
+    if code is None:
+        return None
+    desc = _WMO.get(int(code), f"code{code}")
+    if not _weather_consistent(int(code), pop, psum):
+        # 誤った数字を自信満々に出すより、矛盾を正直に告げる方が信頼される。
+        return (
+            f"{name}: 天気取得の整合性エラー (天気={desc} と降水が矛盾のため数値非表示)"
+        )
+    temp = ""
+    if tmax is not None and tmin is not None:
+        temp = f" {round(tmin)}〜{round(tmax)}℃"
+    # 降水: pop(%) があればそれ、無ければ JMA の precipitation_sum(mm)。
+    if pop is not None:
+        rain = f" 降水{round(pop)}%"
+    elif psum is not None:
+        rain = f" 降水{round(psum)}mm" if psum > 0 else " 降水なし"
+    else:
+        rain = ""
+    return f"{name}: {desc}{temp}{rain}"
+
+
 def fetch_weather(is_weekend: bool, timeout: float = 10.0) -> str | None:
     name, lat, lon = WEEKEND_LOC if is_weekend else WEEKDAY_LOC
-    url = (
-        "https://api.open-meteo.com/v1/forecast"
-        f"?latitude={lat}&longitude={lon}"
-        "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max"
-        "&timezone=Asia%2FTokyo&forecast_days=1"
-    )
     try:
         import requests
-
-        r = requests.get(url, timeout=timeout)
-        if r.status_code != 200:
-            return None
-        d = r.json().get("daily", {})
-        code = int(d.get("weather_code", [3])[0])
-        tmax = d.get("temperature_2m_max", [None])[0]
-        tmin = d.get("temperature_2m_min", [None])[0]
-        pop = d.get("precipitation_probability_max", [None])[0]
-        desc = _WMO.get(code, f"code{code}")
-        temp = ""
-        if tmax is not None and tmin is not None:
-            temp = f" {round(tmin)}〜{round(tmax)}℃"
-        rain = f" 降水{pop}%" if pop is not None else ""
-        return f"{name}: {desc}{temp}{rain}"
     except Exception:
         return None
+    # 単一の整合モデルを順に試す(継ぎ接ぎしない)。最初に気温が取れたモデルを採用。
+    for model in _WEATHER_MODELS:
+        url = (
+            "https://api.open-meteo.com/v1/forecast"
+            f"?latitude={lat}&longitude={lon}"
+            "&daily=weather_code,temperature_2m_max,temperature_2m_min,"
+            "precipitation_probability_max,precipitation_sum"
+            f"&timezone=Asia%2FTokyo&forecast_days=1&models={model}"
+        )
+        try:
+            r = requests.get(url, timeout=timeout)
+            if r.status_code != 200:
+                continue
+            d = r.json().get("daily", {})
+
+            def _first(key: str):
+                v = d.get(key)
+                return v[0] if isinstance(v, list) and v else None
+
+            code = _first("weather_code")
+            tmax = _first("temperature_2m_max")
+            tmin = _first("temperature_2m_min")
+            pop = _first("precipitation_probability_max")
+            psum = _first("precipitation_sum")
+            if tmax is None or tmin is None:
+                continue  # このモデルは欠測 → 次の単一モデルへ
+            return _format_weather(name, code, tmax, tmin, pop, psum)
+        except Exception:
+            continue
+    return None
 
 
 # --------------------------------------------------------------------------
@@ -636,7 +792,7 @@ def main(argv: list[str] | None = None) -> int:
     for fn in (
         lambda: adapter_quant(primary, today_yyyymmdd),
         lambda: adapter_mt5(mt5_root, args.zombie_timeout),
-        lambda: adapter_tribe(tribe_root),
+        lambda: adapter_tribe(tribe_root, today),
         adapter_family,
     ):
         try:
