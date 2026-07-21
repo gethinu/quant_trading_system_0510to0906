@@ -343,6 +343,77 @@ def count_active_positions_by_system(
     return counts
 
 
+def count_positions_with_unmapped(
+    positions: Sequence[object] | None,
+    symbol_system_map: Mapping[str, Any] | None,
+) -> tuple[dict[str, int], dict[str, int]]:
+    """Like :func:`count_active_positions_by_system` but also tallies positions
+    that cannot be attributed to any system (delisted/orphan, e.g. FOLD/CDTX).
+
+    P1 fix (2026-07-21): ``count_active_positions_by_system`` silently *skips*
+    unmapped symbols, so ``held_total`` was undercounted and the portfolio total
+    cap thought there was more room than there really was (audit 🔴P1 root-cause C).
+    Delisted/orphan positions consume real capital and portfolio slots, so they
+    must count toward the total/side held — even though they have no per-system
+    attribution. See docs/POSITION_MANAGEMENT_P1_STANDING_CAP_20260721.md §3.3.
+
+    Returns ``(per_system, unmapped)`` where ``unmapped`` is
+    ``{"long": n, "short": m, "total": k}``.
+    """
+    per_system = count_active_positions_by_system(positions, symbol_system_map)
+
+    normalized: SymbolSystemMap = {}
+    if symbol_system_map:
+        for key, value in symbol_system_map.items():
+            try:
+                symbol = str(key).strip().upper()
+            except Exception:
+                continue
+            if not symbol:
+                continue
+            systems = coerce_system_list(value, ensure_all=False)
+            if systems:
+                normalized[symbol] = systems
+
+    unmapped = {"long": 0, "short": 0, "total": 0}
+    for pos in positions or []:
+        try:
+            symbol_raw = _get_position_attr(pos, "symbol")
+            if symbol_raw is None:
+                continue
+            sym = str(symbol_raw).strip().upper()
+            if not sym:
+                continue
+            qty_raw = _get_position_attr(pos, "qty")
+            try:
+                qty_val = float(qty_raw) if qty_raw is not None else 0.0
+            except (TypeError, ValueError):
+                qty_val = 0.0
+            if qty_val == 0.0:
+                continue
+
+            side_raw = _get_position_attr(pos, "side")
+            side = str(side_raw).strip().lower() if side_raw is not None else ""
+
+            primary_system = resolve_primary_system(normalized.get(sym))
+            if not primary_system and sym == "SPY" and side == "short":
+                primary_system = "system7"
+            if primary_system:
+                continue  # attributed → already in per_system
+
+            # unmapped (delisted/orphan): tally toward total/side by qty sign
+            unmapped["total"] += 1
+            if side == "short" or qty_val < 0:
+                unmapped["short"] += 1
+            else:
+                unmapped["long"] += 1
+        except Exception as exc:  # noqa: BLE001 - defensive
+            logger.warning("count_positions_with_unmapped: skip position: %s", exc)
+            continue
+
+    return per_system, unmapped
+
+
 def _normalize_allocations(
     weights: Mapping[str, float] | None,
     defaults: Mapping[str, float],
@@ -1665,14 +1736,21 @@ def _apply_portfolio_caps(
     if final_df is None or getattr(final_df, "empty", True):
         return final_df, report
 
-    active_by_system = count_active_positions_by_system(
+    # P1 fix (2026-07-21): delisted/orphan (system 帰属できない実保有) も held に算入。
+    # 従来 count_active_positions_by_system は unmapped を skip し held_total 過少 →
+    # total cap が余裕を過大評価していた (audit 🔴P1 root-cause C)。
+    active_by_system, unmapped = count_positions_with_unmapped(
         active_positions, symbol_system_map
     )
     long_set = {str(s).strip().lower() for s in long_systems}
     short_set = {str(s).strip().lower() for s in short_systems}
-    held_long = sum(v for k, v in active_by_system.items() if k in long_set)
-    held_short = sum(v for k, v in active_by_system.items() if k in short_set)
-    held_total = sum(active_by_system.values())
+    held_long = sum(v for k, v in active_by_system.items() if k in long_set) + int(
+        unmapped.get("long", 0)
+    )
+    held_short = sum(v for k, v in active_by_system.items() if k in short_set) + int(
+        unmapped.get("short", 0)
+    )
+    held_total = sum(active_by_system.values()) + int(unmapped.get("total", 0))
 
     max_total = int(caps.get("max_total_positions", 70))
     max_long = int(caps.get("max_long_positions", 40))
@@ -1730,6 +1808,7 @@ def _apply_portfolio_caps(
     report = {
         "applied": True,
         "held": {"long": held_long, "short": held_short, "total": held_total},
+        "held_unmapped": dict(unmapped),  # delisted/orphan の内訳 (観測性)
         "caps": {
             "max_total": max_total,
             "max_long": max_long,

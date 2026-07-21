@@ -55,17 +55,42 @@ def test_reconcile_fetches_when_enabled(monkeypatch):
     assert positions == fake_positions
 
 
-def test_reconcile_fetch_failure_falls_back_to_none(monkeypatch):
+def test_reconcile_fetch_failure_is_fail_closed(monkeypatch):
+    """P1 fix (2026-07-21): fetch 失敗は既定で **fail-closed** (raise)。
+
+    従来は None へ silent フォールバック (fail-open) で、held が available_slots に
+    反映されず per-run cap only で新規を積み増していた (audit 🔴P1 root-cause A)。
+    """
+    import pytest
+
     monkeypatch.setenv("ALLOCATION_RECONCILE_POSITIONS", "1")
     monkeypatch.setenv("APCA_API_KEY_ID", "k")
     monkeypatch.setenv("APCA_API_SECRET_KEY", "s")
+    monkeypatch.delenv(
+        "ALLOCATION_RECONCILE_FAILCLOSED", raising=False
+    )  # 既定=fail-closed
+
+    def _boom():
+        raise RuntimeError("alpaca down")
+
+    monkeypatch.setattr(rast, "_fetch_positions_and_symbol_map", _boom)
+    with pytest.raises(rast.PositionReconcileError):
+        rast._resolve_positions_for_allocation()
+
+
+def test_reconcile_fetch_failure_failopen_optout(monkeypatch):
+    """opt-out (ALLOCATION_RECONCILE_FAILCLOSED=0) で従来の fail-open (None) に戻せる。"""
+    monkeypatch.setenv("ALLOCATION_RECONCILE_POSITIONS", "1")
+    monkeypatch.setenv("APCA_API_KEY_ID", "k")
+    monkeypatch.setenv("APCA_API_SECRET_KEY", "s")
+    monkeypatch.setenv("ALLOCATION_RECONCILE_FAILCLOSED", "0")
 
     def _boom():
         raise RuntimeError("alpaca down")
 
     monkeypatch.setattr(rast, "_fetch_positions_and_symbol_map", _boom)
     positions, _ = rast._resolve_positions_for_allocation()
-    assert positions is None  # fetch 失敗は None にフォールバック (fail-open)
+    assert positions is None  # opt-out: fetch 失敗は None にフォールバック
 
 
 def test_held_positions_reduce_available_slots():
