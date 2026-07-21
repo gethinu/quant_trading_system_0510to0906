@@ -77,6 +77,38 @@ $env:PYTHONIOENCODING = "utf-8"
 try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
+# --- dashboard publish self-heal + freshness alert (2026-07-22 root-cause) -
+# The 06:00 daily_main_follow.ps1 publishes the dashboard as its LAST step, AFTER
+# the child daily_pipeline.ps1 (which fires the ntfy) finishes. The ntfy lives in
+# the child; the dashboard publish lives in the wrapper. If the wrapper dies
+# mid-run the orphaned child still ntfy's fresh data while the publish is silently
+# lost -> the site freezes on yesterday's build even though ntfy shows today
+# (seen 2026-07-22: ntfy=07-22, dashboard=07-21). This launcher runs ~08:00 JST,
+# host-side and INDEPENDENT of that fragile wrapper, so it is the reliable place
+# to (1) DETECT the publish gap and alert on recurrence, then (2) SELF-HEAL by
+# republishing the newest generated data. -AutoLatest is idempotent (a no-op once
+# data/ is already current). Paper-only; data publish only, never orders.
+$pubScript = Join-Path $PrimaryRoot "scripts\publish_data_to_vercel.ps1"
+$freshChk = Join-Path $PrimaryRoot "scripts\check_dashboard_freshness.py"
+Push-Location $PrimaryRoot
+try {
+    if (Test-Path $freshChk) {
+        Write-Launch "--- [dashboard_freshness] detect (+notify if stale) ---"
+        & python $freshChk --repo-root $PrimaryRoot --notify 2>&1 |
+            ForEach-Object { Write-Launch $_ }
+        Write-Launch "[dashboard_freshness] exit=$LASTEXITCODE (0=fresh, 2=stale)"
+    }
+    if (Test-Path $pubScript) {
+        Write-Launch "--- [dashboard_selfheal] publish_data_to_vercel.ps1 -AutoLatest ---"
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $pubScript -AutoLatest 2>&1 |
+            ForEach-Object { Write-Launch $_ }
+        Write-Launch "[dashboard_selfheal] exit=$LASTEXITCODE"
+    }
+}
+finally {
+    Pop-Location
+}
+
 # --- build python args ---------------------------------------------------
 $py = Join-Path $RepoRoot "scripts\morning_brief.py"
 $pyArgs = @($py, "--primary-root", $PrimaryRoot, "--mt5-root", $Mt5Root)

@@ -27,6 +27,12 @@
     results_csv/ 側の source file (今日以外) を KeepDays 世代残して削除する。
     default $true。false 指定で無効化 (Sprint 期間中に history 保持したい時など)。
 
+.PARAMETER AutoLatest
+    -Date を無視し、results_csv/today_signals_*.json の最新生成日を自動検出して
+    publish する self-heal モード。冪等 (data/ が既に最新なら差分ゼロで exit 0)。
+    06:00 の wrapper (daily_main_follow.ps1) が途中で死んで dashboard publish を
+    取りこぼしても、独立した catch-up task から呼べば取り戻せる。
+
 .NOTES
     daily_pipeline.ps1 の最終 step から呼ばれる想定。単体実行も可。
     push 先: origin claude/monitor-webapp
@@ -36,18 +42,46 @@ param(
     [string]$Date = "",
     [int]$KeepDays = 7,
     [switch]$NoPush = $false,
-    [bool]$PurgeSource = $true
+    [bool]$PurgeSource = $true,
+    [switch]$AutoLatest = $false
 )
 
 $ErrorActionPreference = "Continue"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent $ScriptDir
-if (-not $Date) { $Date = Get-Date -Format "yyyy-MM-dd" }
-$DateCompact = $Date -replace "-", ""
 
 $SrcDir = Join-Path $ProjectRoot "results_csv"
 $DataDir = Join-Path $ProjectRoot "apps\dashboards\alpaca-next\data"
 $Branch = "claude/monitor-webapp"
+
+# -AutoLatest: self-heal path (2026-07-22 root-cause fix). The daily dashboard
+# publish normally runs as the LAST step of daily_main_follow.ps1, AFTER the child
+# daily_pipeline.ps1 (-SkipVercel) has finished. The ntfy notification lives INSIDE
+# that child (step 5), but the dashboard publish lives in the wrapper's step 4.
+# If the wrapper dies mid-run (e.g. host sleep / task timeout) the child is orphaned
+# yet keeps running to completion -> ntfy fires with fresh data while the wrapper's
+# publish is silently lost -> the dashboard freezes on yesterday's build.
+# This mode ignores -Date and publishes the NEWEST generated
+# results_csv/today_signals_*.json instead. It is idempotent: the downstream
+# `git diff --cached --quiet` gate makes a re-run a no-op (exit 0) once data/ is
+# already current, so it is safe to fire from an independent catch-up task
+# (see scripts/morning_brief.ps1) regardless of whether the 06:00 publish succeeded.
+if ($AutoLatest) {
+    $latest = Get-ChildItem -Path $SrcDir -Filter "today_signals_*.json" -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match 'today_signals_(\d{8})\.json$' } |
+        Sort-Object Name -Descending | Select-Object -First 1
+    if (-not $latest) {
+        Write-Host "[publish_data] AutoLatest: results_csv に today_signals_*.json が無い。何もせず終了 (exit 0)。"
+        exit 0
+    }
+    if ($latest.Name -match 'today_signals_(\d{8})\.json$') {
+        $dc = $matches[1]
+        $Date = "{0}-{1}-{2}" -f $dc.Substring(0, 4), $dc.Substring(4, 2), $dc.Substring(6, 2)
+        Write-Host "[publish_data] AutoLatest: newest generated date = $Date ($($latest.Name))"
+    }
+}
+if (-not $Date) { $Date = Get-Date -Format "yyyy-MM-dd" }
+$DateCompact = $Date -replace "-", ""
 
 function Write-Log {
     param([string]$Message)

@@ -7,6 +7,7 @@ import { PipelineSection } from '@/components/PipelineSection';
 import { SignalsSection } from '@/components/SignalsSection';
 import { AlpacaSection } from '@/components/AlpacaSection';
 import { Tabs } from '@/components/Tabs';
+import { FreshnessBanner } from '@/components/FreshnessBanner';
 import type {
   PipelinePayload,
   SignalsPayload,
@@ -137,6 +138,11 @@ export default function Home() {
 
   return (
     <main className="mx-auto max-w-5xl p-4 sm:p-6 pb-16">
+      <FreshnessBanner
+        date={signals?.date ?? null}
+        runId={signals?.meta.run_id ?? null}
+        generatedAt={signals?.generated_at ?? null}
+      />
       <Tabs
         signalsView={
           <SignalsView signals={signals} pipeline={pipeline} narrative={narrative} />
