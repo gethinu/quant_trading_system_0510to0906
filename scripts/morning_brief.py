@@ -47,55 +47,129 @@ TRIBE_ROOT_DEFAULT = r"C:\Repos\swimmy-fx-tribe"
 
 # 天気: 平日=東京・国際展示場駅周辺(江東区有明) / 週末=千葉県千葉市
 #
-# 座標について: 国際展示場駅(実測 139.7939)は open-meteo/JMA グリッドでは東京湾側
-# のセル(丸め先 139.8125)に落ち、海洋影響で日中最高気温を ~3℃ 過小評価する
-# (実測 36℃ の日に湾側セルは 30.3℃、江東区の陸側セル=139.75 は 33.0℃ と、陸側が
-# 実測にも Yahoo/tenki 等の陸上予報にも近い)。ラベルは「有明」のまま、代表点だけ
-# 江東区の陸側グリッドへわずかに内陸へ寄せる (経度 139.775 → 139.75 セル)。
-WEEKDAY_LOC = ("東京・有明(国際展示場)", 35.635, 139.775)
-WEEKEND_LOC = ("千葉市", 35.6073, 140.1063)
-
-# open-meteo の既定 (best_match) は JMA の気温/天気コードに *別モデルの* 降水確率を
-# 継ぎ接ぎするため、「晴れ(code 1)なのに降水100%」という自己矛盾を吐く(実際に
-# 2026-07-21 の配信で発生)。日本域は JMA モデルに固定し、天気コード・気温・降水を
-# 1 つの整合したモデルから取る。JMA は降水確率(%)を持たず precipitation_sum(mm)を
-# 返すので、雨は mm ベースで表示する。JMA が欠測なら降水確率を持つ単一モデル
-# (gfs_seamless)へフォールバック(それでもモデルを跨いで継ぎ接ぎはしない)。
-_WEATHER_MODELS = ("jma_seamless", "gfs_seamless")
-# 「晴れ/快晴/晴れ時々曇」= WMO 0..2。ここに強い降水シグナルが同居したら矛盾。
-_CLEAR_CODES = frozenset({0, 1, 2})
-
-# WMO weather_code -> 短い日本語 (open-meteo daily.weather_code)
-_WMO = {
-    0: "快晴",
-    1: "晴れ",
-    2: "晴れ時々曇",
-    3: "曇り",
-    45: "霧",
-    48: "着氷性の霧",
-    51: "霧雨(弱)",
-    53: "霧雨",
-    55: "霧雨(強)",
-    56: "着氷性霧雨",
-    57: "着氷性霧雨(強)",
-    61: "雨(弱)",
-    63: "雨",
-    65: "雨(強)",
-    66: "着氷性の雨",
-    67: "着氷性の雨(強)",
-    71: "雪(弱)",
-    73: "雪",
-    75: "雪(強)",
-    77: "細氷",
-    80: "にわか雨(弱)",
-    81: "にわか雨",
-    82: "にわか雨(激)",
-    85: "にわか雪",
-    86: "にわか雪(強)",
-    95: "雷雨",
-    96: "雷雨(雹)",
-    99: "雷雨(激・雹)",
+# 【地点観測ベースへ切替 2026-07-22】以前は open-meteo(グリッド予報)を使っていたが、
+# 有明はグリッドが東京湾セルに落ち海洋影響で日中最高を過小評価した(実測36℃に対し
+# 33℃止まり)。地点観測ベースに切替: **気象庁(JMA)公式**を直接叩く。
+#   - 天気・降水確率・**当日最高気温** = 府県天気予報(地点予報)
+#       forecast/data/forecast/{pref}.json (05時発表 = 当日最高/降水確率を含む)
+#   - **当日最低気温** = AMeDAS 地点観測 (朝の時点で当日最低は既に観測済 = 確定値)
+#       amedas/data/point/{amedas_id}/{YYYYMMDD}_{HH}.json
+# 予報(最高)と観測(最低)の役割分担で、実測に最も近い range を作る。
+# pref=府県コード, area=一次細分区(天気/降水確率), temp_point=気温地点, amedas=観測点。
+JMA_WEEKDAY = {
+    "name": "東京・有明(国際展示場)",
+    "pref": "130000",  # 東京都
+    "area": "130010",  # 東京地方 (23区含む=江東区)
+    "temp_point": "44132",  # 気温地点=東京
+    "amedas": "44132",  # AMeDAS=東京 (北の丸公園, 陸上観測)
 }
+JMA_WEEKEND = {
+    "name": "千葉市",
+    "pref": "120000",  # 千葉県
+    "area": "120010",  # 北西部 (千葉市)
+    "temp_point": "45212",  # 気温地点=千葉
+    "amedas": "45212",  # AMeDAS=千葉
+}
+
+# JMA telop コード -> 短い日本語 (forecast weatherCodes)。telops.json は 404 のため
+# 静的に埋め込む(コードは安定)。未収載コードは先頭桁で粗くフォールバック
+# (1xx=晴/2xx=くもり/3xx=雨/4xx=雪) して生 code を出さない。
+_JMA_TELOP = {
+    "100": "晴れ",
+    "101": "晴れ時々くもり",
+    "102": "晴れ一時雨",
+    "103": "晴れ時々雨",
+    "104": "晴れ一時雪",
+    "105": "晴れ時々雪",
+    "110": "晴れのち時々くもり",
+    "111": "晴れのちくもり",
+    "112": "晴れのち一時雨",
+    "113": "晴れのち時々雨",
+    "114": "晴れのち雨",
+    "115": "晴れのち一時雪",
+    "116": "晴れのち時々雪",
+    "117": "晴れのち雪",
+    "119": "晴れのち雨か雷雨",
+    "123": "晴れ(山沿い雷雨)",
+    "125": "晴れ午後は雷雨",
+    "126": "晴れ昼頃から雨",
+    "127": "晴れ夕方から雨",
+    "128": "晴れ夜は雨",
+    "130": "朝の内霧のち晴れ",
+    "132": "晴れ朝夕くもり",
+    "140": "晴れ時々雨で雷",
+    "160": "晴れ一時雪か雨",
+    "200": "くもり",
+    "201": "くもり時々晴れ",
+    "202": "くもり一時雨",
+    "203": "くもり時々雨",
+    "204": "くもり一時雪",
+    "205": "くもり時々雪",
+    "206": "くもり一時雨か雪",
+    "207": "くもり時々雨か雪",
+    "208": "くもり一時雨で雷",
+    "209": "霧",
+    "210": "くもりのち時々晴れ",
+    "211": "くもりのち晴れ",
+    "212": "くもりのち一時雨",
+    "213": "くもりのち時々雨",
+    "214": "くもりのち雨",
+    "215": "くもりのち一時雪",
+    "216": "くもりのち時々雪",
+    "217": "くもりのち雪",
+    "218": "くもりのち雨か雪",
+    "219": "くもりのち雨か雷雨",
+    "220": "くもり朝夕一時雨",
+    "221": "くもり朝の内一時雨",
+    "222": "くもり夕方一時雨",
+    "223": "くもり日中時々晴れ",
+    "224": "くもり昼頃から雨",
+    "225": "くもり夕方から雨",
+    "226": "くもり夜は雨",
+    "228": "くもり昼頃から雪",
+    "231": "くもり(海上海岸は霧)",
+    "240": "くもり時々雨で雷",
+    "300": "雨",
+    "301": "雨時々晴れ",
+    "302": "雨時々止む",
+    "303": "雨時々雪",
+    "304": "雨か雪",
+    "306": "大雨",
+    "308": "雨で暴風",
+    "309": "雨一時雪",
+    "311": "雨のち晴れ",
+    "313": "雨のちくもり",
+    "314": "雨のち時々雪",
+    "315": "雨のち雪",
+    "316": "雨か雪のち晴れ",
+    "317": "雨か雪のちくもり",
+    "320": "朝の内雨のち晴れ",
+    "321": "朝の内雨のちくもり",
+    "323": "雨昼頃から晴れ",
+    "324": "雨夕方から晴れ",
+    "325": "雨夜は晴れ",
+    "328": "雨一時強く降る",
+    "329": "雨一時みぞれ",
+    "340": "雪か雨",
+    "350": "雨で雷",
+    "400": "雪",
+    "401": "雪時々晴れ",
+    "402": "雪時々止む",
+    "403": "雪時々雨",
+    "405": "大雪",
+    "406": "風雪強い",
+    "407": "暴風雪",
+    "409": "雪一時雨",
+    "411": "雪のち晴れ",
+    "413": "雪のちくもり",
+    "414": "雪のち雨",
+    "425": "雪一時強く降る",
+    "426": "雪のちみぞれ",
+    "427": "雪一時みぞれ",
+    "450": "雪で雷",
+}
+# 降水を示す文字(整合性ガード用)。表示テキストにこれらが無い=「乾いた空」判定。
+_PRECIP_CHARS = ("雨", "雪", "雷", "みぞれ", "霧雨")
 
 
 # --------------------------------------------------------------------------
@@ -480,92 +554,206 @@ def adapter_family() -> ProjectStatus:
 
 
 # --------------------------------------------------------------------------
-# 天気 — open-meteo (無料・キー不要)
+# 天気 — 気象庁(JMA)公式: 府県天気予報(地点予報) + AMeDAS(地点観測)
 # --------------------------------------------------------------------------
-def _weather_consistent(code: int, pop: float | None, psum: float | None) -> bool:
-    """天気コードと降水シグナルが内部矛盾していないか。
+_JMA_UA = {"User-Agent": "quant-morning-brief/1.0 (host-side ops)"}
 
-    信頼を落とす最大の失敗は「晴れなのに降水100%」。天気コードが晴れ系(0..2)
-    なのに降水確率が高い/降水量が多い場合は矛盾とみなす(数値を出さない判断に使う)。
+
+def _jma_weather_text(code: str | None) -> str | None:
+    """JMA telop code -> 短い日本語。未収載は先頭桁で粗くフォールバック。"""
+    if not code:
+        return None
+    if code in _JMA_TELOP:
+        return _JMA_TELOP[code]
+    coarse = {"1": "晴れ", "2": "くもり", "3": "雨", "4": "雪"}.get(str(code)[:1])
+    return coarse  # None なら呼び側で扱う (生 code は出さない)
+
+
+def _text_is_dry(text: str) -> bool:
+    """表示テキストが「乾いた空」(雨/雪/雷を含まない) か。"""
+    return not any(ch in text for ch in _PRECIP_CHARS)
+
+
+def _weather_consistent(text: str | None, pop: float | None) -> bool:
+    """天気テキストと降水確率が内部矛盾していないか。
+
+    信頼を落とす最大の失敗は「晴れなのに降水確率が極端に高い」。乾いた空
+    (雨/雪/雷なし)なのに pop>=70% なら矛盾とみなす(数値を伏せる判断に使う)。
+    JMA 単一ソースなので通常は起きないが、ガードは安全網として維持する。
     """
-    if code in _CLEAR_CODES:
-        if pop is not None and pop >= 70:
-            return False
-        if psum is not None and psum >= 5.0:
-            return False
+    if text and _text_is_dry(text) and pop is not None and pop >= 70:
+        return False
     return True
 
 
 def _format_weather(
     name: str,
-    code: int | None,
+    code: str | None,
     tmax: float | None,
     tmin: float | None,
     pop: float | None,
-    psum: float | None,
 ) -> str | None:
-    """生の日次値から 1 行を組む(HTTP しない純関数=テスト可能)。
+    """日次値から 1 行を組む(HTTP しない純関数=テスト可能)。
 
-    矛盾を検知したら数値を伏せて「整合性エラー」を正直に返す。晴れ/雨いずれの
-    表示も同一モデル由来なので、best_match のような継ぎ接ぎ矛盾は構造的に起きない。
+    - 最高は予報・最低は観測(呼び側で解決済)。矛盾検知時は数値を伏せて正直に。
+    - 最低が取れない場合は range をやめ「最高X℃」だけ出す(観測欠損を捏造しない)。
     """
-    if code is None:
-        return None
-    desc = _WMO.get(int(code), f"code{code}")
-    if not _weather_consistent(int(code), pop, psum):
+    desc = _jma_weather_text(code)
+    if desc is None and tmax is None:
+        return None  # 天気も気温も無い = 実質取得失敗
+    label = desc or "天気不明"
+    if not _weather_consistent(desc, pop):
         # 誤った数字を自信満々に出すより、矛盾を正直に告げる方が信頼される。
-        return (
-            f"{name}: 天気取得の整合性エラー (天気={desc} と降水が矛盾のため数値非表示)"
-        )
-    temp = ""
+        return f"{name}: 天気取得の整合性エラー (天気={label} と降水確率{pop}%が矛盾のため数値非表示)"
     if tmax is not None and tmin is not None:
         temp = f" {round(tmin)}〜{round(tmax)}℃"
-    # 降水: pop(%) があればそれ、無ければ JMA の precipitation_sum(mm)。
-    if pop is not None:
-        rain = f" 降水{round(pop)}%"
-    elif psum is not None:
-        rain = f" 降水{round(psum)}mm" if psum > 0 else " 降水なし"
+    elif tmax is not None:
+        temp = f" 最高{round(tmax)}℃"  # 最低(観測)欠損 → range を捏造しない
+    elif tmin is not None:
+        temp = f" 最低{round(tmin)}℃"
     else:
-        rain = ""
-    return f"{name}: {desc}{temp}{rain}"
+        temp = ""
+    rain = f" 降水{round(pop)}%" if pop is not None else ""
+    return f"{name}: {label}{temp}{rain}"
 
 
-def fetch_weather(is_weekend: bool, timeout: float = 10.0) -> str | None:
-    name, lat, lon = WEEKEND_LOC if is_weekend else WEEKDAY_LOC
+def _http_json(url: str, timeout: float):
+    """GET -> JSON。失敗は None (黙って別値を出さない=呼び側で欠損扱い)。"""
     try:
         import requests
+
+        r = requests.get(url, headers=_JMA_UA, timeout=timeout)
+        if r.status_code != 200:
+            return None
+        return r.json()
     except Exception:
         return None
-    # 単一の整合モデルを順に試す(継ぎ接ぎしない)。最初に気温が取れたモデルを採用。
-    for model in _WEATHER_MODELS:
+
+
+def _parse_jma_forecast(
+    blocks: list, area: str, temp_point: str, today_iso: str
+) -> dict:
+    """JMA 府県予報 JSON(list)から当日の {code,text,pop,tmax,report} を抜く純関数。
+
+    tmax = 気温地点の当日値の最大 (05時発表の temps は当日 min スロットが max と同値の
+    placeholder になる既知仕様のため、当日エントリの max を最高気温として採る)。
+    tmin は当日ぶんが信頼できない(観測で別途取る)ので返さない。
+    """
+    out: dict = {"code": None, "text": None, "pop": None, "tmax": None, "report": None}
+    if not isinstance(blocks, list) or not blocks:
+        return out
+    b = blocks[0]
+    out["report"] = b.get("reportDatetime")
+
+    def _area(ts: dict, code: str) -> dict | None:
+        for a in ts.get("areas", []):
+            if a.get("area", {}).get("code") == code:
+                return a
+        return None
+
+    def _today_ints(ts: dict, a: dict | None, key: str) -> list[int]:
+        if not a or not a.get(key):
+            return []
+        tdef = ts.get("timeDefines", [])
+        return [
+            int(v)
+            for t, v in zip(tdef, a[key])
+            if str(t).startswith(today_iso) and str(v).lstrip("-").isdigit()
+        ]
+
+    ts = b.get("timeSeries", [])
+    if len(ts) >= 1:  # 天気コード (先頭 = 当日)
+        a = _area(ts[0], area)
+        if a and a.get("weatherCodes"):
+            out["code"] = str(a["weatherCodes"][0])
+            out["text"] = _jma_weather_text(out["code"])
+    if len(ts) >= 2:  # 降水確率 (当日ぶんの最大)
+        pops = _today_ints(ts[1], _area(ts[1], area), "pops")
+        if pops:
+            out["pop"] = max(pops)
+    if len(ts) >= 3:  # 最高気温 (当日ぶんの最大値)
+        temps = _today_ints(ts[2], _area(ts[2], temp_point), "temps")
+        if temps:
+            out["tmax"] = max(temps)
+    return out
+
+
+def _jma_forecast_today(
+    pref: str, area: str, temp_point: str, today_iso: str, timeout: float
+) -> dict:
+    """府県予報を取得して当日ぶんを parse (HTTP は _http_json、parse は純関数)。"""
+    j = _http_json(
+        f"https://www.jma.go.jp/bosai/forecast/data/forecast/{pref}.json", timeout
+    )
+    return _parse_jma_forecast(
+        j if isinstance(j, list) else [], area, temp_point, today_iso
+    )
+
+
+def _amedas_today_min(amedas_id: str, today_compact: str, timeout: float) -> dict:
+    """AMeDAS 地点観測から当日の {tmin, current} を取る(観測値=確定した最低)。
+
+    3 時間ごとのファイル(00,03,...)を過去ぶんだけ辿る。未来ブロックは 404 で、
+    200 の後に 404 が来たら以降は無いので打ち切る(無駄打ち回避)。
+    """
+    out: dict = {"tmin": None, "current": None}
+    temps: list[float] = []
+    seen200 = False
+    for hh in ("00", "03", "06", "09", "12", "15", "18", "21"):
         url = (
-            "https://api.open-meteo.com/v1/forecast"
-            f"?latitude={lat}&longitude={lon}"
-            "&daily=weather_code,temperature_2m_max,temperature_2m_min,"
-            "precipitation_probability_max,precipitation_sum"
-            f"&timezone=Asia%2FTokyo&forecast_days=1&models={model}"
+            f"https://www.jma.go.jp/bosai/amedas/data/point/"
+            f"{amedas_id}/{today_compact}_{hh}.json"
         )
-        try:
-            r = requests.get(url, timeout=timeout)
-            if r.status_code != 200:
-                continue
-            d = r.json().get("daily", {})
-
-            def _first(key: str):
-                v = d.get(key)
-                return v[0] if isinstance(v, list) and v else None
-
-            code = _first("weather_code")
-            tmax = _first("temperature_2m_max")
-            tmin = _first("temperature_2m_min")
-            pop = _first("precipitation_probability_max")
-            psum = _first("precipitation_sum")
-            if tmax is None or tmin is None:
-                continue  # このモデルは欠測 → 次の単一モデルへ
-            return _format_weather(name, code, tmax, tmin, pop, psum)
-        except Exception:
+        j = _http_json(url, timeout)
+        if not isinstance(j, dict) or not j:
+            if seen200:
+                break  # 200 の後の欠落 = 未来ブロック → 打ち切り
             continue
-    return None
+        seen200 = True
+        for k in sorted(j):
+            t = j[k].get("temp")
+            if isinstance(t, list) and t and t[0] is not None:
+                temps.append(float(t[0]))
+                out["current"] = float(t[0])
+    if temps:
+        out["tmin"] = min(temps)
+    return out
+
+
+def fetch_weather(is_weekend: bool, today: date, timeout: float = 10.0) -> str | None:
+    """当日の天気 1 行を JMA 公式(予報=最高/降水/天気, 観測=最低)で組む。
+
+    フォールバックは *黙って別ソース/古い値を出さない*:
+      - 府県予報が取れない → None (呼び側で「取得失敗(JMA)」と正直に注記)
+      - 最高だけ取れ最低(観測)が欠損 → range をやめ「最高X℃」だけ(捏造しない)
+    値のソースは stdout ([weather] 行)に必ず残す (launch ログから追える)。
+    """
+    loc = JMA_WEEKEND if is_weekend else JMA_WEEKDAY
+    name = loc["name"]
+    today_iso = today.strftime("%Y-%m-%d")
+    today_compact = today.strftime("%Y%m%d")
+
+    fc = _jma_forecast_today(
+        loc["pref"], loc["area"], loc["temp_point"], today_iso, timeout
+    )
+    if fc["tmax"] is None and fc["code"] is None:
+        print(f"[weather] {name} src=JMA-forecast 取得失敗 (府県予報 null)")
+        return None  # 予報が取れない = 別ソースに黙って乗り換えず正直に失敗
+
+    am = _amedas_today_min(loc["amedas"], today_compact, timeout)
+    tmax = fc["tmax"]
+    tmin = am["tmin"]
+
+    # ソースを必ずログ (どの値がどのソースか後から追える)
+    print(
+        f"[weather] {name} src=JMA report={fc['report']} "
+        f"code={fc['code']}(forecast {loc['area']}) "
+        f"tmax={tmax}(forecast {loc['temp_point']}) "
+        f"tmin={tmin}(AMeDAS obs {loc['amedas']}) "
+        f"current={am['current']} pop={fc['pop']}(forecast max)"
+        + ("" if tmin is not None else " [WARN AMeDAS最低欠損→最高のみ表示]")
+    )
+    return _format_weather(name, fc["code"], tmax, tmin, fc["pop"])
 
 
 # --------------------------------------------------------------------------
@@ -680,7 +868,7 @@ def build_brief(
     # 取得できなかったセクション/ソースを正直に注記
     gaps = [f"{p.label}: {p.note}" for p in projects if not p.available and p.note]
     if weather is None:
-        gaps.append("天気: 取得失敗 (open-meteo)")
+        gaps.append("天気: 取得失敗 (JMA 地点予報 — 別ソースは出さない)")
     if gaps:
         out.append("")
         out.append("■ 未取得 (正直な注記)")
@@ -800,7 +988,7 @@ def main(argv: list[str] | None = None) -> int:
         except Exception as exc:  # noqa: BLE001
             print(f"[warn] adapter 失敗: {exc}")
 
-    weather = None if args.no_weather else fetch_weather(is_weekend)
+    weather = None if args.no_weather else fetch_weather(is_weekend, today)
 
     prev = _load_prev_brief(state_dir, today)
     title, body, worst, has_red, has_warn = build_brief(projects, weather, today, prev)

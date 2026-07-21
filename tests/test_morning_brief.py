@@ -1,8 +1,9 @@
 """Unit + regression tests for scripts/morning_brief.py.
 
-Covers the 2026-07-21 fixes:
-  - 天気: 「晴れ(code 1)なのに降水100%」の best_match 継ぎ接ぎ矛盾を再発させない。
-           JMA 単一モデル整合 + 降水は mm/%、内部矛盾は数値を伏せて正直に告げる。
+Covers:
+  - 天気 (2026-07-22 地点観測ベース化): 気象庁(JMA)公式=府県予報(天気/降水/最高)+
+           AMeDAS 観測(当日最低)。telop code→短文、当日値の抽出、内部矛盾ガード
+           (乾いた空 + pop>=70% は数値を伏せる)、観測欠損時は range 捏造せず最高のみ。
   - tribe: swimmy-fx-tribe の forward_status.txt (LIVE_READY/RUNNING/total) を
            read-only で1行ステータスへ。deploy 無し=live 0 を明示。
   - 家族ボード: 実体が無いうちは行ごと沈黙 (毎朝の「ソース無し」ノイズを止める)。
@@ -25,47 +26,122 @@ _spec.loader.exec_module(mb)
 
 
 # --------------------------------------------------------------------------
-# 天気: 内部整合チェック
+# 天気: telop code -> 短文 / 乾き判定
 # --------------------------------------------------------------------------
-def test_weather_clear_with_high_pop_is_inconsistent():
-    # 晴れ(code 1) + 降水確率100% = 2026-07-21 に実際に配信された矛盾。
-    assert mb._weather_consistent(1, 100, None) is False
-    assert mb._weather_consistent(0, 80, None) is False
-    # 晴れ + 大量降水量(mm) も矛盾。
-    assert mb._weather_consistent(2, None, 12.0) is False
+def test_jma_weather_text_known_and_coarse_fallback():
+    assert mb._jma_weather_text("110") == "晴れのち時々くもり"  # 7/21 東京
+    assert mb._jma_weather_text("101") == "晴れ時々くもり"  # 7/21 千葉
+    assert mb._jma_weather_text("300") == "雨"
+    # 未収載コードは先頭桁で粗くフォールバック(生 code は出さない)。
+    assert mb._jma_weather_text("299") == "くもり"
+    assert mb._jma_weather_text("999") is None  # 分類不能は None (呼び側で扱う)
+    assert mb._jma_weather_text(None) is None
+
+
+def test_text_is_dry():
+    assert mb._text_is_dry("晴れ") is True
+    assert mb._text_is_dry("晴れのち時々くもり") is True
+    assert mb._text_is_dry("雨") is False
+    assert mb._text_is_dry("晴れ時々雨で雷") is False
+
+
+# --------------------------------------------------------------------------
+# 天気: 内部整合ガード
+# --------------------------------------------------------------------------
+def test_weather_dry_sky_with_high_pop_is_inconsistent():
+    assert mb._weather_consistent("晴れ", 100) is False
+    assert mb._weather_consistent("くもり", 90) is False
 
 
 def test_weather_coherent_cases_pass():
-    assert mb._weather_consistent(1, None, 0.0) is True  # 晴れ + 0mm (JMA)
-    assert mb._weather_consistent(63, None, 8.0) is True  # 雨 + 8mm
-    assert mb._weather_consistent(3, 60, 1.0) is True  # 曇り + 中程度は矛盾でない
+    assert mb._weather_consistent("晴れのち時々くもり", 20) is True  # 乾き + 低 pop
+    assert mb._weather_consistent("雨", 90) is True  # 雨 + 高 pop は整合
+    assert mb._weather_consistent(None, 100) is True  # 天気不明なら判定しない
 
 
 def test_format_weather_flags_contradiction_instead_of_lying():
-    # 矛盾入力は数値を伏せて「整合性エラー」を返す (誤った数字を出さない)。
-    out = mb._format_weather("有明", 1, 30.3, 25.9, 100, None)
+    # 乾いた空(晴れ) + pop 100% は数値を伏せて「整合性エラー」を返す。
+    out = mb._format_weather("有明", "100", 36, 27, 100)
     assert "整合性エラー" in out
-    assert "30" not in out and "100" not in out  # 矛盾した数値は出さない
+    assert "36" not in out and "27" not in out  # 矛盾時は気温を出さない
 
 
-def test_format_weather_jma_clear_uses_mm_and_no_rain_label():
-    out = mb._format_weather("有明", 1, 33.0, 25.5, None, 0.0)
-    assert out == "有明: 晴れ 25〜33℃ 降水なし" or out == "有明: 晴れ 26〜33℃ 降水なし"
-    assert "%" not in out  # JMA は pop を持たない → % は出さない
+def test_format_weather_normal_range():
+    # 7/21 東京の実データ相当: 最高=予報36 / 最低=観測27 / 降水=予報max20。
+    out = mb._format_weather("有明", "110", 36, 27, 20)
+    assert out == "有明: 晴れのち時々くもり 27〜36℃ 降水20%"
 
 
-def test_format_weather_rain_shows_mm():
-    out = mb._format_weather("有明", 63, 24.0, 20.0, None, 8.0)
-    assert "雨" in out and "降水8mm" in out
+def test_format_weather_rain_shows_pct():
+    out = mb._format_weather("有明", "300", 24, 20, 90)
+    assert out == "有明: 雨 20〜24℃ 降水90%"
 
 
-def test_format_weather_uses_pop_when_present():
-    out = mb._format_weather("有明", 2, 32.5, 26.4, 45, 0.0)
-    assert "降水45%" in out and "mm" not in out
+def test_format_weather_missing_amedas_min_shows_max_only():
+    # 観測(最低)欠損時は range を捏造せず「最高X℃」だけ。
+    out = mb._format_weather("有明", "110", 36, None, 20)
+    assert "最高36℃" in out and "〜" not in out
 
 
-def test_format_weather_none_code_returns_none():
-    assert mb._format_weather("有明", None, 30.0, 25.0, None, 0.0) is None
+def test_format_weather_nothing_returns_none():
+    assert mb._format_weather("有明", None, None, None, None) is None
+
+
+# --------------------------------------------------------------------------
+# 天気: 府県予報 JSON パーサ (純関数・当日値抽出)
+# --------------------------------------------------------------------------
+def test_parse_jma_forecast_extracts_today_values():
+    # 実 JMA 構造の最小再現 (東京 2026-07-21, 05時発表)。temps は当日 min スロットが
+    # max と同値の placeholder → 当日 max=36 を最高として採る。
+    blocks = [
+        {
+            "reportDatetime": "2026-07-21T05:00:00+09:00",
+            "timeSeries": [
+                {
+                    "timeDefines": [
+                        "2026-07-21T05:00:00+09:00",
+                        "2026-07-22T00:00:00+09:00",
+                    ],
+                    "areas": [
+                        {"area": {"code": "130010"}, "weatherCodes": ["110", "101"]}
+                    ],
+                },
+                {
+                    "timeDefines": [
+                        "2026-07-21T06:00:00+09:00",
+                        "2026-07-21T12:00:00+09:00",
+                        "2026-07-21T18:00:00+09:00",
+                        "2026-07-22T00:00:00+09:00",
+                    ],
+                    "areas": [
+                        {"area": {"code": "130010"}, "pops": ["10", "20", "20", "0"]}
+                    ],
+                },
+                {
+                    "timeDefines": [
+                        "2026-07-21T09:00:00+09:00",
+                        "2026-07-21T00:00:00+09:00",
+                        "2026-07-22T00:00:00+09:00",
+                        "2026-07-22T09:00:00+09:00",
+                    ],
+                    "areas": [
+                        {"area": {"code": "44132"}, "temps": ["36", "36", "27", "36"]}
+                    ],
+                },
+            ],
+        }
+    ]
+    fc = mb._parse_jma_forecast(blocks, "130010", "44132", "2026-07-21")
+    assert fc["code"] == "110"
+    assert fc["text"] == "晴れのち時々くもり"
+    assert fc["pop"] == 20  # 当日 06/12/18 = 10/20/20 の max、明日 00:00 の 0 は除外
+    assert fc["tmax"] == 36  # 当日 temps の max (min placeholder に汚染されない)
+    assert fc["report"] == "2026-07-21T05:00:00+09:00"
+
+
+def test_parse_jma_forecast_empty_is_safe():
+    fc = mb._parse_jma_forecast([], "130010", "44132", "2026-07-21")
+    assert fc["code"] is None and fc["tmax"] is None and fc["pop"] is None
 
 
 # --------------------------------------------------------------------------
