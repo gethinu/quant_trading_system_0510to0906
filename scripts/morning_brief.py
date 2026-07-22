@@ -239,6 +239,74 @@ def _truncate(s: str, n: int) -> str:
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
+def check_exit_ledger(
+    results_dir: Path, today_yyyymmdd: int
+) -> tuple[list[str], bool, str]:
+    """exit (決済) の計測が生きているかを毎朝確かめる。
+
+    ``exit_ledger_YYYYMMDD.json`` は「実際に決済されたか / いくらだったか」の
+    唯一の記録源。ここが黙って止まると *実現損益が無いことにすら気づけない* ので、
+    ntfy に出す側で必ず見る。
+
+    戻り値 ``(alerts, red, 1行サマリ)``。
+
+    赤にするのは **お金が動いていない/測れていない** 場合だけ:
+      - 台帳が無い / 当日ぶんが無い  -> 計測そのものが止まっている
+      - ``measured=false``           -> 約定 ground truth が取れていない
+      - ``intended_not_filled``      -> 立会が終わったのに exit が約定していない
+
+    建玉不一致 (ticker rename 由来) は原因が既知で毎日出るため赤にせず
+    サマリに件数だけ残す (毎朝オオカミ少年にしない)。
+    """
+    path, date = _latest_dated_json(results_dir, "exit_ledger")
+    data = _load_json(path)
+    if data is None:
+        return (
+            [
+                "[quant] exit 台帳が無い — 決済と実現損益が未計測 (build_exit_ledger.py を確認)"
+            ],
+            True,
+            "exit台帳=未検出",
+        )
+
+    alerts: list[str] = []
+    red = False
+    measurement = data.get("measurement") or {}
+    recon = data.get("exit_intent_reconciliation") or {}
+
+    if date is not None and date < today_yyyymmdd:
+        red = True
+        alerts.append(
+            f"[quant] exit 台帳が当日ぶん未更新 (最新={date}, 今日={today_yyyymmdd}) — publish 経路を確認"
+        )
+    if not measurement.get("measured"):
+        red = True
+        alerts.append(
+            "[quant] exit 未計測: 約定履歴が取得できていない (実現損益は信用しないこと)"
+        )
+
+    missed = recon.get("intended_not_filled") or []
+    if missed:
+        red = True
+        syms = ", ".join(str(m.get("symbol")) for m in missed[:8])
+        alerts.append(f"[quant] exit 予定 {len(missed)} 件が立会終了後も未約定: {syms}")
+
+    all_time = (data.get("realized") or {}).get("all_time") or {}
+    total = all_time.get("total_realized_pl")
+    n_mismatch = len(measurement.get("unmeasured_symbols") or [])
+    parts = [
+        f"exit台帳={date}",
+        f"実現累計={total if total is not None else '未計測'}",
+        f"決済{all_time.get('n_trades', 0)}本",
+    ]
+    if n_mismatch:
+        parts.append(f"建玉不一致{n_mismatch}銘柄")
+    pending = len(recon.get("intended_pending") or [])
+    if pending:
+        parts.append(f"exit執行待ち{pending}")
+    return alerts, red, " · ".join(parts)
+
+
 # --------------------------------------------------------------------------
 # quant アダプタ — self_monitor JSON を読む
 # --------------------------------------------------------------------------
@@ -281,9 +349,19 @@ def adapter_quant(primary_root: Path, today_yyyymmdd: int) -> ProjectStatus:
             f"[quant] self_monitor が当日ぶん未更新 (最新={sm_date}, 今日={today_yyyymmdd}) — 06:00 run/端末を確認"
         )
 
+    # exit (決済) の計測が生きているか。self_monitor は signals 側しか見ないので
+    # ここで別途確かめる (実現損益が「無い」ことに気づけない事故を防ぐ)。
+    exit_alerts, exit_red, exit_summary = check_exit_ledger(
+        primary_root / "results_csv", today_yyyymmdd
+    )
+    st.alerts.extend(exit_alerts)
+    st.red = st.red or exit_red
+
     sig_txt = f"{total_signals}sig" if total_signals is not None else "sig?"
     date_txt = str(sm_date) if sm_date else "?"
-    st.status_line = f"worst={worst} · {sig_txt} · self_monitor={date_txt}"
+    st.status_line = (
+        f"worst={worst} · {sig_txt} · self_monitor={date_txt} · {exit_summary}"
+    )
     return st
 
 

@@ -4,7 +4,12 @@ import { useMemo, useState } from 'react';
 import type {
   AlpacaPosition,
   AlpacaSnapshot,
+  ClosedTrade,
   EquityCurve,
+  EquityRange,
+  EquityRangeKey,
+  RealizedBlock,
+  RealizedDay,
   SystemExposure,
 } from '@/lib/types';
 
@@ -88,13 +93,85 @@ function Kpi({
 // --------------------------------------------------------------------------
 // equity curve (SVG, drawdown band) — no external chart lib (static export)
 // --------------------------------------------------------------------------
-function EquityChart({ curve }: { curve: EquityCurve }) {
+// 期間切替タブ。snapshot の equity_ranges を持たない旧データでは非表示にする。
+const RANGE_ORDER: EquityRangeKey[] = ['1D', '1W', '1M', '3M', 'ALL'];
+
+function EquityPanel({ snap }: { snap: AlpacaSnapshot }) {
+  const ranges = snap.equity_ranges ?? null;
+  const available = RANGE_ORDER.filter((k) => ranges?.[k] != null);
+  // 既定は「1月」= 直近が読める粒度。旧データは 3M 固定 curve に fallback。
+  const [sel, setSel] = useState<EquityRangeKey>('1M');
+
+  if (!ranges || available.length === 0) {
+    return <EquityChart curve={snap.equity_curve} periodLabel={snap.equity_curve.period} />;
+  }
+
+  const active = ranges[sel] ?? ranges[available[available.length - 1]]!;
+
+  return (
+    <div>
+      <div className="mb-2 flex flex-wrap gap-1">
+        {available.map((k) => {
+          const r = ranges[k]!;
+          const on = k === sel;
+          const empty = r.n_points < 2;
+          return (
+            <button
+              key={k}
+              type="button"
+              onClick={() => setSel(k)}
+              disabled={empty}
+              title={empty ? 'この期間はデータがありません' : `${r.start} → ${r.end}`}
+              className={`rounded px-2 py-0.5 text-[11px] tabular-nums transition ${
+                on
+                  ? 'bg-white/15 text-cardfg'
+                  : empty
+                    ? 'text-muted/40 cursor-not-allowed'
+                    : 'text-muted hover:bg-white/5'
+              }`}
+            >
+              {r.label}
+            </button>
+          );
+        })}
+      </div>
+      <EquityChart
+        curve={{
+          timeframe: active.timeframe,
+          period: active.label,
+          base_value: null,
+          points: active.points,
+          peak_equity: active.peak_equity,
+          max_drawdown_pct: active.max_drawdown_pct,
+          period_return_pct: active.period_return_pct,
+          source: 'equity_ranges',
+        }}
+        periodLabel={active.label}
+      />
+      <div className="mt-1 text-[10px] text-muted/60 leading-relaxed">
+        {active.basis === 'intraday'
+          ? `当セッションの 5 分足 equity（live equity と同一基準）。${active.start ?? '—'} → ${active.end ?? '—'}`
+          : `broker の日次エクイティ系列（${active.start ?? '—'} → ${active.end ?? '—'}）。` +
+            'この系列は上場廃止で決済不能な建玉を計上しないため、上の live equity とは水準が異なります。' +
+            '末尾に live equity を継ぎ足していないのは、基準の違う点を足すと最終日だけ跳ねて見えるためです。'}
+      </div>
+    </div>
+  );
+}
+
+function EquityChart({
+  curve,
+  periodLabel,
+}: {
+  curve: EquityCurve;
+  periodLabel?: string;
+}) {
   const pts = curve.points ?? [];
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
   if (pts.length < 2) {
     return (
       <div className="text-xs text-muted py-6 text-center">
-        equity 履歴が不足しています（{pts.length} point）。
+        この期間の equity データがありません（{pts.length} point）。
       </div>
     );
   }
@@ -134,19 +211,6 @@ function EquityChart({ curve }: { curve: EquityCurve }) {
   const last = pts[pts.length - 1];
   const minIdx = equities.indexOf(yMin);
 
-  // 末尾 live 点が直近日次終値から大きく段差する場合の検出（日次終値ラグ / repricing）。
-  // 段差が通常の日次変動の中央値の 4 倍かつ $500 超なら「当日急騰」ではなく基準ずれと注記。
-  const lastReal = pts.length >= 2 ? pts[pts.length - 2] : null;
-  const tailStep = last.live && lastReal ? last.equity - lastReal.equity : 0;
-  const dailyMoves = pts
-    .filter((p) => p.pl != null)
-    .map((p) => Math.abs(p.pl as number))
-    .sort((m, n) => m - n);
-  const medMove = dailyMoves.length
-    ? dailyMoves[Math.floor(dailyMoves.length / 2)]
-    : 0;
-  const tailOutlier = Math.abs(tailStep) > Math.max(500, medMove * 4);
-
   const nLabels = 4;
   const xLabels = Array.from({ length: nLabels }, (_, k) => {
     const i = Math.round((k / (nLabels - 1)) * (pts.length - 1));
@@ -171,7 +235,7 @@ function EquityChart({ curve }: { curve: EquityCurve }) {
     <div>
       <div className="flex items-baseline justify-between mb-1">
         <span className="text-[11px] text-muted">
-          equity · {curve.period}
+          equity · {periodLabel ?? curve.period}
         </span>
         <span className="flex items-center gap-3 text-[11px] tabular-nums">
           <span className={up ? 'text-ok' : 'text-fail'}>
@@ -180,12 +244,6 @@ function EquityChart({ curve }: { curve: EquityCurve }) {
           <span className="text-fail">最大DD {fmtPct(curve.max_drawdown_pct)}</span>
         </span>
       </div>
-      {tailOutlier ? (
-        <div className="mb-1 text-[10px] leading-snug text-warn/90">
-          ⚠ 末尾はライブ equity。直近日次終値との段差 {fmtSignedUsd(tailStep)} は
-          日次終値ラグ由来（当日の急騰ではありません）。
-        </div>
-      ) : null}
       <div className="relative">
         <svg
           viewBox={`0 0 ${W} ${H}`}
@@ -765,6 +823,545 @@ function PositionsTable({ positions }: { positions: AlpacaPosition[] }) {
 }
 
 // --------------------------------------------------------------------------
+// 当日損益 — 定義は 1 つだけ:
+//   総額 = 現在 equity − 前セッション終値 equity (どちらも intraday 系列 = 同一基準)
+//   総額 = 実現 (決済で確定) + 含みの当日変動
+// 基準が取れない時は「未計測」と出す。数字は出さない。注釈で誤魔化さない。
+// --------------------------------------------------------------------------
+function TodayPnl({ snap }: { snap: AlpacaSnapshot }) {
+  const p = snap.pnl_today ?? null;
+
+  if (!p || !p.measured || p.total_pl == null) {
+    const reason =
+      p?.reason ??
+      'この snapshot は当日損益の基準情報を持ちません（旧 exporter が生成）。';
+    return (
+      <div className="flex flex-col gap-1">
+        <div className="flex items-center gap-2 text-sm">
+          <span className="px-1.5 py-0.5 rounded bg-white/[0.06] text-muted font-medium">
+            当日損益 — 未計測
+          </span>
+          <span className="text-muted text-[11px]">
+            同一基準の前セッション終値が取れないため数字を出しません
+          </span>
+        </div>
+        <div className="text-[11px] text-muted/80 leading-relaxed">{reason}</div>
+      </div>
+    );
+  }
+
+  const hasSplit = p.realized_pl != null && p.unrealized_delta != null;
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex flex-wrap items-center gap-2 text-sm tabular-nums">
+        <span
+          className={`px-1.5 py-0.5 rounded font-medium ${
+            p.total_pl >= 0 ? 'bg-ok/15 text-ok' : 'bg-fail/15 text-fail'
+          }`}
+          title={`${p.session_date} セッション = 現在 equity ${fmtUsd(
+            p.equity_now,
+            0,
+          )} − 前セッション(${p.baseline_session}) 終値 ${fmtUsd(
+            p.baseline_equity,
+            0,
+          )}。どちらも intraday 系列 (同一基準)。`}
+        >
+          {fmtSignedUsd(p.total_pl)} ({fmtPct(p.total_pl_pct)})
+        </span>
+        <span className="text-muted">
+          今日{' '}
+          <span className="text-muted/60 text-[11px]">
+            {p.session_date} · vs {p.baseline_session} 終値 {fmtUsd(p.baseline_equity, 0)}
+          </span>
+        </span>
+      </div>
+      {hasSplit ? (
+        <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] tabular-nums text-muted">
+          <span>
+            実現{' '}
+            <span className={pnlText(p.realized_pl)}>{fmtSignedUsd(p.realized_pl)}</span>
+          </span>
+          <span className="text-muted/40">+</span>
+          <span>
+            含みの当日変動{' '}
+            <span className={pnlText(p.unrealized_delta)}>
+              {fmtSignedUsd(p.unrealized_delta)}
+            </span>
+          </span>
+        </div>
+      ) : (
+        <div className="text-[11px] text-muted/80">
+          実現／含みの内訳は未計測（exit 台帳がこのセッションに届いていません）。
+        </div>
+      )}
+    </div>
+  );
+}
+
+// live equity と broker 日次系列の水準差を事実で説明する 1 行。
+function EquityBasisNote({ snap }: { snap: AlpacaSnapshot }) {
+  const b = snap.equity_basis ?? null;
+  if (!b || b.n_frozen === 0 || !b.frozen_market_value) return null;
+  return (
+    <div className="mt-2 text-[11px] leading-relaxed text-muted">
+      equity {fmtUsd(snap.account.equity, 0)} のうち{' '}
+      <span className="text-cardfg tabular-nums">{fmtUsd(b.frozen_market_value, 2)}</span>{' '}
+      は上場廃止（API から決済不能）の {b.frozen_symbols.join(' / ')}。broker の日次
+      エクイティ系列と <code className="text-cardfg">last_equity</code>（
+      {fmtUsd(b.last_daily_equity, 0)} @ {b.last_daily_session ?? '—'}）はこの分を計上
+      しないため、live equity とは水準が {fmtUsd(b.daily_series_gap, 0)} ずれます（うち
+      説明できない残差 {fmtUsd(b.residual_usd, 0)}）。当日損益はこのずれを避けるため
+      intraday 系列同士でのみ計算しています。
+    </div>
+  );
+}
+
+// --------------------------------------------------------------------------
+// 実現損益 (決済済み) — 含み損益とは別セクションに分ける
+// --------------------------------------------------------------------------
+const EXIT_REASON_LABEL: Record<string, string> = {
+  time_based: '期間満了',
+  protect_stop: 'ストップ',
+  protect_target: '利確',
+  protect_trailing: 'トレイリング',
+  flatten_all: '全手仕舞い',
+};
+const exitReasonLabel = (r: string | null) =>
+  r == null ? '記録なし' : (EXIT_REASON_LABEL[r] ?? r);
+
+function MeasurementBanner({ realized }: { realized: RealizedBlock }) {
+  const m = realized.measurement;
+  const recon = realized.exit_intent_reconciliation ?? null;
+  const pending = recon?.intended_pending ?? [];
+  const missed = recon?.intended_not_filled ?? [];
+  const complete = realized.complete === true;
+
+  if (complete && pending.length === 0) {
+    return (
+      <div className="mb-3 rounded-lg border border-ok/20 bg-ok/[0.05] px-3 py-2 text-[11px] text-muted">
+        <span className="text-ok font-medium">計測済み</span> · 約定{' '}
+        {m?.fills_seen ?? '—'} 件から {realized.n_closed_trades_total ?? 0} 本の決済を
+        復元し、broker のポジションと一致。取りこぼしゼロ。
+      </div>
+    );
+  }
+
+  return (
+    <div className="mb-3 rounded-lg border border-warn/25 bg-warn/[0.06] px-3 py-2 text-[11px] leading-relaxed text-muted space-y-1">
+      <div className="text-warn font-medium">
+        ⚠ 一部が未計測です（下の実現損益はこの分を含みません）
+      </div>
+      {(m?.reasons ?? []).map((r) => (
+        <div key={r}>· {r}</div>
+      ))}
+      {missed.length > 0 ? (
+        <div>
+          · exit する予定だったのに約定していない:{' '}
+          <span className="text-cardfg">
+            {missed.map((x) => `${x.symbol}(${exitReasonLabel(x.reason)})`).join(', ')}
+          </span>
+        </div>
+      ) : null}
+      {pending.length > 0 ? (
+        <div className="text-muted/80">
+          · 執行待ち（次の立会でこれから）: {pending.length} 件 —{' '}
+          {pending.map((x) => x.symbol).join(', ')}
+        </div>
+      ) : null}
+      {(m?.discrepancies ?? []).length > 0 ? (
+        <div className="pt-1">
+          <div className="text-muted/80">建玉が broker と一致しない銘柄:</div>
+          <div className="overflow-x-auto">
+            <table className="mt-1 text-[10px] tabular-nums">
+              <thead className="text-muted/60">
+                <tr>
+                  <th className="pr-3 text-left">銘柄</th>
+                  <th className="pr-3 text-right">約定から復元</th>
+                  <th className="pr-3 text-right">broker</th>
+                  <th className="text-left">推定原因</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(m?.discrepancies ?? []).map((d) => (
+                  <tr key={d.symbol}>
+                    <td className="pr-3 text-cardfg">{d.symbol}</td>
+                    <td className="pr-3 text-right">{fmtQty(d.reconstructed_qty)}</td>
+                    <td className="pr-3 text-right">{fmtQty(d.broker_qty)}</td>
+                    <td className="text-muted/70">{d.reason.split(':')[0]}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// 日次実現損益 (バー) + 累計 (ライン)。データが無い期間は描かない。
+function RealizedByDayChart({ rows }: { rows: RealizedDay[] }) {
+  if (rows.length < 1) {
+    return (
+      <div className="text-xs text-muted py-6 text-center">
+        決済のあった日がまだありません（データ無し）。
+      </div>
+    );
+  }
+  const W = 720;
+  const H = 150;
+  const padL = 46;
+  const padR = 46;
+  const padY = 12;
+  const iw = W - padL - padR;
+  const ih = H - padY * 2;
+
+  const bars = rows.map((r) => r.realized_pl);
+  const maxAbs = Math.max(...bars.map((v) => Math.abs(v)), 1);
+  const cums = rows.map((r) => r.realized_pl_cum);
+  const cMin = Math.min(...cums, 0);
+  const cMax = Math.max(...cums, 0);
+  const cSpan = cMax - cMin || 1;
+
+  const n = rows.length;
+  const slot = iw / Math.max(n, 1);
+  const barW = Math.max(1.5, Math.min(14, slot * 0.6));
+  const zeroY = padY + ih / 2;
+  const barY = (v: number) => (v >= 0 ? zeroY - (v / maxAbs) * (ih / 2) : zeroY);
+  const barH = (v: number) => (Math.abs(v) / maxAbs) * (ih / 2);
+  const cx = (i: number) => padL + slot * (i + 0.5);
+  const cy = (v: number) => padY + ih - ((v - cMin) / cSpan) * ih;
+  const cumPath = rows.map((r, i) => `${i === 0 ? 'M' : 'L'}${cx(i)},${cy(r.realized_pl_cum)}`).join(' ');
+
+  return (
+    <div className="overflow-x-auto">
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full min-w-[520px]" role="img">
+        <line x1={padL} y1={zeroY} x2={W - padR} y2={zeroY} stroke="#ffffff20" strokeWidth={1} />
+        {rows.map((r, i) => (
+          <rect
+            key={r.t}
+            x={cx(i) - barW / 2}
+            y={barY(r.realized_pl)}
+            width={barW}
+            height={Math.max(barH(r.realized_pl), 0.8)}
+            fill={r.realized_pl >= 0 ? '#34d399' : '#f87171'}
+            opacity={0.75}
+          >
+            <title>{`${r.t}  実現 ${r.realized_pl >= 0 ? '+' : '−'}$${Math.abs(r.realized_pl).toLocaleString('en-US', { maximumFractionDigits: 2 })}  / 累計 $${r.realized_pl_cum.toLocaleString('en-US', { maximumFractionDigits: 2 })}`}</title>
+          </rect>
+        ))}
+        <path d={cumPath} fill="none" stroke="#38bdf8" strokeWidth={1.6} />
+        <text x={2} y={padY + 8} className="fill-muted" fontSize={9}>
+          日次 ±{fmtUsd(maxAbs, 0)}
+        </text>
+        <text x={W - padR + 4} y={padY + 8} className="fill-muted" fontSize={9}>
+          累計 {fmtUsd(cMax, 0)}
+        </text>
+        <text x={W - padR + 4} y={padY + ih} className="fill-muted" fontSize={9}>
+          {fmtUsd(cMin, 0)}
+        </text>
+        <text x={padL} y={H - 1} className="fill-muted" fontSize={9}>
+          {rows[0].t}
+        </text>
+        <text x={W - padR} y={H - 1} textAnchor="end" className="fill-muted" fontSize={9}>
+          {rows[rows.length - 1].t}
+        </text>
+      </svg>
+      <div className="flex gap-3 text-[10px] text-muted mt-1">
+        <span>
+          <span className="inline-block w-2 h-2 rounded-sm align-middle" style={{ background: '#34d399' }} />{' '}
+          日次実現（バー）
+        </span>
+        <span>
+          <span className="inline-block w-3 h-[2px] align-middle" style={{ background: '#38bdf8' }} />{' '}
+          累計実現（ライン）
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function ClosedTradesTable({ trades }: { trades: ClosedTrade[] }) {
+  const [limit, setLimit] = useState(40);
+  const [reasonFilter, setReasonFilter] = useState<string>('all');
+
+  const reasons = useMemo(() => {
+    const set = new Set<string>();
+    trades.forEach((t) => set.add(t.exit_reason ?? '__none__'));
+    return Array.from(set).sort();
+  }, [trades]);
+
+  const filtered = useMemo(() => {
+    const rows =
+      reasonFilter === 'all'
+        ? trades
+        : trades.filter((t) => (t.exit_reason ?? '__none__') === reasonFilter);
+    // 新しい決済が上
+    return [...rows].sort((a, b) => (a.exit_time < b.exit_time ? 1 : -1));
+  }, [trades, reasonFilter]);
+
+  if (trades.length === 0) {
+    return (
+      <div className="text-xs text-muted py-6 text-center">
+        決済済みトレードがまだありません（データ無し）。
+      </div>
+    );
+  }
+
+  const shown = filtered.slice(0, limit);
+  return (
+    <div>
+      <div className="mb-2 flex flex-wrap items-center gap-1 text-[11px]">
+        <button
+          type="button"
+          onClick={() => setReasonFilter('all')}
+          className={`rounded px-2 py-0.5 transition ${
+            reasonFilter === 'all' ? 'bg-white/15 text-cardfg' : 'text-muted hover:bg-white/5'
+          }`}
+        >
+          すべて {trades.length}
+        </button>
+        {reasons.map((r) => {
+          const key = r === '__none__' ? null : r;
+          const count = trades.filter((t) => (t.exit_reason ?? '__none__') === r).length;
+          return (
+            <button
+              key={r}
+              type="button"
+              onClick={() => setReasonFilter(r)}
+              className={`rounded px-2 py-0.5 transition ${
+                reasonFilter === r ? 'bg-white/15 text-cardfg' : 'text-muted hover:bg-white/5'
+              }`}
+            >
+              {exitReasonLabel(key)} {count}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-[11px] tabular-nums">
+          <thead className="text-muted text-[10px] uppercase tracking-wide">
+            <tr className="border-b border-white/10">
+              <th className="py-1 pr-2 text-left">銘柄</th>
+              <th className="py-1 pr-2 text-left">system</th>
+              <th className="py-1 pr-2 text-left">売買</th>
+              <th className="py-1 pr-2 text-right">株数</th>
+              <th className="py-1 pr-2 text-left">エントリー</th>
+              <th className="py-1 pr-2 text-left">エグジット</th>
+              <th className="py-1 pr-2 text-right">保有</th>
+              <th className="py-1 pr-2 text-right">実現損益</th>
+              <th className="py-1 text-left">理由</th>
+            </tr>
+          </thead>
+          <tbody>
+            {shown.map((t, i) => (
+              <tr
+                key={`${t.symbol}-${t.exit_time}-${i}`}
+                className="border-b border-white/5 hover:bg-white/[0.03]"
+              >
+                <td className="py-1 pr-2 font-medium text-cardfg">{t.symbol}</td>
+                <td className="py-1 pr-2">
+                  <span
+                    className="px-1 rounded text-[10px]"
+                    style={{
+                      color: sysColor(t.system ?? 'unknown'),
+                      background: `${sysColor(t.system ?? 'unknown')}22`,
+                    }}
+                  >
+                    {t.system ? sysShort(t.system) : '—'}
+                  </span>
+                </td>
+                <td className={`py-1 pr-2 ${t.side === 'long' ? 'text-ok/80' : 'text-fail/80'}`}>
+                  {t.side === 'long' ? 'L' : 'S'}
+                </td>
+                <td className="py-1 pr-2 text-right">{fmtQty(t.qty)}</td>
+                <td className="py-1 pr-2 text-muted">
+                  {(t.entry_session ?? t.entry_time).slice(0, 10)}{' '}
+                  <span className="text-cardfg">{fmtPrice(t.entry_price)}</span>
+                </td>
+                <td className="py-1 pr-2 text-muted">
+                  {(t.exit_session ?? t.exit_time).slice(0, 10)}{' '}
+                  <span className="text-cardfg">{fmtPrice(t.exit_price)}</span>
+                </td>
+                <td className="py-1 pr-2 text-right text-muted">{t.holding_days}d</td>
+                <td className={`py-1 pr-2 text-right font-medium ${pnlText(t.realized_pl)}`}>
+                  {fmtSignedUsd(t.realized_pl)}
+                  {t.realized_pl_pct != null ? (
+                    <span className="text-[10px] text-muted ml-1">
+                      ({fmtPct(t.realized_pl_pct, 1)})
+                    </span>
+                  ) : null}
+                </td>
+                <td
+                  className={`py-1 ${t.exit_reason ? 'text-muted' : 'text-muted/40 italic'}`}
+                >
+                  {exitReasonLabel(t.exit_reason)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {filtered.length > shown.length ? (
+        <button
+          type="button"
+          onClick={() => setLimit((n) => n + 60)}
+          className="mt-2 text-[11px] text-muted hover:text-cardfg transition"
+        >
+          さらに表示（{shown.length} / {filtered.length}）
+        </button>
+      ) : (
+        <div className="mt-2 text-[10px] text-muted/60">
+          {filtered.length} 件すべて表示
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RealizedSection({ snap }: { snap: AlpacaSnapshot }) {
+  const realized = snap.realized ?? null;
+
+  if (!realized || !realized.available) {
+    return (
+      <div className="text-xs text-muted leading-relaxed">
+        <span className="px-1.5 py-0.5 rounded bg-white/[0.06] text-muted font-medium">
+          未計測
+        </span>{' '}
+        決済の実績台帳がまだ生成されていません。
+        <div className="mt-1 text-[11px] text-muted/80">
+          {realized?.reason ??
+            'この snapshot は exit 台帳を持ちません（旧 exporter が生成）。'}{' '}
+          実現損益を 0 とは表示しません（0 と不明は別物のため）。
+        </div>
+      </div>
+    );
+  }
+
+  const all = realized.all_time;
+  const byDay = realized.by_day ?? [];
+  const bySystem = Object.entries(realized.by_system ?? {});
+
+  return (
+    <div className="space-y-4">
+      <MeasurementBanner realized={realized} />
+
+      {realized.stale ? (
+        <div className="rounded-lg border border-warn/25 bg-warn/[0.06] px-3 py-2 text-[11px] text-muted">
+          <span className="text-warn font-medium">⚠ 台帳が古い</span> — {realized.reason}
+        </div>
+      ) : null}
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <Kpi
+          label="累計実現損益"
+          value={fmtSignedUsd(all?.total_realized_pl ?? null)}
+          tone={pnlText(all?.total_realized_pl ?? null)}
+          sub={`${all?.n_trades ?? 0} 本の決済`}
+        />
+        <Kpi
+          label="勝率 (実現)"
+          value={all?.win_rate_pct != null ? `${all.win_rate_pct}%` : '—'}
+          sub={all ? `${all.n_wins}勝 / ${all.n_losses}敗` : undefined}
+        />
+        <Kpi
+          label="平均勝ち"
+          value={fmtSignedUsd(all?.avg_win ?? null)}
+          tone="text-ok"
+          sub={all?.best ? `best ${all.best.symbol} ${fmtSignedUsd(all.best.realized_pl)}` : undefined}
+        />
+        <Kpi
+          label="平均負け"
+          value={fmtSignedUsd(all?.avg_loss ?? null)}
+          tone="text-fail"
+          sub={
+            all?.worst ? `worst ${all.worst.symbol} ${fmtSignedUsd(all.worst.realized_pl)}` : undefined
+          }
+        />
+      </div>
+
+      <div>
+        <h4 className="text-[11px] text-muted mb-1">日次・累計の実現損益</h4>
+        <RealizedByDayChart rows={byDay} />
+      </div>
+
+      {bySystem.length > 0 ? (
+        <div>
+          <h4 className="text-[11px] text-muted mb-1">system 別（実現のみ）</h4>
+          <div className="overflow-x-auto">
+            <table className="w-full text-[11px] tabular-nums">
+              <thead className="text-muted text-[10px] uppercase tracking-wide">
+                <tr className="border-b border-white/10">
+                  <th className="py-1 pr-2 text-left">system</th>
+                  <th className="py-1 pr-2 text-right">決済数</th>
+                  <th className="py-1 pr-2 text-right">実現損益</th>
+                  <th className="py-1 pr-2 text-right">勝率</th>
+                  <th className="py-1 text-right">平均勝ち / 負け</th>
+                </tr>
+              </thead>
+              <tbody>
+                {bySystem.map(([key, s]) => (
+                  <tr key={key} className="border-b border-white/5">
+                    <td className="py-1 pr-2">
+                      <span
+                        className="px-1 rounded text-[10px]"
+                        style={{ color: sysColor(key), background: `${sysColor(key)}22` }}
+                      >
+                        {sysShort(key)}
+                      </span>
+                    </td>
+                    <td className="py-1 pr-2 text-right text-muted">{s.n_trades}</td>
+                    <td className={`py-1 pr-2 text-right font-medium ${pnlText(s.total_realized_pl)}`}>
+                      {fmtSignedUsd(s.total_realized_pl)}
+                    </td>
+                    <td className="py-1 pr-2 text-right text-muted">
+                      {s.win_rate_pct != null ? `${s.win_rate_pct}%` : '—'}
+                    </td>
+                    <td className="py-1 text-right text-muted">
+                      <span className="text-ok">{fmtSignedUsd(s.avg_win)}</span>
+                      {' / '}
+                      <span className="text-fail">{fmtSignedUsd(s.avg_loss)}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="mt-1 text-[10px] text-muted/60">
+            system が特定できない決済は unknown にまとめています（捨てていません）。
+          </div>
+        </div>
+      ) : null}
+
+      <div>
+        <h4 className="text-[11px] text-muted mb-1">
+          決済済みトレード
+          {realized.n_closed_trades_total &&
+          realized.n_closed_trades_total > realized.closed_trades.length ? (
+            <span className="text-muted/60">
+              {' '}
+              — 直近 {realized.closed_trades.length} 件（全 {realized.n_closed_trades_total} 本は
+              results_csv/exit_ledger_*.json に保存）
+            </span>
+          ) : null}
+        </h4>
+        <ClosedTradesTable trades={realized.closed_trades} />
+      </div>
+
+      <div className="text-[10px] text-muted/60 leading-relaxed">
+        出典: Alpaca の約定履歴（/v2/account/activities/FILL）を FIFO で round-trip 化。
+        台帳 {realized.ledger_date} · run {realized.ledger_run_id} · 生成{' '}
+        {realized.ledger_generated_at ?? '—'} ·{' '}
+        {realized.measurement?.coverage_start?.slice(0, 10) ?? '—'} 〜{' '}
+        {realized.measurement?.coverage_end?.slice(0, 10) ?? '—'}
+      </div>
+    </div>
+  );
+}
+
+// --------------------------------------------------------------------------
 // section root
 // --------------------------------------------------------------------------
 export function AlpacaSection({ payload }: { payload: AlpacaSnapshot | null }) {
@@ -785,25 +1382,6 @@ export function AlpacaSection({ payload }: { payload: AlpacaSnapshot | null }) {
 
   const a = payload.account;
   const s = payload.summary;
-  const up = (a.pnl_today_abs ?? 0) >= 0;
-
-  // freeze-aware baseline の provenance (新 exporter)。pnl_today_abs/pct は補正後の値。
-  const basis = a.pnl_today_basis ?? null;
-  const isFreezeAdjusted = basis === 'freeze_adjusted';
-  const hasProvenance = basis != null;
-
-  // legacy: provenance を持たない旧 snapshot 用の凍結ラグ検出（後方互換の保険）。
-  // 保有ポジションの当日値洗い合計 (intraday_pl) とヘッドラインが大きく乖離すれば疑い。
-  const heldTodayMove = payload.positions.reduce(
-    (acc, p) => acc + (p.intraday_pl ?? 0),
-    0,
-  );
-  const todayAbs = a.pnl_today_abs ?? 0;
-  const legacySuspect =
-    !hasProvenance &&
-    Math.abs(a.pnl_today_pct ?? 0) >= 1.5 &&
-    Math.abs(heldTodayMove) < Math.abs(todayAbs) * 0.5 &&
-    Math.abs(todayAbs - heldTodayMove) > 500;
 
   return (
     <div className="space-y-4">
@@ -833,89 +1411,12 @@ export function AlpacaSection({ payload }: { payload: AlpacaSnapshot | null }) {
             </span>
             <span className="text-sm text-muted">equity</span>
           </div>
-          <div className="flex items-center gap-2 text-sm tabular-nums">
-            <span
-              className={`px-1.5 py-0.5 rounded font-medium ${
-                up ? 'bg-ok/15 text-ok' : 'bg-fail/15 text-fail'
-              }`}
-              title={
-                isFreezeAdjusted
-                  ? `今日 = 現在の equity − 前営業日 intraday equity (${fmtUsd(
-                      a.pnl_today_baseline,
-                      0,
-                    )})。日次終値ラグを補正した基準。`
-                  : `今日 = 現在の equity − 前営業日クローズ equity (last_equity ${fmtUsd(
-                      a.last_equity,
-                      0,
-                    )})`
-              }
-            >
-              {fmtSignedUsd(a.pnl_today_abs)} ({fmtPct(a.pnl_today_pct)})
-            </span>
-            <span className="text-muted">
-              今日{' '}
-              <span className="text-muted/60 text-[11px]">
-                {isFreezeAdjusted
-                  ? 'vs 前営業日 equity · freeze-adjusted'
-                  : 'vs 前日クローズ'}
-              </span>
-            </span>
-            {isFreezeAdjusted ? (
-              <span
-                className="text-xs cursor-help"
-                style={{ color: '#38bdf8' }}
-                title="日次終値ラグを検出し、前営業日の intraday 整合 equity を基準に補正済み。生の基準値は下の注記。"
-              >
-                ℹ
-              </span>
-            ) : legacySuspect ? (
-              <span
-                className="text-warn text-xs cursor-help"
-                title="前日クローズ(last_equity)が実質 equity より低く据え置かれた日次終値ラグの疑い。下の注記を参照。"
-              >
-                ⚠
-              </span>
-            ) : null}
-          </div>
+          <TodayPnl snap={payload} />
         </div>
 
-        {isFreezeAdjusted ? (
-          <div
-            className="mb-3 rounded-lg border px-3 py-2 text-[11px] leading-relaxed text-muted"
-            style={{ borderColor: '#38bdf840', backgroundColor: '#38bdf80f' }}
-          >
-            <span className="font-medium" style={{ color: '#7dd3fc' }}>
-              ℹ 日次終値ラグを補正しました（freeze-adjusted）。
-            </span>{' '}
-            生の daily-close 基準（last_equity {fmtUsd(a.last_equity, 0)}）だと{' '}
-            <span className="text-cardfg">
-              {fmtSignedUsd(a.pnl_today_abs_raw)} ({fmtPct(a.pnl_today_pct_raw)})
-            </span>{' '}
-            の phantom になりますが、前営業日クローズが実勢より{' '}
-            <span className="text-cardfg">{fmtSignedUsd(a.freeze_lag_gap)}</span>{' '}
-            低く据え置かれていたため、前営業日の intraday equity（
-            {fmtUsd(a.pnl_today_baseline, 0)}）を基準に補正 →{' '}
-            <span className={pnlText(a.pnl_today_abs)}>
-              {fmtSignedUsd(a.pnl_today_abs)} ({fmtPct(a.pnl_today_pct)})
-            </span>{' '}
-            が実勢の当日 P&amp;L。equity・保有・unrealized 等の実報告値は不変。
-          </div>
-        ) : legacySuspect ? (
-          <div className="mb-3 rounded-lg border border-warn/25 bg-warn/[0.06] px-3 py-2 text-[11px] leading-relaxed text-muted">
-            <span className="text-warn font-medium">
-              ⚠ 「今日 {fmtSignedUsd(todayAbs)}」は当日の実損益ではなく基準ずれの可能性。
-            </span>{' '}
-            保有ポジションの当日値洗い (intraday) は{' '}
-            <span className={pnlText(heldTodayMove)}>{fmtSignedUsd(heldTodayMove)}</span>{' '}
-            のみ。ヘッドラインとの差{' '}
-            <span className="text-cardfg">{fmtSignedUsd(todayAbs - heldTodayMove)}</span>{' '}
-            は前日クローズ (last_equity {fmtUsd(a.last_equity, 0)}) を基準にした差で、
-            Alpaca の日次終値が実質 equity ({fmtUsd(a.equity, 0)}) より低く据え置かれている場合に生じます
-            （データ凍結期の値洗いラグ由来。日次終値が更新されれば解消）。
-          </div>
-        ) : null}
+        <EquityBasisNote snap={payload} />
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3">
           <Kpi label="現金" value={fmtUsd(a.cash, 0)} />
           <Kpi label="買付余力" value={fmtUsd(a.buying_power, 0)} />
           <Kpi
@@ -924,15 +1425,19 @@ export function AlpacaSection({ payload }: { payload: AlpacaSnapshot | null }) {
             sub={`L${s.n_long} / S${s.n_short}`}
           />
           <Kpi
-            label="含み損益"
+            label="含み損益 (未実現)"
             value={fmtSignedUsd(s.unrealized_pl_total)}
             tone={pnlText(s.unrealized_pl_total)}
             sub={
               s.win_rate_pct != null
-                ? `勝率 ${s.win_rate_pct}% (${s.n_winning}/${s.n_positions})`
+                ? `保有 ${s.n_winning}/${s.n_positions} が含み益`
                 : undefined
             }
           />
+        </div>
+        <div className="mt-1 text-[10px] text-muted/60">
+          「含み損益」は保有中のポジションの評価損益（未確定）。決済済みの確定損益は
+          下の「実現損益」セクションを参照（両者は別物なので合算していません）。
         </div>
 
         {s.biggest_winner || s.biggest_loser ? (
@@ -958,9 +1463,18 @@ export function AlpacaSection({ payload }: { payload: AlpacaSnapshot | null }) {
         ) : null}
       </section>
 
-      {/* equity curve */}
+      {/* equity curve (期間切替) */}
       <section className="bg-card rounded-xl p-4 shadow-lg">
-        <EquityChart curve={payload.equity_curve} />
+        <h3 className="text-xs uppercase tracking-widest text-muted mb-2">エクイティ</h3>
+        <EquityPanel snap={payload} />
+      </section>
+
+      {/* 実現損益 (決済済み) */}
+      <section className="bg-card rounded-xl p-4 shadow-lg">
+        <h3 className="text-xs uppercase tracking-widest text-muted mb-3">
+          実現損益 · exit 履歴
+        </h3>
+        <RealizedSection snap={payload} />
       </section>
 
       {/* exposure */}

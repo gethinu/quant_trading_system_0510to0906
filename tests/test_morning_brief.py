@@ -234,3 +234,111 @@ def test_family_produces_no_line_in_brief():
     )
     assert "家族ボード" not in body
     assert "未取得" not in body  # 家族の gap 注記が消えている
+
+
+# --------------------------------------------------------------------------
+# exit 台帳の監視 (silent-fail を毎朝表に出す)
+# --------------------------------------------------------------------------
+def _write_ledger(tmp_path, name: str, payload: dict) -> Path:
+    import json
+
+    d = tmp_path / "results_csv"
+    d.mkdir(exist_ok=True)
+    (d / name).write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    return d
+
+
+def _ledger(**over) -> dict:
+    base = {
+        "date": "2026-07-22",
+        "measurement": {"measured": True, "complete": True, "unmeasured_symbols": []},
+        "realized": {"all_time": {"total_realized_pl": 3334.08, "n_trades": 649}},
+        "exit_intent_reconciliation": {
+            "intended_not_filled": [],
+            "intended_pending": [],
+        },
+    }
+    base.update(over)
+    return base
+
+
+def test_missing_exit_ledger_is_red_not_silence(tmp_path):
+    """台帳が無い = 実現損益が測れていない。黙って通さず赤にする。"""
+    (tmp_path / "results_csv").mkdir()
+    alerts, red, summary = mb.check_exit_ledger(tmp_path / "results_csv", 20260722)
+    assert red is True
+    assert any("exit 台帳が無い" in a for a in alerts)
+    assert summary == "exit台帳=未検出"
+
+
+def test_healthy_exit_ledger_raises_no_alert(tmp_path):
+    d = _write_ledger(tmp_path, "exit_ledger_20260722.json", _ledger())
+    alerts, red, summary = mb.check_exit_ledger(d, 20260722)
+    assert alerts == []
+    assert red is False
+    assert "実現累計=3334.08" in summary and "決済649本" in summary
+
+
+def test_unmeasured_ledger_is_red(tmp_path):
+    """約定 ground truth が取れていなければ実現損益は信用できない -> 赤。"""
+    payload = _ledger(
+        measurement={"measured": False, "complete": False, "unmeasured_symbols": []}
+    )
+    d = _write_ledger(tmp_path, "exit_ledger_20260722.json", payload)
+    alerts, red, _ = mb.check_exit_ledger(d, 20260722)
+    assert red is True
+    assert any("exit 未計測" in a for a in alerts)
+
+
+def test_stale_ledger_is_red(tmp_path):
+    """当日ぶんが無い = 計測が止まっている (publish 経路の故障)。"""
+    d = _write_ledger(tmp_path, "exit_ledger_20260721.json", _ledger(date="2026-07-21"))
+    alerts, red, _ = mb.check_exit_ledger(d, 20260722)
+    assert red is True
+    assert any("当日ぶん未更新" in a for a in alerts)
+
+
+def test_exit_intent_not_filled_is_red(tmp_path):
+    """立会が終わったのに exit が約定していない = お金が動いていない -> 赤。"""
+    payload = _ledger(
+        exit_intent_reconciliation={
+            "intended_not_filled": [
+                {"symbol": "ACHC", "reason": "time_based"},
+                {"symbol": "DJT", "reason": "protect_stop"},
+            ],
+            "intended_pending": [],
+        }
+    )
+    d = _write_ledger(tmp_path, "exit_ledger_20260722.json", payload)
+    alerts, red, _ = mb.check_exit_ledger(d, 20260722)
+    assert red is True
+    assert any("2 件が立会終了後も未約定" in a and "ACHC" in a for a in alerts)
+
+
+def test_pending_exits_are_reported_but_not_red(tmp_path):
+    """まだ執行機会が来ていない分で毎朝赤を出さない (偽陽性を作らない)。"""
+    payload = _ledger(
+        exit_intent_reconciliation={
+            "intended_not_filled": [],
+            "intended_pending": [{"symbol": "ACHC", "reason": "time_based"}] * 20,
+        }
+    )
+    d = _write_ledger(tmp_path, "exit_ledger_20260722.json", payload)
+    alerts, red, summary = mb.check_exit_ledger(d, 20260722)
+    assert red is False and alerts == []
+    assert "exit執行待ち20" in summary
+
+
+def test_lot_mismatch_is_surfaced_without_crying_wolf(tmp_path):
+    """建玉不一致 (ticker rename) は既知原因なので赤にせず件数だけ残す。"""
+    payload = _ledger(
+        measurement={
+            "measured": True,
+            "complete": False,
+            "unmeasured_symbols": ["FI", "FISV"],
+        }
+    )
+    d = _write_ledger(tmp_path, "exit_ledger_20260722.json", payload)
+    alerts, red, summary = mb.check_exit_ledger(d, 20260722)
+    assert red is False and alerts == []
+    assert "建玉不一致2銘柄" in summary
