@@ -1,5 +1,5 @@
 {
-  "date": "2026-07-12",
+  "date": "2026-07-23",
   "provider": "polygon_grouped_daily",
   "n_candidates_total": 0,
   "survival_by_system": {
@@ -55,22 +55,22 @@
   },
   "rejected_top10": [],
   "delta_vs_previous": {
-    "sys1": -0.1676,
-    "sys2": -0.2222,
-    "sys3": -0.2222,
-    "sys4": -0.1116,
-    "sys5": -0.8429,
-    "sys6": -0.2878,
-    "sys7": -1.0
+    "sys1": 0.0,
+    "sys2": 0.0,
+    "sys3": 0.0,
+    "sys4": 0.0,
+    "sys5": 0.0,
+    "sys6": 0.0,
+    "sys7": 0.0
   },
   "consecutive_drops": {
-    "sys1": 1,
-    "sys2": 1,
-    "sys3": 1,
-    "sys4": 1,
-    "sys5": 1,
-    "sys6": 1,
-    "sys7": 1
+    "sys1": 0,
+    "sys2": 0,
+    "sys3": 0,
+    "sys4": 0,
+    "sys5": 0,
+    "sys6": 0,
+    "sys7": 0
   },
   "notes": []
 }
