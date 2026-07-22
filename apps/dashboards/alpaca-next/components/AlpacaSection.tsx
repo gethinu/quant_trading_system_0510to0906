@@ -909,8 +909,9 @@ function EquityBasisNote({ snap }: { snap: AlpacaSnapshot }) {
       は上場廃止（API から決済不能）の {b.frozen_symbols.join(' / ')}。broker の日次
       エクイティ系列と <code className="text-cardfg">last_equity</code>（
       {fmtUsd(b.last_daily_equity, 0)} @ {b.last_daily_session ?? '—'}）はこの分を計上
-      しないため、live equity とは水準が {fmtUsd(b.daily_series_gap, 0)} ずれます（うち
-      説明できない残差 {fmtUsd(b.residual_usd, 0)}）。当日損益はこのずれを避けるため
+      しないため、live equity とは水準が {fmtUsd(b.daily_series_gap, 0)} ずれます。うち
+      上場廃止分で説明できない残り{fmtUsd(b.residual_usd, 0)}は、日次系列の最終点（
+      {b.last_daily_session ?? '—'}）以降の値動きです。当日損益はこのずれを避けるため
       intraday 系列同士でのみ計算しています。
     </div>
   );
