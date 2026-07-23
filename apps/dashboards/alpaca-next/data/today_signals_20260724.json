@@ -1,0 +1,193 @@
+{
+  "version": "1.0",
+  "date": "2026-07-24",
+  "generated_at": "2026-07-24T06:45:19+09:00",
+  "provider": "polygon",
+  "systems": {
+    "sys1": {
+      "signals": [],
+      "n_candidates_input": 10,
+      "n_signals_output": 0,
+      "gate_survival_ratio": 0.0,
+      "funnel": {
+        "target": 5205,
+        "filter_pass": 1457,
+        "setup_pass": 629,
+        "candidate_count": 10,
+        "entry_count": 0,
+        "exit_count": null
+      }
+    },
+    "sys2": {
+      "signals": [
+        {
+          "symbol": "TRAX",
+          "side": "SELL",
+          "entry_price": 38.17,
+          "weight": 0.0879,
+          "rank": 30,
+          "reason": "モメンタムが強く過熱のため"
+        },
+        {
+          "symbol": "FBRX",
+          "side": "SELL",
+          "entry_price": 56.63,
+          "weight": 0.0903,
+          "rank": 31,
+          "reason": "モメンタムが強く過熱のため"
+        },
+        {
+          "symbol": "SM",
+          "side": "SELL",
+          "entry_price": 33.19,
+          "weight": 0.1587,
+          "rank": 32,
+          "reason": "モメンタムが強く過熱のため"
+        },
+        {
+          "symbol": "NOG",
+          "side": "SELL",
+          "entry_price": 22.05,
+          "weight": 0.1425,
+          "rank": 33,
+          "reason": "モメンタムが強く過熱のため"
+        },
+        {
+          "symbol": "OII",
+          "side": "SELL",
+          "entry_price": 45.0,
+          "weight": 0.1275,
+          "rank": 34,
+          "reason": "モメンタムが強く過熱のため"
+        },
+        {
+          "symbol": "PTEN",
+          "side": "SELL",
+          "entry_price": 10.72,
+          "weight": 0.1158,
+          "rank": 35,
+          "reason": "モメンタムが強く過熱のため"
+        },
+        {
+          "symbol": "HUN",
+          "side": "SELL",
+          "entry_price": 13.22,
+          "weight": 0.1042,
+          "rank": 36,
+          "reason": "モメンタムが強く過熱のため"
+        },
+        {
+          "symbol": "SWKS",
+          "side": "SELL",
+          "entry_price": 63.16,
+          "weight": 0.0895,
+          "rank": 37,
+          "reason": "モメンタムが強く過熱のため"
+        },
+        {
+          "symbol": "OLN",
+          "side": "SELL",
+          "entry_price": 24.24,
+          "weight": 0.0837,
+          "rank": 38,
+          "reason": "モメンタムが強く過熱のため"
+        }
+      ],
+      "n_candidates_input": 10,
+      "n_signals_output": 9,
+      "gate_survival_ratio": 0.9,
+      "funnel": {
+        "target": 5205,
+        "filter_pass": 1511,
+        "setup_pass": 12,
+        "candidate_count": 10,
+        "entry_count": 9,
+        "exit_count": null
+      }
+    },
+    "sys3": {
+      "signals": [],
+      "n_candidates_input": 10,
+      "n_signals_output": 0,
+      "gate_survival_ratio": 0.0,
+      "funnel": {
+        "target": 5205,
+        "filter_pass": 1031,
+        "setup_pass": 10,
+        "candidate_count": 10,
+        "entry_count": 0,
+        "exit_count": null
+      }
+    },
+    "sys4": {
+      "signals": [],
+      "n_candidates_input": 10,
+      "n_signals_output": 0,
+      "gate_survival_ratio": 0.0,
+      "funnel": {
+        "target": 5205,
+        "filter_pass": 504,
+        "setup_pass": 10,
+        "candidate_count": 10,
+        "entry_count": 0,
+        "exit_count": null
+      }
+    },
+    "sys5": {
+      "signals": [],
+      "n_candidates_input": 7,
+      "n_signals_output": 0,
+      "gate_survival_ratio": 0.0,
+      "funnel": {
+        "target": 5205,
+        "filter_pass": 1314,
+        "setup_pass": 7,
+        "candidate_count": 7,
+        "entry_count": 0,
+        "exit_count": null
+      }
+    },
+    "sys6": {
+      "signals": [],
+      "n_candidates_input": 0,
+      "n_signals_output": 0,
+      "gate_survival_ratio": 0.0,
+      "funnel": {
+        "target": 5205,
+        "filter_pass": 1089,
+        "setup_pass": 0,
+        "candidate_count": 0,
+        "entry_count": 0,
+        "exit_count": null
+      }
+    },
+    "sys7": {
+      "signals": [],
+      "n_candidates_input": 0,
+      "n_signals_output": 0,
+      "gate_survival_ratio": 0.0,
+      "funnel": {
+        "target": 5205,
+        "filter_pass": 1,
+        "setup_pass": 0,
+        "candidate_count": 0,
+        "entry_count": 0,
+        "exit_count": null
+      }
+    }
+  },
+  "portfolio": {
+    "total_signals": 9,
+    "total_notional_usd": 11294.01,
+    "hedge": null,
+    "universe_target": 5205
+  },
+  "meta": {
+    "cli_version": "0.1.0",
+    "run_id": "20260724_062952_9e0697",
+    "elapsed_seconds": 927.4,
+    "status": "ok",
+    "abort_reason": null,
+    "publish_status": "ok"
+  }
+}
