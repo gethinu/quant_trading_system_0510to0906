@@ -1,5 +1,5 @@
 {
-  "date": "2026-07-20",
+  "date": "2026-07-27",
   "provider": "polygon_grouped_daily",
   "schema": "signal_pipeline/v1",
   "systems": {
@@ -10,7 +10,7 @@
           "name": "Tgt",
           "label": "Tgt",
           "condition": "ユニバース対象銘柄数",
-          "count": 5214,
+          "count": 5196,
           "measured": false,
           "ratio_of_prev": null,
           "ratio_of_universe": 1.0
@@ -19,19 +19,19 @@
           "name": "FILpass",
           "label": "FILpass",
           "condition": "Close >= 5 かつ DollarVolume20 > 50M",
-          "count": 1501,
+          "count": 1446,
           "measured": false,
-          "ratio_of_prev": 0.287879,
-          "ratio_of_universe": 0.287879
+          "ratio_of_prev": 0.278291,
+          "ratio_of_universe": 0.278291
         },
         {
           "name": "STUpass",
           "label": "STUpass",
           "condition": "SMA25 > SMA50 かつ ROC200 > 0",
-          "count": 684,
+          "count": 625,
           "measured": false,
-          "ratio_of_prev": 0.455696,
-          "ratio_of_universe": 0.131185
+          "ratio_of_prev": 0.432227,
+          "ratio_of_universe": 0.120285
         },
         {
           "name": "TRDlist",
@@ -39,17 +39,17 @@
           "condition": "ROC200 降順 上位候補",
           "count": 10,
           "measured": false,
-          "ratio_of_prev": 0.01462,
-          "ratio_of_universe": 0.001918
+          "ratio_of_prev": 0.016,
+          "ratio_of_universe": 0.001925
         },
         {
           "name": "Entry",
           "label": "Entry",
           "condition": "allocation 後エントリ発火",
-          "count": 7,
+          "count": 0,
           "measured": false,
-          "ratio_of_prev": 0.7,
-          "ratio_of_universe": 0.001343
+          "ratio_of_prev": 0.0,
+          "ratio_of_universe": 0.0
         },
         {
           "name": "Exit",
@@ -61,7 +61,7 @@
           "ratio_of_universe": null
         }
       ],
-      "final_signals": 7
+      "final_signals": 0
     },
     "sys2": {
       "system_id": "sys2",
@@ -70,7 +70,7 @@
           "name": "Tgt",
           "label": "Tgt",
           "condition": "ユニバース対象銘柄数",
-          "count": 5214,
+          "count": 5196,
           "measured": false,
           "ratio_of_prev": null,
           "ratio_of_universe": 1.0
@@ -79,37 +79,37 @@
           "name": "FILpass",
           "label": "FILpass",
           "condition": "Close >= 5 かつ DollarVolume20 > 25M かつ ATR_Ratio > 0.03",
-          "count": 1570,
+          "count": 1496,
           "measured": false,
-          "ratio_of_prev": 0.301112,
-          "ratio_of_universe": 0.301112
+          "ratio_of_prev": 0.287914,
+          "ratio_of_universe": 0.287914
         },
         {
           "name": "STUpass",
           "label": "STUpass",
           "condition": "RSI3 > 90 かつ twodayup",
-          "count": 19,
+          "count": 9,
           "measured": false,
-          "ratio_of_prev": 0.012102,
-          "ratio_of_universe": 0.003644
+          "ratio_of_prev": 0.006016,
+          "ratio_of_universe": 0.001732
         },
         {
           "name": "TRDlist",
           "label": "TRDlist",
           "condition": "ADX7 降順 上位候補",
-          "count": 10,
+          "count": 9,
           "measured": false,
-          "ratio_of_prev": 0.526316,
-          "ratio_of_universe": 0.001918
+          "ratio_of_prev": 1.0,
+          "ratio_of_universe": 0.001732
         },
         {
           "name": "Entry",
           "label": "Entry",
           "condition": "allocation 後エントリ発火",
-          "count": 10,
+          "count": 9,
           "measured": false,
           "ratio_of_prev": 1.0,
-          "ratio_of_universe": 0.001918
+          "ratio_of_universe": 0.001732
         },
         {
           "name": "Exit",
@@ -121,7 +121,7 @@
           "ratio_of_universe": null
         }
       ],
-      "final_signals": 10
+      "final_signals": 9
     },
     "sys3": {
       "system_id": "sys3",
@@ -130,7 +130,7 @@
           "name": "Tgt",
           "label": "Tgt",
           "condition": "ユニバース対象銘柄数",
-          "count": 5214,
+          "count": 5196,
           "measured": false,
           "ratio_of_prev": null,
           "ratio_of_universe": 1.0
@@ -139,10 +139,10 @@
           "name": "FILpass",
           "label": "FILpass",
           "condition": "Close >= 5 かつ DollarVolume20 > 25M かつ ATR_Ratio >= 0.05",
-          "count": 1066,
+          "count": 1028,
           "measured": false,
-          "ratio_of_prev": 0.20445,
-          "ratio_of_universe": 0.20445
+          "ratio_of_prev": 0.197844,
+          "ratio_of_universe": 0.197844
         },
         {
           "name": "STUpass",
@@ -150,8 +150,8 @@
           "condition": "drop3d >= 0.125",
           "count": 10,
           "measured": false,
-          "ratio_of_prev": 0.009381,
-          "ratio_of_universe": 0.001918
+          "ratio_of_prev": 0.009728,
+          "ratio_of_universe": 0.001925
         },
         {
           "name": "TRDlist",
@@ -160,16 +160,16 @@
           "count": 10,
           "measured": false,
           "ratio_of_prev": 1.0,
-          "ratio_of_universe": 0.001918
+          "ratio_of_universe": 0.001925
         },
         {
           "name": "Entry",
           "label": "Entry",
           "condition": "allocation 後エントリ発火",
-          "count": 8,
+          "count": 0,
           "measured": false,
-          "ratio_of_prev": 0.8,
-          "ratio_of_universe": 0.001534
+          "ratio_of_prev": 0.0,
+          "ratio_of_universe": 0.0
         },
         {
           "name": "Exit",
@@ -181,7 +181,7 @@
           "ratio_of_universe": null
         }
       ],
-      "final_signals": 8
+      "final_signals": 0
     },
     "sys4": {
       "system_id": "sys4",
@@ -190,7 +190,7 @@
           "name": "Tgt",
           "label": "Tgt",
           "condition": "ユニバース対象銘柄数",
-          "count": 5214,
+          "count": 5196,
           "measured": false,
           "ratio_of_prev": null,
           "ratio_of_universe": 1.0
@@ -199,10 +199,10 @@
           "name": "FILpass",
           "label": "FILpass",
           "condition": "DollarVolume50 > 100M かつ HV50 in [10,40]",
-          "count": 482,
+          "count": 505,
           "measured": false,
-          "ratio_of_prev": 0.092443,
-          "ratio_of_universe": 0.092443
+          "ratio_of_prev": 0.09719,
+          "ratio_of_universe": 0.09719
         },
         {
           "name": "STUpass",
@@ -210,8 +210,8 @@
           "condition": "Close > SMA200",
           "count": 10,
           "measured": false,
-          "ratio_of_prev": 0.020747,
-          "ratio_of_universe": 0.001918
+          "ratio_of_prev": 0.019802,
+          "ratio_of_universe": 0.001925
         },
         {
           "name": "TRDlist",
@@ -220,16 +220,16 @@
           "count": 10,
           "measured": false,
           "ratio_of_prev": 1.0,
-          "ratio_of_universe": 0.001918
+          "ratio_of_universe": 0.001925
         },
         {
           "name": "Entry",
           "label": "Entry",
           "condition": "allocation 後エントリ発火",
-          "count": 10,
+          "count": 0,
           "measured": false,
-          "ratio_of_prev": 1.0,
-          "ratio_of_universe": 0.001918
+          "ratio_of_prev": 0.0,
+          "ratio_of_universe": 0.0
         },
         {
           "name": "Exit",
@@ -241,7 +241,7 @@
           "ratio_of_universe": null
         }
       ],
-      "final_signals": 10
+      "final_signals": 0
     },
     "sys5": {
       "system_id": "sys5",
@@ -250,7 +250,7 @@
           "name": "Tgt",
           "label": "Tgt",
           "condition": "ユニバース対象銘柄数",
-          "count": 5214,
+          "count": 5196,
           "measured": false,
           "ratio_of_prev": null,
           "ratio_of_universe": 1.0
@@ -259,37 +259,37 @@
           "name": "FILpass",
           "label": "FILpass",
           "condition": "Close >= 5 かつ ADX7 > 55 かつ ATR_Pct > 0.04 かつ AvgVolume50 > 500k かつ DollarVolume50 > 2.5M",
-          "count": 1361,
+          "count": 1312,
           "measured": false,
-          "ratio_of_prev": 0.261028,
-          "ratio_of_universe": 0.261028
+          "ratio_of_prev": 0.252502,
+          "ratio_of_universe": 0.252502
         },
         {
           "name": "STUpass",
           "label": "STUpass",
           "condition": "ADX7 > 55 かつ Close > SMA100+ATR10 かつ RSI3 < 50",
-          "count": 4,
+          "count": 7,
           "measured": false,
-          "ratio_of_prev": 0.002939,
-          "ratio_of_universe": 0.000767
+          "ratio_of_prev": 0.005335,
+          "ratio_of_universe": 0.001347
         },
         {
           "name": "TRDlist",
           "label": "TRDlist",
           "condition": "ADX7 降順 上位候補",
-          "count": 4,
+          "count": 7,
           "measured": false,
           "ratio_of_prev": 1.0,
-          "ratio_of_universe": 0.000767
+          "ratio_of_universe": 0.001347
         },
         {
           "name": "Entry",
           "label": "Entry",
           "condition": "allocation 後エントリ発火",
-          "count": 4,
+          "count": 0,
           "measured": false,
-          "ratio_of_prev": 1.0,
-          "ratio_of_universe": 0.000767
+          "ratio_of_prev": 0.0,
+          "ratio_of_universe": 0.0
         },
         {
           "name": "Exit",
@@ -301,7 +301,7 @@
           "ratio_of_universe": null
         }
       ],
-      "final_signals": 4
+      "final_signals": 0
     },
     "sys6": {
       "system_id": "sys6",
@@ -310,7 +310,7 @@
           "name": "Tgt",
           "label": "Tgt",
           "condition": "ユニバース対象銘柄数",
-          "count": 5214,
+          "count": 5196,
           "measured": false,
           "ratio_of_prev": null,
           "ratio_of_universe": 1.0
@@ -319,10 +319,10 @@
           "name": "FILpass",
           "label": "FILpass",
           "condition": "Low >= 5 かつ DollarVolume50 > 10M",
-          "count": 1035,
+          "count": 1099,
           "measured": false,
-          "ratio_of_prev": 0.198504,
-          "ratio_of_universe": 0.198504
+          "ratio_of_prev": 0.211509,
+          "ratio_of_universe": 0.211509
         },
         {
           "name": "STUpass",
@@ -370,7 +370,7 @@
           "name": "Tgt",
           "label": "Tgt",
           "condition": "ユニバース対象銘柄数",
-          "count": 5214,
+          "count": 5196,
           "measured": false,
           "ratio_of_prev": null,
           "ratio_of_universe": 1.0
