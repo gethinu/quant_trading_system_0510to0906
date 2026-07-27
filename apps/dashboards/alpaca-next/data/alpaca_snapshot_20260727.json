@@ -1,18 +1,18 @@
 {
   "schema": "alpaca_snapshot/v1",
   "date": "2026-07-27",
-  "generated_at": "2026-07-27T06:27:58Z",
+  "generated_at": "2026-07-27T07:35:23Z",
   "provider": "alpaca-paper",
   "account": {
-    "equity": 103583.5,
+    "equity": 103639.29,
     "last_equity": 99523.1,
     "cash": 65360.52,
-    "buying_power": 298500.41,
-    "long_market_value": 58542.07,
+    "buying_power": 298656.64,
+    "long_market_value": 58597.86,
     "short_market_value": -20319.09,
-    "pnl_today_abs": -186.54,
-    "pnl_today_pct": -0.18,
-    "unrealized_pl_total": 155.13,
+    "pnl_today_abs": -130.75,
+    "pnl_today_pct": -0.126,
+    "unrealized_pl_total": 210.92,
     "pnl_today_basis": "prev_session_intraday",
     "pnl_today_measured": true,
     "pnl_today_baseline": 103770.04,
@@ -534,18 +534,18 @@
       },
       {
         "t": "2026-07-27",
-        "equity": 103583.5,
+        "equity": 103639.29,
         "pl": null,
         "pl_pct": null,
         "live": true,
-        "peak": 103583.5,
+        "peak": 103639.29,
         "dd_pct": 0.0
       }
     ],
     "source": "portfolio_history_api",
-    "peak_equity": 103583.5,
+    "peak_equity": 103639.29,
     "max_drawdown_pct": -3.885,
-    "period_return_pct": 2.952
+    "period_return_pct": 3.008
   },
   "equity_ranges": {
     "1D": {
@@ -554,15 +554,15 @@
       "points": [
         {
           "t": "2026-07-27 live",
-          "equity": 103583.5,
+          "equity": 103639.29,
           "pl": null,
           "pl_pct": null,
           "live": true,
-          "peak": 103583.5,
+          "peak": 103639.29,
           "dd_pct": 0.0
         }
       ],
-      "peak_equity": 103583.5,
+      "peak_equity": 103639.29,
       "max_drawdown_pct": 0.0,
       "period_return_pct": null,
       "start": "2026-07-27 live",
@@ -2846,20 +2846,20 @@
       "FOLD"
     ],
     "n_frozen": 2,
-    "daily_series_gap": 4060.4,
-    "residual_usd": -225.47,
+    "daily_series_gap": 4116.19,
+    "residual_usd": -169.68,
     "last_daily_equity": 99523.1,
     "last_daily_session": "2026-07-24"
   },
   "pnl_today": {
     "session_date": "2026-07-27",
-    "equity_now": 103583.5,
+    "equity_now": 103639.29,
     "baseline_equity": 103770.04,
     "baseline_session": "2026-07-24",
-    "total_pl": -186.54,
-    "total_pl_pct": -0.18,
+    "total_pl": -130.75,
+    "total_pl_pct": -0.126,
     "realized_pl": 0.0,
-    "unrealized_delta": -186.54,
+    "unrealized_delta": -130.75,
     "basis": "prev_session_intraday",
     "measured": true,
     "reason": null
@@ -2867,20 +2867,20 @@
   "realized": {
     "available": true,
     "measured": true,
-    "complete": false,
+    "complete": true,
     "stale": false,
     "reason": null,
     "ledger_date": "2026-07-27",
-    "ledger_run_id": "20260727_152742_161eb5",
-    "ledger_generated_at": "2026-07-27T06:27:45Z",
+    "ledger_run_id": "20260727_163511_87626c",
+    "ledger_generated_at": "2026-07-27T07:35:14Z",
     "all_time": {
-      "n_trades": 652,
-      "total_realized_pl": 2966.36,
-      "win_rate_pct": 41.0,
-      "n_wins": 267,
-      "n_losses": 382,
-      "avg_win": 61.15,
-      "avg_loss": -34.98,
+      "n_trades": 663,
+      "total_realized_pl": 3431.41,
+      "win_rate_pct": 41.3,
+      "n_wins": 274,
+      "n_losses": 386,
+      "avg_win": 63.48,
+      "avg_loss": -36.17,
       "best": {
         "symbol": "TIGR",
         "realized_pl": 2234.7
@@ -2893,53 +2893,53 @@
     "by_day": [
       {
         "t": "2025-12-12",
-        "realized_pl": -68.16,
-        "realized_pl_cum": -68.16
+        "realized_pl": -9.15,
+        "realized_pl_cum": -9.15
       },
       {
         "t": "2026-07-06",
-        "realized_pl": 5835.19,
-        "realized_pl_cum": 5767.03
+        "realized_pl": 6241.23,
+        "realized_pl_cum": 6232.08
       },
       {
         "t": "2026-07-07",
         "realized_pl": -6.14,
-        "realized_pl_cum": 5760.89
+        "realized_pl_cum": 6225.94
       },
       {
         "t": "2026-07-08",
         "realized_pl": -4.9,
-        "realized_pl_cum": 5755.99
+        "realized_pl_cum": 6221.04
       },
       {
         "t": "2026-07-13",
         "realized_pl": 16.69,
-        "realized_pl_cum": 5772.68
+        "realized_pl_cum": 6237.73
       },
       {
         "t": "2026-07-14",
         "realized_pl": 141.19,
-        "realized_pl_cum": 5913.87
+        "realized_pl_cum": 6378.92
       },
       {
         "t": "2026-07-15",
         "realized_pl": -44.49,
-        "realized_pl_cum": 5869.38
+        "realized_pl_cum": 6334.43
       },
       {
         "t": "2026-07-17",
         "realized_pl": -202.25,
-        "realized_pl_cum": 5667.13
+        "realized_pl_cum": 6132.18
       },
       {
         "t": "2026-07-20",
         "realized_pl": -2333.06,
-        "realized_pl_cum": 3334.08
+        "realized_pl_cum": 3799.13
       },
       {
         "t": "2026-07-22",
         "realized_pl": -367.72,
-        "realized_pl_cum": 2966.36
+        "realized_pl_cum": 3431.41
       }
     ],
     "by_system": {
@@ -2978,12 +2978,12 @@
         }
       },
       "system3": {
-        "n_trades": 134,
-        "total_realized_pl": -1656.87,
-        "win_rate_pct": 32.8,
-        "n_wins": 44,
+        "n_trades": 139,
+        "total_realized_pl": -1597.86,
+        "win_rate_pct": 35.3,
+        "n_wins": 49,
         "n_losses": 90,
-        "avg_win": 17.63,
+        "avg_win": 17.03,
         "avg_loss": -27.03,
         "best": {
           "symbol": "APLS",
@@ -3046,13 +3046,13 @@
         }
       },
       "unknown": {
-        "n_trades": 85,
-        "total_realized_pl": 2982.49,
-        "win_rate_pct": 49.4,
-        "n_wins": 42,
-        "n_losses": 43,
-        "avg_win": 162.95,
-        "avg_loss": -89.8,
+        "n_trades": 91,
+        "total_realized_pl": 3388.53,
+        "win_rate_pct": 48.4,
+        "n_wins": 44,
+        "n_losses": 47,
+        "avg_win": 178.4,
+        "avg_loss": -94.92,
         "best": {
           "symbol": "TIGR",
           "realized_pl": 2234.7
@@ -3066,8 +3066,8 @@
     "by_exit_reason": [
       {
         "reason": null,
-        "n_trades": 334,
-        "realized_pl": 5564.68
+        "n_trades": 345,
+        "realized_pl": 6029.73
       },
       {
         "reason": "time_based",
@@ -3114,7 +3114,8 @@
         "exit_order_id": "cad9f67f-001d-47e6-b608-dec133d3d499",
         "entry_order_id": "387e3670-5775-4072-97f7-5d85c3069ac8",
         "system_source": null,
-        "system_unknown_reason": "entry_order_untagged"
+        "system_unknown_reason": "entry_order_untagged",
+        "symbol_aliases": []
       },
       {
         "symbol": "LCID",
@@ -3134,7 +3135,8 @@
         "exit_order_id": "87755dd2-96e9-40a3-8747-8833f721fd4b",
         "entry_order_id": "a159a504-5e52-466a-b587-2adaa9d6e025",
         "system_source": null,
-        "system_unknown_reason": "entry_order_untagged"
+        "system_unknown_reason": "entry_order_untagged",
+        "symbol_aliases": []
       },
       {
         "symbol": "MET",
@@ -3154,7 +3156,8 @@
         "exit_order_id": "7724f7b0-863c-44c4-9c88-6103f580926c",
         "entry_order_id": "8d468163-b3c3-41a6-a7fe-c7e9e26e8eae",
         "system_source": null,
-        "system_unknown_reason": "entry_order_untagged"
+        "system_unknown_reason": "entry_order_untagged",
+        "symbol_aliases": []
       },
       {
         "symbol": "IREN",
@@ -3174,7 +3177,8 @@
         "exit_order_id": "b71f8050-c79d-47d7-86d2-f2495e77f860",
         "entry_order_id": "a17ac16d-0a72-4738-acea-3f72c7f5a36c",
         "system_source": null,
-        "system_unknown_reason": "entry_order_untagged"
+        "system_unknown_reason": "entry_order_untagged",
+        "symbol_aliases": []
       },
       {
         "symbol": "IREN",
@@ -3194,7 +3198,8 @@
         "exit_order_id": "b71f8050-c79d-47d7-86d2-f2495e77f860",
         "entry_order_id": "a17ac16d-0a72-4738-acea-3f72c7f5a36c",
         "system_source": null,
-        "system_unknown_reason": "entry_order_untagged"
+        "system_unknown_reason": "entry_order_untagged",
+        "symbol_aliases": []
       },
       {
         "symbol": "IREN",
@@ -3214,7 +3219,8 @@
         "exit_order_id": "b71f8050-c79d-47d7-86d2-f2495e77f860",
         "entry_order_id": "a17ac16d-0a72-4738-acea-3f72c7f5a36c",
         "system_source": null,
-        "system_unknown_reason": "entry_order_untagged"
+        "system_unknown_reason": "entry_order_untagged",
+        "symbol_aliases": []
       },
       {
         "symbol": "LVS",
@@ -3234,7 +3240,8 @@
         "exit_order_id": "783d26c1-6dad-4ab4-826a-88f30727a702",
         "entry_order_id": "ac3d40b6-5707-4c67-b31c-c43a268419f4",
         "system_source": null,
-        "system_unknown_reason": "entry_order_untagged"
+        "system_unknown_reason": "entry_order_untagged",
+        "symbol_aliases": []
       },
       {
         "symbol": "DK",
@@ -3254,7 +3261,8 @@
         "exit_order_id": "7eaacf26-2229-4906-82e5-0a1332886b5d",
         "entry_order_id": "2de06832-8e6b-45cc-9fbf-72700f2f303c",
         "system_source": "order_file",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "AXTI",
@@ -3274,7 +3282,8 @@
         "exit_order_id": "9fda1227-535b-49a8-83ae-681f3ee33386",
         "entry_order_id": "3b13921d-38da-4acb-b6e7-a4e0fdfdd037",
         "system_source": "order_file",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "LCID",
@@ -3294,7 +3303,8 @@
         "exit_order_id": "87755dd2-96e9-40a3-8747-8833f721fd4b",
         "entry_order_id": "a159a504-5e52-466a-b587-2adaa9d6e025",
         "system_source": null,
-        "system_unknown_reason": "entry_order_untagged"
+        "system_unknown_reason": "entry_order_untagged",
+        "symbol_aliases": []
       },
       {
         "symbol": "LVS",
@@ -3314,7 +3324,8 @@
         "exit_order_id": "783d26c1-6dad-4ab4-826a-88f30727a702",
         "entry_order_id": "ac3d40b6-5707-4c67-b31c-c43a268419f4",
         "system_source": null,
-        "system_unknown_reason": "entry_order_untagged"
+        "system_unknown_reason": "entry_order_untagged",
+        "symbol_aliases": []
       },
       {
         "symbol": "DK",
@@ -3334,7 +3345,8 @@
         "exit_order_id": "7eaacf26-2229-4906-82e5-0a1332886b5d",
         "entry_order_id": "2de06832-8e6b-45cc-9fbf-72700f2f303c",
         "system_source": "order_file",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "AXTI",
@@ -3354,7 +3366,8 @@
         "exit_order_id": "9fda1227-535b-49a8-83ae-681f3ee33386",
         "entry_order_id": "3b13921d-38da-4acb-b6e7-a4e0fdfdd037",
         "system_source": "order_file",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "VOR",
@@ -3374,7 +3387,8 @@
         "exit_order_id": "7232662f-24f5-407d-8ffd-16877f74730a",
         "entry_order_id": "59d6a5ad-b982-4e22-acae-5f85d14cd970",
         "system_source": null,
-        "system_unknown_reason": "entry_order_untagged"
+        "system_unknown_reason": "entry_order_untagged",
+        "symbol_aliases": []
       },
       {
         "symbol": "HST",
@@ -3394,7 +3408,8 @@
         "exit_order_id": "d065bf5b-9b6b-45ba-a223-c62981f2e993",
         "entry_order_id": "971c66f5-f6c3-4516-86b0-a750474fb334",
         "system_source": "order_file",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "ANF",
@@ -3414,7 +3429,8 @@
         "exit_order_id": "41d2bb71-8ee1-4cb4-a542-8466e2e8f2e5",
         "entry_order_id": "c490d1fa-f732-4f01-90c2-7d1d2f4ce888",
         "system_source": null,
-        "system_unknown_reason": "entry_order_untagged"
+        "system_unknown_reason": "entry_order_untagged",
+        "symbol_aliases": []
       },
       {
         "symbol": "ONDS",
@@ -3434,7 +3450,8 @@
         "exit_order_id": "4bf4ac62-ec21-4494-9175-da0d2b50a466",
         "entry_order_id": "65b372b5-c222-4a32-945d-e063837ae679",
         "system_source": null,
-        "system_unknown_reason": "entry_order_untagged"
+        "system_unknown_reason": "entry_order_untagged",
+        "symbol_aliases": []
       },
       {
         "symbol": "ONDS",
@@ -3454,7 +3471,8 @@
         "exit_order_id": "4bf4ac62-ec21-4494-9175-da0d2b50a466",
         "entry_order_id": "65b372b5-c222-4a32-945d-e063837ae679",
         "system_source": null,
-        "system_unknown_reason": "entry_order_untagged"
+        "system_unknown_reason": "entry_order_untagged",
+        "symbol_aliases": []
       },
       {
         "symbol": "ONDS",
@@ -3474,7 +3492,8 @@
         "exit_order_id": "4bf4ac62-ec21-4494-9175-da0d2b50a466",
         "entry_order_id": "65b372b5-c222-4a32-945d-e063837ae679",
         "system_source": null,
-        "system_unknown_reason": "entry_order_untagged"
+        "system_unknown_reason": "entry_order_untagged",
+        "symbol_aliases": []
       },
       {
         "symbol": "ONDS",
@@ -3494,7 +3513,8 @@
         "exit_order_id": "4bf4ac62-ec21-4494-9175-da0d2b50a466",
         "entry_order_id": "65b372b5-c222-4a32-945d-e063837ae679",
         "system_source": null,
-        "system_unknown_reason": "entry_order_untagged"
+        "system_unknown_reason": "entry_order_untagged",
+        "symbol_aliases": []
       },
       {
         "symbol": "ONDS",
@@ -3514,7 +3534,8 @@
         "exit_order_id": "4bf4ac62-ec21-4494-9175-da0d2b50a466",
         "entry_order_id": "65b372b5-c222-4a32-945d-e063837ae679",
         "system_source": null,
-        "system_unknown_reason": "entry_order_untagged"
+        "system_unknown_reason": "entry_order_untagged",
+        "symbol_aliases": []
       },
       {
         "symbol": "COGT",
@@ -3534,7 +3555,8 @@
         "exit_order_id": "86be3abf-6501-4a60-b9f6-8de04b44f903",
         "entry_order_id": "4b6ab64a-72ae-4b44-8f21-a8799b8f110d",
         "system_source": null,
-        "system_unknown_reason": "entry_order_untagged"
+        "system_unknown_reason": "entry_order_untagged",
+        "symbol_aliases": []
       },
       {
         "symbol": "PTEN",
@@ -3554,7 +3576,8 @@
         "exit_order_id": "fdf5efdd-fbda-4c45-ad52-43c1082e9576",
         "entry_order_id": "8d6ed8ee-d08c-4bd9-ad27-c7c8bd7c05fe",
         "system_source": "order_file",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "HYMC",
@@ -3574,7 +3597,8 @@
         "exit_order_id": "34d734d0-f2d9-461d-b3cc-7170e722c60f",
         "entry_order_id": "400335ca-a167-4078-ba14-871eb0940ec6",
         "system_source": null,
-        "system_unknown_reason": "entry_order_untagged"
+        "system_unknown_reason": "entry_order_untagged",
+        "symbol_aliases": []
       },
       {
         "symbol": "HYMC",
@@ -3594,7 +3618,8 @@
         "exit_order_id": "34d734d0-f2d9-461d-b3cc-7170e722c60f",
         "entry_order_id": "400335ca-a167-4078-ba14-871eb0940ec6",
         "system_source": null,
-        "system_unknown_reason": "entry_order_untagged"
+        "system_unknown_reason": "entry_order_untagged",
+        "symbol_aliases": []
       },
       {
         "symbol": "NFLX",
@@ -3614,7 +3639,8 @@
         "exit_order_id": "c2cffa07-e488-4da6-9862-5174703f915a",
         "entry_order_id": "57c36c39-cb14-4f8f-b340-bc82a7bcc62f",
         "system_source": null,
-        "system_unknown_reason": "entry_order_untagged"
+        "system_unknown_reason": "entry_order_untagged",
+        "symbol_aliases": []
       },
       {
         "symbol": "CLH",
@@ -3634,7 +3660,8 @@
         "exit_order_id": "15451386-5886-428b-8773-fdbc2fba30c8",
         "entry_order_id": "f9530aec-1b6d-4b80-9ce2-793bb8f07d7f",
         "system_source": null,
-        "system_unknown_reason": "entry_order_untagged"
+        "system_unknown_reason": "entry_order_untagged",
+        "symbol_aliases": []
       },
       {
         "symbol": "CLH",
@@ -3654,7 +3681,8 @@
         "exit_order_id": "15451386-5886-428b-8773-fdbc2fba30c8",
         "entry_order_id": "f9530aec-1b6d-4b80-9ce2-793bb8f07d7f",
         "system_source": null,
-        "system_unknown_reason": "entry_order_untagged"
+        "system_unknown_reason": "entry_order_untagged",
+        "symbol_aliases": []
       },
       {
         "symbol": "CLH",
@@ -3674,7 +3702,8 @@
         "exit_order_id": "15451386-5886-428b-8773-fdbc2fba30c8",
         "entry_order_id": "f9530aec-1b6d-4b80-9ce2-793bb8f07d7f",
         "system_source": null,
-        "system_unknown_reason": "entry_order_untagged"
+        "system_unknown_reason": "entry_order_untagged",
+        "symbol_aliases": []
       },
       {
         "symbol": "CVI",
@@ -3694,7 +3723,8 @@
         "exit_order_id": "cad9f67f-001d-47e6-b608-dec133d3d499",
         "entry_order_id": "387e3670-5775-4072-97f7-5d85c3069ac8",
         "system_source": null,
-        "system_unknown_reason": "entry_order_untagged"
+        "system_unknown_reason": "entry_order_untagged",
+        "symbol_aliases": []
       },
       {
         "symbol": "LCID",
@@ -3714,7 +3744,8 @@
         "exit_order_id": "87755dd2-96e9-40a3-8747-8833f721fd4b",
         "entry_order_id": "a159a504-5e52-466a-b587-2adaa9d6e025",
         "system_source": null,
-        "system_unknown_reason": "entry_order_untagged"
+        "system_unknown_reason": "entry_order_untagged",
+        "symbol_aliases": []
       },
       {
         "symbol": "LVS",
@@ -3734,7 +3765,8 @@
         "exit_order_id": "783d26c1-6dad-4ab4-826a-88f30727a702",
         "entry_order_id": "ac3d40b6-5707-4c67-b31c-c43a268419f4",
         "system_source": null,
-        "system_unknown_reason": "entry_order_untagged"
+        "system_unknown_reason": "entry_order_untagged",
+        "symbol_aliases": []
       },
       {
         "symbol": "DK",
@@ -3754,7 +3786,8 @@
         "exit_order_id": "7eaacf26-2229-4906-82e5-0a1332886b5d",
         "entry_order_id": "2de06832-8e6b-45cc-9fbf-72700f2f303c",
         "system_source": "order_file",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "AXTI",
@@ -3774,7 +3807,8 @@
         "exit_order_id": "9fda1227-535b-49a8-83ae-681f3ee33386",
         "entry_order_id": "3b13921d-38da-4acb-b6e7-a4e0fdfdd037",
         "system_source": "order_file",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "VOR",
@@ -3794,7 +3828,8 @@
         "exit_order_id": "7232662f-24f5-407d-8ffd-16877f74730a",
         "entry_order_id": "59d6a5ad-b982-4e22-acae-5f85d14cd970",
         "system_source": null,
-        "system_unknown_reason": "entry_order_untagged"
+        "system_unknown_reason": "entry_order_untagged",
+        "symbol_aliases": []
       },
       {
         "symbol": "VOR",
@@ -3814,7 +3849,8 @@
         "exit_order_id": "7232662f-24f5-407d-8ffd-16877f74730a",
         "entry_order_id": "59d6a5ad-b982-4e22-acae-5f85d14cd970",
         "system_source": null,
-        "system_unknown_reason": "entry_order_untagged"
+        "system_unknown_reason": "entry_order_untagged",
+        "symbol_aliases": []
       },
       {
         "symbol": "HST",
@@ -3834,7 +3870,8 @@
         "exit_order_id": "d065bf5b-9b6b-45ba-a223-c62981f2e993",
         "entry_order_id": "971c66f5-f6c3-4516-86b0-a750474fb334",
         "system_source": "order_file",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "ANF",
@@ -3854,7 +3891,8 @@
         "exit_order_id": "41d2bb71-8ee1-4cb4-a542-8466e2e8f2e5",
         "entry_order_id": "c490d1fa-f732-4f01-90c2-7d1d2f4ce888",
         "system_source": null,
-        "system_unknown_reason": "entry_order_untagged"
+        "system_unknown_reason": "entry_order_untagged",
+        "symbol_aliases": []
       },
       {
         "symbol": "COGT",
@@ -3874,7 +3912,8 @@
         "exit_order_id": "86be3abf-6501-4a60-b9f6-8de04b44f903",
         "entry_order_id": "4b6ab64a-72ae-4b44-8f21-a8799b8f110d",
         "system_source": null,
-        "system_unknown_reason": "entry_order_untagged"
+        "system_unknown_reason": "entry_order_untagged",
+        "symbol_aliases": []
       },
       {
         "symbol": "PTEN",
@@ -3894,7 +3933,8 @@
         "exit_order_id": "fdf5efdd-fbda-4c45-ad52-43c1082e9576",
         "entry_order_id": "8d6ed8ee-d08c-4bd9-ad27-c7c8bd7c05fe",
         "system_source": "order_file",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "NFLX",
@@ -3914,7 +3954,8 @@
         "exit_order_id": "c2cffa07-e488-4da6-9862-5174703f915a",
         "entry_order_id": "57c36c39-cb14-4f8f-b340-bc82a7bcc62f",
         "system_source": null,
-        "system_unknown_reason": "entry_order_untagged"
+        "system_unknown_reason": "entry_order_untagged",
+        "symbol_aliases": []
       },
       {
         "symbol": "LCID",
@@ -3934,7 +3975,8 @@
         "exit_order_id": "87755dd2-96e9-40a3-8747-8833f721fd4b",
         "entry_order_id": "a159a504-5e52-466a-b587-2adaa9d6e025",
         "system_source": null,
-        "system_unknown_reason": "entry_order_untagged"
+        "system_unknown_reason": "entry_order_untagged",
+        "symbol_aliases": []
       },
       {
         "symbol": "DK",
@@ -3954,7 +3996,8 @@
         "exit_order_id": "7eaacf26-2229-4906-82e5-0a1332886b5d",
         "entry_order_id": "2de06832-8e6b-45cc-9fbf-72700f2f303c",
         "system_source": "order_file",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "COGT",
@@ -3974,7 +4017,8 @@
         "exit_order_id": "86be3abf-6501-4a60-b9f6-8de04b44f903",
         "entry_order_id": "4b6ab64a-72ae-4b44-8f21-a8799b8f110d",
         "system_source": null,
-        "system_unknown_reason": "entry_order_untagged"
+        "system_unknown_reason": "entry_order_untagged",
+        "symbol_aliases": []
       },
       {
         "symbol": "PTEN",
@@ -3994,7 +4038,8 @@
         "exit_order_id": "fdf5efdd-fbda-4c45-ad52-43c1082e9576",
         "entry_order_id": "8d6ed8ee-d08c-4bd9-ad27-c7c8bd7c05fe",
         "system_source": "order_file",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "COGT",
@@ -4014,7 +4059,8 @@
         "exit_order_id": "86be3abf-6501-4a60-b9f6-8de04b44f903",
         "entry_order_id": "4b6ab64a-72ae-4b44-8f21-a8799b8f110d",
         "system_source": null,
-        "system_unknown_reason": "entry_order_untagged"
+        "system_unknown_reason": "entry_order_untagged",
+        "symbol_aliases": []
       },
       {
         "symbol": "PTEN",
@@ -4034,7 +4080,8 @@
         "exit_order_id": "fdf5efdd-fbda-4c45-ad52-43c1082e9576",
         "entry_order_id": "8d6ed8ee-d08c-4bd9-ad27-c7c8bd7c05fe",
         "system_source": "order_file",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "PTEN",
@@ -4054,7 +4101,8 @@
         "exit_order_id": "fdf5efdd-fbda-4c45-ad52-43c1082e9576",
         "entry_order_id": "8d6ed8ee-d08c-4bd9-ad27-c7c8bd7c05fe",
         "system_source": "order_file",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "PTEN",
@@ -4074,7 +4122,8 @@
         "exit_order_id": "fdf5efdd-fbda-4c45-ad52-43c1082e9576",
         "entry_order_id": "8d6ed8ee-d08c-4bd9-ad27-c7c8bd7c05fe",
         "system_source": "order_file",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "BLZE",
@@ -4094,7 +4143,8 @@
         "exit_order_id": "3e021503-25d4-4cf9-a2bb-58bdd2ca1787",
         "entry_order_id": "c93a4701-6162-4d87-ad42-45e3daedcc09",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "UBXG",
@@ -4114,7 +4164,8 @@
         "exit_order_id": "a09e04e0-9031-4c3c-b446-39e0698ad777",
         "entry_order_id": "e2d33c9a-3f39-4608-9754-c4f32e9b0bfb",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "PCLA",
@@ -4134,7 +4185,8 @@
         "exit_order_id": "23d79004-c869-46b2-a094-d17cd4fa815a",
         "entry_order_id": "256337fa-f8af-4b5c-afd3-2dd7f6b4cdbc",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "VCIG",
@@ -4154,7 +4206,8 @@
         "exit_order_id": "2dc95b19-9238-4cc2-a6f9-0ec615c4a4f0",
         "entry_order_id": "5bdef611-0973-4ded-a7d8-2a38dd36e8eb",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "IVF",
@@ -4174,7 +4227,8 @@
         "exit_order_id": "32ebb33b-2665-4c84-8900-f814dec58674",
         "entry_order_id": "3c037550-7575-4dfb-9418-6b02e92babfd",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "IVF",
@@ -4194,7 +4248,8 @@
         "exit_order_id": "32ebb33b-2665-4c84-8900-f814dec58674",
         "entry_order_id": "3c037550-7575-4dfb-9418-6b02e92babfd",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "IVF",
@@ -4214,7 +4269,8 @@
         "exit_order_id": "32ebb33b-2665-4c84-8900-f814dec58674",
         "entry_order_id": "3c037550-7575-4dfb-9418-6b02e92babfd",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "IVF",
@@ -4234,7 +4290,8 @@
         "exit_order_id": "32ebb33b-2665-4c84-8900-f814dec58674",
         "entry_order_id": "3c037550-7575-4dfb-9418-6b02e92babfd",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "MIMI",
@@ -4254,7 +4311,8 @@
         "exit_order_id": "7129eebe-9d1c-48b1-b1b9-0ae8a7c0805a",
         "entry_order_id": "9025405b-56f6-43af-bdf5-b90610887d82",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "STI",
@@ -4274,7 +4332,8 @@
         "exit_order_id": "d6aad9fb-c3a8-4649-b0c2-112997d02c93",
         "entry_order_id": "4f44ad5a-2a20-4630-b39c-9024dfdd53fc",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "AAL",
@@ -4294,7 +4353,8 @@
         "exit_order_id": "b3dbbc35-6158-4e97-a370-1e9fd325cc2d",
         "entry_order_id": "990d784d-8def-47da-babe-0107322b247a",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "PRCH",
@@ -4314,7 +4374,8 @@
         "exit_order_id": "7b8e5b6f-6e3a-4bf1-bb2d-14428e69de71",
         "entry_order_id": "b6b7737a-3204-44e4-8110-bc49cfad314b",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "ALHC",
@@ -4334,7 +4395,8 @@
         "exit_order_id": "a6f6d9c5-1488-4b84-962e-4bb0e5325fef",
         "entry_order_id": "1be8656b-4867-415f-876d-027e426f06c5",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "LFST",
@@ -4354,7 +4416,8 @@
         "exit_order_id": "1b905b27-c44b-42d2-83e9-606a2f142e62",
         "entry_order_id": "242c9f41-f12c-4f39-bf73-8b14cab2c2a1",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "ASTH",
@@ -4374,7 +4437,8 @@
         "exit_order_id": "fb9ee5e8-47d6-4feb-842a-3c9c4d1121e2",
         "entry_order_id": "23af0dee-480a-4aef-93b1-51b143eb072e",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "GPGI",
@@ -4394,7 +4458,8 @@
         "exit_order_id": "2ffd5f3b-50ba-40e5-8bec-2f2c69ec911d",
         "entry_order_id": "354af790-0959-45c5-8f6c-0b942b18e882",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "KALA",
@@ -4414,7 +4479,8 @@
         "exit_order_id": "7a3d3ec0-41ca-4c66-b5a1-a16a09f52331",
         "entry_order_id": "46aba195-66b5-4aa7-8c9c-fcf8b4bbabf1",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "CLSK",
@@ -4434,7 +4500,8 @@
         "exit_order_id": "b52592ee-7ec5-4af5-8980-f930fb7b4b0f",
         "entry_order_id": "315d92c0-a756-490e-8f08-17e779572f87",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "KALA",
@@ -4454,7 +4521,8 @@
         "exit_order_id": "7a3d3ec0-41ca-4c66-b5a1-a16a09f52331",
         "entry_order_id": "46aba195-66b5-4aa7-8c9c-fcf8b4bbabf1",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "KALA",
@@ -4474,7 +4542,8 @@
         "exit_order_id": "7a3d3ec0-41ca-4c66-b5a1-a16a09f52331",
         "entry_order_id": "46aba195-66b5-4aa7-8c9c-fcf8b4bbabf1",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "VCIG",
@@ -4494,7 +4563,8 @@
         "exit_order_id": "2dc95b19-9238-4cc2-a6f9-0ec615c4a4f0",
         "entry_order_id": "5bdef611-0973-4ded-a7d8-2a38dd36e8eb",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "MIMI",
@@ -4514,7 +4584,8 @@
         "exit_order_id": "7129eebe-9d1c-48b1-b1b9-0ae8a7c0805a",
         "entry_order_id": "9025405b-56f6-43af-bdf5-b90610887d82",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "MIMI",
@@ -4534,7 +4605,8 @@
         "exit_order_id": "7129eebe-9d1c-48b1-b1b9-0ae8a7c0805a",
         "entry_order_id": "9025405b-56f6-43af-bdf5-b90610887d82",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "LFST",
@@ -4554,7 +4626,8 @@
         "exit_order_id": "1b905b27-c44b-42d2-83e9-606a2f142e62",
         "entry_order_id": "242c9f41-f12c-4f39-bf73-8b14cab2c2a1",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "KALA",
@@ -4574,7 +4647,8 @@
         "exit_order_id": "7a3d3ec0-41ca-4c66-b5a1-a16a09f52331",
         "entry_order_id": "46aba195-66b5-4aa7-8c9c-fcf8b4bbabf1",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "VCIG",
@@ -4594,7 +4668,8 @@
         "exit_order_id": "2dc95b19-9238-4cc2-a6f9-0ec615c4a4f0",
         "entry_order_id": "5bdef611-0973-4ded-a7d8-2a38dd36e8eb",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "LFST",
@@ -4614,7 +4689,8 @@
         "exit_order_id": "1b905b27-c44b-42d2-83e9-606a2f142e62",
         "entry_order_id": "242c9f41-f12c-4f39-bf73-8b14cab2c2a1",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "LFST",
@@ -4634,7 +4710,8 @@
         "exit_order_id": "1b905b27-c44b-42d2-83e9-606a2f142e62",
         "entry_order_id": "242c9f41-f12c-4f39-bf73-8b14cab2c2a1",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "DLR",
@@ -4654,7 +4731,8 @@
         "exit_order_id": "d009257d-ca58-42b8-801e-3e1111aea618",
         "entry_order_id": "6e3bcd88-e0db-42f6-a1b4-d3d17f59a684",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "LIND",
@@ -4674,7 +4752,8 @@
         "exit_order_id": "2e5f8dd2-1162-46a6-9191-4840151a577e",
         "entry_order_id": "258bb9be-726b-4a67-90bb-d55b7a49ef5e",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "BNY",
@@ -4694,7 +4773,8 @@
         "exit_order_id": "115ce022-dda1-4fa3-97c0-0fc8a5a20cc2",
         "entry_order_id": "8bddcc21-c6fe-4bb1-8f4b-b8360768047a",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "ELVN",
@@ -4714,7 +4794,8 @@
         "exit_order_id": "9b538366-38f5-4217-8040-34e0fa391da3",
         "entry_order_id": "495f9355-b95e-426f-a434-b7996fe38e80",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "GM",
@@ -4734,7 +4815,8 @@
         "exit_order_id": "6a7eb189-a02e-4c39-b71c-602c97f6a574",
         "entry_order_id": "59873a7c-0ffd-4079-8793-64e7976be9c9",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "RIOT",
@@ -4754,7 +4836,8 @@
         "exit_order_id": "d2e86803-bc82-45cf-89f9-03147c0463aa",
         "entry_order_id": "f38107e7-537f-4363-aed3-19c5adaf553b",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "NUE",
@@ -4774,7 +4857,8 @@
         "exit_order_id": "ab9711f9-2551-43b9-9eca-aa1d8648e725",
         "entry_order_id": "19b24c1f-131a-4ccd-96b4-5e8f921abe90",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "SU",
@@ -4794,7 +4878,8 @@
         "exit_order_id": "1fbc237f-985b-47d2-8bba-ed64cd145e90",
         "entry_order_id": "80be1d0e-3321-458b-920a-221f9e30dd48",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "ERAS",
@@ -4814,7 +4899,8 @@
         "exit_order_id": "d481b056-b3c1-4fae-8ff0-00d922ce6e8a",
         "entry_order_id": "f7bbc28c-1482-46e5-a70a-0d1c81d1feb4",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "VICR",
@@ -4834,7 +4920,8 @@
         "exit_order_id": "b9f901f9-53ba-4f95-a51d-3f27022bcb66",
         "entry_order_id": "b78927c6-6abe-4059-b6be-d240582756f1",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "CLSK",
@@ -4854,7 +4941,8 @@
         "exit_order_id": "41495efe-9908-4893-b89f-f43f834cece8",
         "entry_order_id": "315d92c0-a756-490e-8f08-17e779572f87",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "ICHR",
@@ -4874,7 +4962,8 @@
         "exit_order_id": "51c75bb8-64a4-497e-9bb4-d549a0691e7b",
         "entry_order_id": "563b4e30-c7c6-4a3d-bd4c-0eedbe6f174a",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "FANG",
@@ -4894,7 +4983,8 @@
         "exit_order_id": "ce08a516-73ae-485a-81b3-e4bffd60294c",
         "entry_order_id": "ebf18110-c218-4f9c-85c7-10ae5f61d5cd",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "IDYA",
@@ -4914,7 +5004,8 @@
         "exit_order_id": "d2722757-dcb6-4511-a39f-249ad4ba32ca",
         "entry_order_id": "e42d4a46-88e8-45eb-bac9-17a27bd110a2",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "EQIX",
@@ -4934,7 +5025,8 @@
         "exit_order_id": "c1f6cda0-8aab-400a-8291-6efa73e2a237",
         "entry_order_id": "a456b818-430f-49aa-b4cd-2ce82f35b54d",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "MXL",
@@ -4954,7 +5046,8 @@
         "exit_order_id": "2071a7e9-5508-4a4c-81cd-9b9b0cfadfdb",
         "entry_order_id": "1ba03783-67d3-4fbf-a5c8-82646b96cae2",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "MAR",
@@ -4974,7 +5067,8 @@
         "exit_order_id": "a67d3977-1afe-4380-a177-70dc9e17c8b0",
         "entry_order_id": "7744753b-b671-42a7-8d37-0b7ecd9d72f2",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "CDNL",
@@ -4994,7 +5088,8 @@
         "exit_order_id": "9a19613b-5299-44d0-b3c4-a405ceb61c46",
         "entry_order_id": "13136932-0b89-4af4-80a7-d64b21d228ac",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "DFTX",
@@ -5014,7 +5109,8 @@
         "exit_order_id": "e79f72fb-6f73-4b86-8d35-014fc3c06164",
         "entry_order_id": "32d5a661-1465-47dc-92d2-74bcdf87d6bb",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "HAL",
@@ -5034,7 +5130,8 @@
         "exit_order_id": "80da1e6f-ba5c-40fa-a36d-22fa2e4a3102",
         "entry_order_id": "2e9f36a1-881c-4ce1-9484-d47e58a87663",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "BFLY",
@@ -5054,7 +5151,8 @@
         "exit_order_id": "bedd1ae3-cf8d-45aa-9da6-2812a168c9c8",
         "entry_order_id": "d04637dc-ab5c-414b-8a46-601a26531900",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "BFLY",
@@ -5074,7 +5172,8 @@
         "exit_order_id": "bedd1ae3-cf8d-45aa-9da6-2812a168c9c8",
         "entry_order_id": "d04637dc-ab5c-414b-8a46-601a26531900",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "TRVI",
@@ -5094,7 +5193,8 @@
         "exit_order_id": "33762a08-5dd8-400c-9ec1-99f0f82b37ee",
         "entry_order_id": "2461486b-5c32-424b-9c77-7567dccc06a6",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "TRVI",
@@ -5114,7 +5214,8 @@
         "exit_order_id": "33762a08-5dd8-400c-9ec1-99f0f82b37ee",
         "entry_order_id": "2461486b-5c32-424b-9c77-7567dccc06a6",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "LESL",
@@ -5134,7 +5235,8 @@
         "exit_order_id": "8a195051-779e-44a0-a9bc-1f00cc3476f6",
         "entry_order_id": "87444aaa-435c-4bf4-a6b4-4e5cfe1cd561",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "LESL",
@@ -5154,7 +5256,8 @@
         "exit_order_id": "8a195051-779e-44a0-a9bc-1f00cc3476f6",
         "entry_order_id": "87444aaa-435c-4bf4-a6b4-4e5cfe1cd561",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "NUAI",
@@ -5174,7 +5277,8 @@
         "exit_order_id": "63b12f87-996f-460c-b3af-1538b7e73230",
         "entry_order_id": "f7d90826-a31f-4208-89e1-479f003d6a8b",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "NUAI",
@@ -5194,7 +5298,8 @@
         "exit_order_id": "63b12f87-996f-460c-b3af-1538b7e73230",
         "entry_order_id": "f7d90826-a31f-4208-89e1-479f003d6a8b",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "PBR",
@@ -5214,7 +5319,8 @@
         "exit_order_id": "9ebab872-83a7-4114-a9c9-277b27effda8",
         "entry_order_id": "192b9736-7ebe-472d-a5ab-54debbf26504",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "PBR",
@@ -5234,7 +5340,8 @@
         "exit_order_id": "9ebab872-83a7-4114-a9c9-277b27effda8",
         "entry_order_id": "192b9736-7ebe-472d-a5ab-54debbf26504",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "WOLF",
@@ -5254,7 +5361,8 @@
         "exit_order_id": "5d8a3bfb-cf4f-4e15-9478-2f756035b9ef",
         "entry_order_id": "868acfb8-b4ec-4a40-bb7b-290b3b21d901",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "WNC",
@@ -5274,7 +5382,8 @@
         "exit_order_id": "17153a0d-727d-421e-834c-82e3de626c63",
         "entry_order_id": "d97dff85-110e-49ec-82d8-79ee48a2b392",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "WNC",
@@ -5294,7 +5403,8 @@
         "exit_order_id": "17153a0d-727d-421e-834c-82e3de626c63",
         "entry_order_id": "d97dff85-110e-49ec-82d8-79ee48a2b392",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "AEHR",
@@ -5314,7 +5424,8 @@
         "exit_order_id": "9a8c844e-2a67-4961-b244-7dbd893575b0",
         "entry_order_id": "52182007-8c2e-4a6b-bb15-7a31cc5b7878",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "AIP",
@@ -5334,7 +5445,8 @@
         "exit_order_id": "cc43449d-deac-4d89-8649-a416d4375ebb",
         "entry_order_id": "412bdf4c-9b98-4a0e-8324-1f6b9c775db0",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "ALGT",
@@ -5354,7 +5466,8 @@
         "exit_order_id": "b76ded58-1a50-489f-b023-ab75cb38393a",
         "entry_order_id": "d93e2fd3-a3ec-4104-adce-44d0a38d9d6a",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "ARW",
@@ -5374,7 +5487,8 @@
         "exit_order_id": "4a4ea902-5d02-4dc0-af71-3d354779b1ff",
         "entry_order_id": "acaa1768-188c-47fd-9eb5-b5db628c1bba",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "BNY",
@@ -5394,7 +5508,8 @@
         "exit_order_id": "94012a04-eeb5-41aa-a28b-11e925d45ad1",
         "entry_order_id": "3cefa4c2-2613-4f81-8b19-b90e7af4addc",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "CBRL",
@@ -5414,7 +5529,8 @@
         "exit_order_id": "eb0ec110-4b8a-437c-8ff7-97d1b55e5d23",
         "entry_order_id": "89b974ca-689f-4402-9a33-73760241cf0a",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "CGON",
@@ -5434,7 +5550,8 @@
         "exit_order_id": "5fa55688-9e56-47d9-bf29-4918de2cdfad",
         "entry_order_id": "78a739d3-e3b8-47e3-bf54-13d500d646ac",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "EQIX",
@@ -5454,7 +5571,8 @@
         "exit_order_id": "62e57eb3-1c17-4d5a-a2c3-162f2712001d",
         "entry_order_id": "41d23517-87de-4653-83ad-6da0a03c0da8",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "FORM",
@@ -5474,7 +5592,8 @@
         "exit_order_id": "39400606-e207-4950-9b5e-f04b4d833c65",
         "entry_order_id": "5043b904-a15a-492b-9e9b-8941887660ad",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "HAL",
@@ -5494,7 +5613,8 @@
         "exit_order_id": "55f88c00-6033-4a14-af0c-a16239515b74",
         "entry_order_id": "460ce8fd-2856-4b05-b162-7be47d60e4ea",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "IRM",
@@ -5514,7 +5634,8 @@
         "exit_order_id": "87e73c2a-f971-4089-9775-43ec34f28da9",
         "entry_order_id": "1d048d91-251e-4330-8573-12714a124134",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "LNTH",
@@ -5534,7 +5655,8 @@
         "exit_order_id": "3655b56c-bcdf-4198-aaba-97d9f6d71552",
         "entry_order_id": "c03a9fc2-a21c-48f3-96c1-bf2c5a7e1727",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "MXL",
@@ -5554,7 +5676,8 @@
         "exit_order_id": "63e977d1-83e9-466d-8b7f-1d8d82b4d898",
         "entry_order_id": "3134f0dd-acfa-4ee7-ae8f-304881f16684",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "SNX",
@@ -5574,7 +5697,8 @@
         "exit_order_id": "a82082be-9670-4e3d-a32d-fa61f86f401f",
         "entry_order_id": "c918caea-cda7-499d-a53a-e616d5874397",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "SYRE",
@@ -5594,7 +5718,8 @@
         "exit_order_id": "138cff6d-d44a-4631-bd8a-10fbe6836862",
         "entry_order_id": "8304b12f-e9da-4b44-b081-3ecc16756570",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "TGT",
@@ -5614,7 +5739,8 @@
         "exit_order_id": "8ac2cb4b-3395-453e-955c-c08f093b6fe1",
         "entry_order_id": "dceda8fa-c128-4b6a-a17f-8349f384c2af",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "TRVI",
@@ -5634,7 +5760,8 @@
         "exit_order_id": "596f268e-d934-4751-b421-ce7061954e6a",
         "entry_order_id": "e9649398-cda0-46d4-a5ff-f1aad0e17e02",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "UCTT",
@@ -5654,7 +5781,8 @@
         "exit_order_id": "1e01bbcd-1f38-461a-a604-7cc4d53314bd",
         "entry_order_id": "e6562a26-7389-41b9-964f-296e785bf587",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "VECO",
@@ -5674,7 +5802,8 @@
         "exit_order_id": "5f45e733-fec8-41a8-9356-b3c111e9100c",
         "entry_order_id": "d21bacaa-f1a3-464c-9991-43004eadd196",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "WH",
@@ -5694,7 +5823,8 @@
         "exit_order_id": "5ec135a0-7f3c-4599-afe6-613b5b26a44b",
         "entry_order_id": "f0e184e8-e1f7-4746-83d8-60efc6cfdf8f",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "WOLF",
@@ -5714,7 +5844,8 @@
         "exit_order_id": "6e5cc7a5-6005-4efb-9713-e3ee8a730f14",
         "entry_order_id": "6c30459e-77d7-4833-960d-5de752a8bef1",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "WSM",
@@ -5734,7 +5865,8 @@
         "exit_order_id": "3de33249-115a-4292-a952-c735a5d5c8a4",
         "entry_order_id": "133cf15f-7920-4a13-b1ed-65647414dff7",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "RGNX",
@@ -5754,7 +5886,8 @@
         "exit_order_id": "bdf4f4b8-742b-4864-bd41-d7fe62473080",
         "entry_order_id": "a8db0045-1b52-400a-9426-ba5254f1c2bc",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "COMP",
@@ -5774,7 +5907,8 @@
         "exit_order_id": "1c995392-32a9-432e-915c-1a1a51d4219a",
         "entry_order_id": "bfeafc05-bc6a-4edf-96e7-9a5f219b426e",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "COMP",
@@ -5794,7 +5928,8 @@
         "exit_order_id": "1c995392-32a9-432e-915c-1a1a51d4219a",
         "entry_order_id": "bfeafc05-bc6a-4edf-96e7-9a5f219b426e",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "LESL",
@@ -5814,7 +5949,8 @@
         "exit_order_id": "24e90506-8d8b-4874-b2b7-f0ac474d0242",
         "entry_order_id": "715e9b53-0383-4151-aa65-c1069607df7a",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "LESL",
@@ -5834,7 +5970,8 @@
         "exit_order_id": "24e90506-8d8b-4874-b2b7-f0ac474d0242",
         "entry_order_id": "715e9b53-0383-4151-aa65-c1069607df7a",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "ERAS",
@@ -5854,7 +5991,8 @@
         "exit_order_id": "52577f36-9d9b-4f4b-8e05-10c899af62ef",
         "entry_order_id": "315fd7ea-8f96-49ae-941f-4ccbd2f20e96",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "ERAS",
@@ -5874,7 +6012,8 @@
         "exit_order_id": "52577f36-9d9b-4f4b-8e05-10c899af62ef",
         "entry_order_id": "315fd7ea-8f96-49ae-941f-4ccbd2f20e96",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "HST",
@@ -5894,7 +6033,8 @@
         "exit_order_id": "5a9b7ca2-f113-49ab-992b-f316ea93683e",
         "entry_order_id": "b7b8d71f-f0fd-4b93-b214-8b5834862a7e",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "HST",
@@ -5914,7 +6054,8 @@
         "exit_order_id": "5a9b7ca2-f113-49ab-992b-f316ea93683e",
         "entry_order_id": "b7b8d71f-f0fd-4b93-b214-8b5834862a7e",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "XNCR",
@@ -5934,7 +6075,8 @@
         "exit_order_id": "4d9ad1cf-9959-4d48-aa34-7144a6d51602",
         "entry_order_id": "9f797548-0575-4afb-8ff8-ea38fb026bc8",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "XNCR",
@@ -5954,7 +6096,8 @@
         "exit_order_id": "4d9ad1cf-9959-4d48-aa34-7144a6d51602",
         "entry_order_id": "9f797548-0575-4afb-8ff8-ea38fb026bc8",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "TDIC",
@@ -5974,7 +6117,8 @@
         "exit_order_id": "8d0457af-1831-4c3f-a9d1-b510b144b023",
         "entry_order_id": "cf81dd95-f76f-472b-80cd-621c7fc430cc",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "TDIC",
@@ -5994,7 +6138,8 @@
         "exit_order_id": "8d0457af-1831-4c3f-a9d1-b510b144b023",
         "entry_order_id": "cf81dd95-f76f-472b-80cd-621c7fc430cc",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "GPGI",
@@ -6014,7 +6159,8 @@
         "exit_order_id": "cd203ca8-0689-4622-b58a-2a64a9956528",
         "entry_order_id": "99aef5cd-7861-4e13-8477-f5df5ff99f14",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "EVC",
@@ -6034,7 +6180,8 @@
         "exit_order_id": "56105731-54e5-496a-b12e-c71b28fa8376",
         "entry_order_id": "5051fbea-edb1-4e34-8c3f-6cf04fa0ce94",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "EVC",
@@ -6054,7 +6201,8 @@
         "exit_order_id": "56105731-54e5-496a-b12e-c71b28fa8376",
         "entry_order_id": "5051fbea-edb1-4e34-8c3f-6cf04fa0ce94",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "RELY",
@@ -6074,7 +6222,8 @@
         "exit_order_id": "eece608a-163b-4818-acd2-5d746750a5bb",
         "entry_order_id": "70a27b0f-19d8-48d9-adef-022d255d0f79",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "CLOV",
@@ -6094,7 +6243,8 @@
         "exit_order_id": "3c05ac93-fac1-44e1-9d13-86c04e44e796",
         "entry_order_id": "a9a9e202-a399-4f3a-af0b-bad041a3c122",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "CLOV",
@@ -6114,7 +6264,8 @@
         "exit_order_id": "3c05ac93-fac1-44e1-9d13-86c04e44e796",
         "entry_order_id": "a9a9e202-a399-4f3a-af0b-bad041a3c122",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "CLOV",
@@ -6134,7 +6285,8 @@
         "exit_order_id": "3c05ac93-fac1-44e1-9d13-86c04e44e796",
         "entry_order_id": "a9a9e202-a399-4f3a-af0b-bad041a3c122",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "CLOV",
@@ -6154,7 +6306,8 @@
         "exit_order_id": "3c05ac93-fac1-44e1-9d13-86c04e44e796",
         "entry_order_id": "a9a9e202-a399-4f3a-af0b-bad041a3c122",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "WNC",
@@ -6174,7 +6327,8 @@
         "exit_order_id": "8e24f3c7-4a4a-4de0-a0a5-4b1a778ff065",
         "entry_order_id": "51b26503-e23e-46ce-9b15-958e116b5fb0",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "WNC",
@@ -6194,7 +6348,8 @@
         "exit_order_id": "8e24f3c7-4a4a-4de0-a0a5-4b1a778ff065",
         "entry_order_id": "51b26503-e23e-46ce-9b15-958e116b5fb0",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "MRVI",
@@ -6214,7 +6369,8 @@
         "exit_order_id": "3e4ff4d2-7044-43b6-819b-78e7fda9aba1",
         "entry_order_id": "e9ac2a51-071b-474a-bf45-31002dd5116a",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "MRVI",
@@ -6234,7 +6390,8 @@
         "exit_order_id": "3e4ff4d2-7044-43b6-819b-78e7fda9aba1",
         "entry_order_id": "e9ac2a51-071b-474a-bf45-31002dd5116a",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "MRVI",
@@ -6254,7 +6411,8 @@
         "exit_order_id": "3e4ff4d2-7044-43b6-819b-78e7fda9aba1",
         "entry_order_id": "e9ac2a51-071b-474a-bf45-31002dd5116a",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "NWL",
@@ -6274,7 +6432,8 @@
         "exit_order_id": "2bc3f1a9-e8f9-400b-9188-3b174ec03a3c",
         "entry_order_id": "b40181d8-43ff-429c-8050-54f81cd7fbea",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "NWL",
@@ -6294,7 +6453,8 @@
         "exit_order_id": "2bc3f1a9-e8f9-400b-9188-3b174ec03a3c",
         "entry_order_id": "b40181d8-43ff-429c-8050-54f81cd7fbea",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "NWL",
@@ -6314,7 +6474,8 @@
         "exit_order_id": "2bc3f1a9-e8f9-400b-9188-3b174ec03a3c",
         "entry_order_id": "b40181d8-43ff-429c-8050-54f81cd7fbea",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "SLDB",
@@ -6334,7 +6495,8 @@
         "exit_order_id": "ca375f6e-f6cf-4bf4-aede-95507035c0b0",
         "entry_order_id": "93edccc4-6e29-4a8d-a031-d6f66d9892ef",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "GPGI",
@@ -6354,7 +6516,8 @@
         "exit_order_id": "cd203ca8-0689-4622-b58a-2a64a9956528",
         "entry_order_id": "99aef5cd-7861-4e13-8477-f5df5ff99f14",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "GPGI",
@@ -6374,7 +6537,8 @@
         "exit_order_id": "cd203ca8-0689-4622-b58a-2a64a9956528",
         "entry_order_id": "99aef5cd-7861-4e13-8477-f5df5ff99f14",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "SLDB",
@@ -6394,7 +6558,8 @@
         "exit_order_id": "ca375f6e-f6cf-4bf4-aede-95507035c0b0",
         "entry_order_id": "93edccc4-6e29-4a8d-a031-d6f66d9892ef",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "RGNX",
@@ -6414,7 +6579,8 @@
         "exit_order_id": "bdf4f4b8-742b-4864-bd41-d7fe62473080",
         "entry_order_id": "a8db0045-1b52-400a-9426-ba5254f1c2bc",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "COMP",
@@ -6434,7 +6600,8 @@
         "exit_order_id": "1c995392-32a9-432e-915c-1a1a51d4219a",
         "entry_order_id": "bfeafc05-bc6a-4edf-96e7-9a5f219b426e",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "FCEL",
@@ -6454,7 +6621,8 @@
         "exit_order_id": "75d7a9c8-9d10-4fbb-a563-90ed22b8f756",
         "entry_order_id": "e8548f17-3a5d-4408-b9bd-a52a0938babf",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "FCEL",
@@ -6474,7 +6642,8 @@
         "exit_order_id": "75d7a9c8-9d10-4fbb-a563-90ed22b8f756",
         "entry_order_id": "e8548f17-3a5d-4408-b9bd-a52a0938babf",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "FCEL",
@@ -6494,7 +6663,8 @@
         "exit_order_id": "75d7a9c8-9d10-4fbb-a563-90ed22b8f756",
         "entry_order_id": "e8548f17-3a5d-4408-b9bd-a52a0938babf",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "FCEL",
@@ -6514,7 +6684,8 @@
         "exit_order_id": "75d7a9c8-9d10-4fbb-a563-90ed22b8f756",
         "entry_order_id": "e8548f17-3a5d-4408-b9bd-a52a0938babf",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "PANW",
@@ -6534,7 +6705,8 @@
         "exit_order_id": "6b2a7a76-2de5-4542-a2b6-7b651a9235de",
         "entry_order_id": "a099cb3a-0fec-4736-8aad-8504190fb59b",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "PANW",
@@ -6554,7 +6726,8 @@
         "exit_order_id": "6b2a7a76-2de5-4542-a2b6-7b651a9235de",
         "entry_order_id": "a099cb3a-0fec-4736-8aad-8504190fb59b",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "PANW",
@@ -6574,7 +6747,8 @@
         "exit_order_id": "6b2a7a76-2de5-4542-a2b6-7b651a9235de",
         "entry_order_id": "a099cb3a-0fec-4736-8aad-8504190fb59b",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "FCUV",
@@ -6594,7 +6768,8 @@
         "exit_order_id": "3dc445ce-dfa2-402a-b7c0-c7230035c40d",
         "entry_order_id": "2986c021-1f98-4773-94d3-2b25f39d601d",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "FCUV",
@@ -6614,7 +6789,8 @@
         "exit_order_id": "3dc445ce-dfa2-402a-b7c0-c7230035c40d",
         "entry_order_id": "2986c021-1f98-4773-94d3-2b25f39d601d",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "FCUV",
@@ -6634,7 +6810,8 @@
         "exit_order_id": "3dc445ce-dfa2-402a-b7c0-c7230035c40d",
         "entry_order_id": "2986c021-1f98-4773-94d3-2b25f39d601d",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "FCUV",
@@ -6654,7 +6831,8 @@
         "exit_order_id": "3dc445ce-dfa2-402a-b7c0-c7230035c40d",
         "entry_order_id": "2986c021-1f98-4773-94d3-2b25f39d601d",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "FCUV",
@@ -6674,7 +6852,8 @@
         "exit_order_id": "3dc445ce-dfa2-402a-b7c0-c7230035c40d",
         "entry_order_id": "2986c021-1f98-4773-94d3-2b25f39d601d",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "FCUV",
@@ -6694,7 +6873,8 @@
         "exit_order_id": "3dc445ce-dfa2-402a-b7c0-c7230035c40d",
         "entry_order_id": "2986c021-1f98-4773-94d3-2b25f39d601d",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "FCUV",
@@ -6714,7 +6894,8 @@
         "exit_order_id": "3dc445ce-dfa2-402a-b7c0-c7230035c40d",
         "entry_order_id": "2986c021-1f98-4773-94d3-2b25f39d601d",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "FCUV",
@@ -6734,7 +6915,8 @@
         "exit_order_id": "3dc445ce-dfa2-402a-b7c0-c7230035c40d",
         "entry_order_id": "2986c021-1f98-4773-94d3-2b25f39d601d",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "ARQT",
@@ -6754,7 +6936,8 @@
         "exit_order_id": "bb9ca5b0-35a3-4e1e-a36d-28f170c855b6",
         "entry_order_id": "c1429358-aefa-4bd5-8d07-b97c83aa84a9",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "ARQT",
@@ -6774,7 +6957,8 @@
         "exit_order_id": "bb9ca5b0-35a3-4e1e-a36d-28f170c855b6",
         "entry_order_id": "c1429358-aefa-4bd5-8d07-b97c83aa84a9",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "ARQT",
@@ -6794,7 +6978,8 @@
         "exit_order_id": "bb9ca5b0-35a3-4e1e-a36d-28f170c855b6",
         "entry_order_id": "c1429358-aefa-4bd5-8d07-b97c83aa84a9",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "ARQT",
@@ -6814,7 +6999,8 @@
         "exit_order_id": "bb9ca5b0-35a3-4e1e-a36d-28f170c855b6",
         "entry_order_id": "c1429358-aefa-4bd5-8d07-b97c83aa84a9",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "ARQT",
@@ -6834,7 +7020,8 @@
         "exit_order_id": "bb9ca5b0-35a3-4e1e-a36d-28f170c855b6",
         "entry_order_id": "c1429358-aefa-4bd5-8d07-b97c83aa84a9",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "ARQT",
@@ -6854,7 +7041,8 @@
         "exit_order_id": "bb9ca5b0-35a3-4e1e-a36d-28f170c855b6",
         "entry_order_id": "c1429358-aefa-4bd5-8d07-b97c83aa84a9",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "ARQT",
@@ -6874,7 +7062,8 @@
         "exit_order_id": "bb9ca5b0-35a3-4e1e-a36d-28f170c855b6",
         "entry_order_id": "c1429358-aefa-4bd5-8d07-b97c83aa84a9",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "ARQT",
@@ -6894,7 +7083,8 @@
         "exit_order_id": "bb9ca5b0-35a3-4e1e-a36d-28f170c855b6",
         "entry_order_id": "c1429358-aefa-4bd5-8d07-b97c83aa84a9",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "ABSI",
@@ -6914,7 +7104,8 @@
         "exit_order_id": "a1dac09c-58a0-471e-997f-e639f22a1ef1",
         "entry_order_id": "b1de981a-4122-446e-9fc2-22e87b8acce2",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "ABSI",
@@ -6934,7 +7125,8 @@
         "exit_order_id": "a1dac09c-58a0-471e-997f-e639f22a1ef1",
         "entry_order_id": "b1de981a-4122-446e-9fc2-22e87b8acce2",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "ABSI",
@@ -6954,7 +7146,8 @@
         "exit_order_id": "a1dac09c-58a0-471e-997f-e639f22a1ef1",
         "entry_order_id": "b1de981a-4122-446e-9fc2-22e87b8acce2",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "ABSI",
@@ -6974,7 +7167,8 @@
         "exit_order_id": "a1dac09c-58a0-471e-997f-e639f22a1ef1",
         "entry_order_id": "b1de981a-4122-446e-9fc2-22e87b8acce2",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "ABSI",
@@ -6994,7 +7188,8 @@
         "exit_order_id": "a1dac09c-58a0-471e-997f-e639f22a1ef1",
         "entry_order_id": "b1de981a-4122-446e-9fc2-22e87b8acce2",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "ACRS",
@@ -7014,7 +7209,8 @@
         "exit_order_id": "27b9aae9-ad54-47fa-bd34-c9ed6bfd7b35",
         "entry_order_id": "b7f6e927-15d0-493b-8c73-1ae839f7b5c2",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "ACRS",
@@ -7034,7 +7230,8 @@
         "exit_order_id": "27b9aae9-ad54-47fa-bd34-c9ed6bfd7b35",
         "entry_order_id": "b7f6e927-15d0-493b-8c73-1ae839f7b5c2",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "ACRS",
@@ -7054,7 +7251,8 @@
         "exit_order_id": "27b9aae9-ad54-47fa-bd34-c9ed6bfd7b35",
         "entry_order_id": "b7f6e927-15d0-493b-8c73-1ae839f7b5c2",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "AGIO",
@@ -7074,7 +7272,8 @@
         "exit_order_id": "41160dec-f349-4694-91e9-d6265f154a98",
         "entry_order_id": "b523ad4c-307a-457d-bd0f-fe20cafbad06",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "AMLX",
@@ -7094,7 +7293,8 @@
         "exit_order_id": "4535878f-e4b8-433d-9cfe-5182384111ce",
         "entry_order_id": "f001e459-fb67-4c43-8209-983f0254142e",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "AMLX",
@@ -7114,7 +7314,8 @@
         "exit_order_id": "4535878f-e4b8-433d-9cfe-5182384111ce",
         "entry_order_id": "f001e459-fb67-4c43-8209-983f0254142e",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "AMLX",
@@ -7134,7 +7335,8 @@
         "exit_order_id": "4535878f-e4b8-433d-9cfe-5182384111ce",
         "entry_order_id": "f001e459-fb67-4c43-8209-983f0254142e",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "AGIO",
@@ -7154,7 +7356,8 @@
         "exit_order_id": "41160dec-f349-4694-91e9-d6265f154a98",
         "entry_order_id": "b523ad4c-307a-457d-bd0f-fe20cafbad06",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "AGIO",
@@ -7174,7 +7377,8 @@
         "exit_order_id": "41160dec-f349-4694-91e9-d6265f154a98",
         "entry_order_id": "b523ad4c-307a-457d-bd0f-fe20cafbad06",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "AGIO",
@@ -7194,7 +7398,8 @@
         "exit_order_id": "41160dec-f349-4694-91e9-d6265f154a98",
         "entry_order_id": "b523ad4c-307a-457d-bd0f-fe20cafbad06",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "AGIO",
@@ -7214,7 +7419,8 @@
         "exit_order_id": "41160dec-f349-4694-91e9-d6265f154a98",
         "entry_order_id": "b523ad4c-307a-457d-bd0f-fe20cafbad06",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "BABA",
@@ -7234,7 +7440,8 @@
         "exit_order_id": "55965420-a67a-4327-842c-1cf304e71c99",
         "entry_order_id": "395e4001-c09f-490f-9f49-597394361975",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "BCAX",
@@ -7254,7 +7461,8 @@
         "exit_order_id": "afe42e52-9804-428b-89f2-402bb0490cef",
         "entry_order_id": "8e7995ce-cd85-47b2-9868-bdd782050caf",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "BCAX",
@@ -7274,7 +7482,8 @@
         "exit_order_id": "afe42e52-9804-428b-89f2-402bb0490cef",
         "entry_order_id": "8e7995ce-cd85-47b2-9868-bdd782050caf",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "BCAX",
@@ -7294,7 +7503,8 @@
         "exit_order_id": "afe42e52-9804-428b-89f2-402bb0490cef",
         "entry_order_id": "8e7995ce-cd85-47b2-9868-bdd782050caf",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "BCAX",
@@ -7314,7 +7524,8 @@
         "exit_order_id": "afe42e52-9804-428b-89f2-402bb0490cef",
         "entry_order_id": "8e7995ce-cd85-47b2-9868-bdd782050caf",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "BCAX",
@@ -7334,7 +7545,8 @@
         "exit_order_id": "afe42e52-9804-428b-89f2-402bb0490cef",
         "entry_order_id": "8e7995ce-cd85-47b2-9868-bdd782050caf",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "BNZI",
@@ -7354,7 +7566,8 @@
         "exit_order_id": "5b401c49-0333-4fc2-8f90-dd8b8f0c7c6f",
         "entry_order_id": "60c86809-0ca4-404a-8e2d-51416018b460",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "BNZI",
@@ -7374,7 +7587,8 @@
         "exit_order_id": "5b401c49-0333-4fc2-8f90-dd8b8f0c7c6f",
         "entry_order_id": "60c86809-0ca4-404a-8e2d-51416018b460",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "BNZI",
@@ -7394,7 +7608,8 @@
         "exit_order_id": "5b401c49-0333-4fc2-8f90-dd8b8f0c7c6f",
         "entry_order_id": "60c86809-0ca4-404a-8e2d-51416018b460",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "BNZI",
@@ -7414,7 +7629,8 @@
         "exit_order_id": "5b401c49-0333-4fc2-8f90-dd8b8f0c7c6f",
         "entry_order_id": "60c86809-0ca4-404a-8e2d-51416018b460",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "BNZI",
@@ -7434,7 +7650,8 @@
         "exit_order_id": "5b401c49-0333-4fc2-8f90-dd8b8f0c7c6f",
         "entry_order_id": "60c86809-0ca4-404a-8e2d-51416018b460",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "BABA",
@@ -7454,7 +7671,8 @@
         "exit_order_id": "55965420-a67a-4327-842c-1cf304e71c99",
         "entry_order_id": "395e4001-c09f-490f-9f49-597394361975",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "BABA",
@@ -7474,7 +7692,8 @@
         "exit_order_id": "55965420-a67a-4327-842c-1cf304e71c99",
         "entry_order_id": "395e4001-c09f-490f-9f49-597394361975",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "CBZ",
@@ -7494,7 +7713,8 @@
         "exit_order_id": "13f528c5-3598-4a7f-8b47-1281dbb3fb70",
         "entry_order_id": "799c9bfe-38ff-4817-b769-209efaddcd6e",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "CLMT",
@@ -7514,7 +7734,8 @@
         "exit_order_id": "b780a0f2-230b-4ab6-8abe-ae22a7f5d2be",
         "entry_order_id": "fc03b46b-6ee9-43f5-8e06-4b10268f0f0e",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "CLMT",
@@ -7534,7 +7755,8 @@
         "exit_order_id": "b780a0f2-230b-4ab6-8abe-ae22a7f5d2be",
         "entry_order_id": "fc03b46b-6ee9-43f5-8e06-4b10268f0f0e",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "CBZ",
@@ -7554,7 +7776,8 @@
         "exit_order_id": "13f528c5-3598-4a7f-8b47-1281dbb3fb70",
         "entry_order_id": "799c9bfe-38ff-4817-b769-209efaddcd6e",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "CLRO",
@@ -7574,7 +7797,8 @@
         "exit_order_id": "99d6658d-3f6c-41b5-9e6c-a42ef97638bd",
         "entry_order_id": "bb307303-3915-4726-b687-7f548e94d4f4",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "CLMT",
@@ -7594,7 +7818,8 @@
         "exit_order_id": "b780a0f2-230b-4ab6-8abe-ae22a7f5d2be",
         "entry_order_id": "fc03b46b-6ee9-43f5-8e06-4b10268f0f0e",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "CLMT",
@@ -7614,7 +7839,8 @@
         "exit_order_id": "b780a0f2-230b-4ab6-8abe-ae22a7f5d2be",
         "entry_order_id": "fc03b46b-6ee9-43f5-8e06-4b10268f0f0e",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "CLMT",
@@ -7634,7 +7860,8 @@
         "exit_order_id": "b780a0f2-230b-4ab6-8abe-ae22a7f5d2be",
         "entry_order_id": "fc03b46b-6ee9-43f5-8e06-4b10268f0f0e",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "CBZ",
@@ -7654,7 +7881,8 @@
         "exit_order_id": "13f528c5-3598-4a7f-8b47-1281dbb3fb70",
         "entry_order_id": "799c9bfe-38ff-4817-b769-209efaddcd6e",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "CLRO",
@@ -7674,7 +7902,8 @@
         "exit_order_id": "99d6658d-3f6c-41b5-9e6c-a42ef97638bd",
         "entry_order_id": "bb307303-3915-4726-b687-7f548e94d4f4",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "DAIC",
@@ -7694,7 +7923,8 @@
         "exit_order_id": "c8e5612d-0dfb-4dcd-8990-ef2246e0b54d",
         "entry_order_id": "7d208c22-4e76-433a-b333-26e76d3a22f1",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "DAIC",
@@ -7714,7 +7944,8 @@
         "exit_order_id": "c8e5612d-0dfb-4dcd-8990-ef2246e0b54d",
         "entry_order_id": "7d208c22-4e76-433a-b333-26e76d3a22f1",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "CRAI",
@@ -7734,7 +7965,8 @@
         "exit_order_id": "d6ef98c4-72cc-4a8f-817e-d7f32b2e0e5a",
         "entry_order_id": "450ef1a5-ec3c-4872-a1d7-aba752977f5e",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "CRAI",
@@ -7754,7 +7986,8 @@
         "exit_order_id": "d6ef98c4-72cc-4a8f-817e-d7f32b2e0e5a",
         "entry_order_id": "450ef1a5-ec3c-4872-a1d7-aba752977f5e",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "DASH",
@@ -7774,7 +8007,8 @@
         "exit_order_id": "461386ca-9fb8-4e8f-a021-3a483e26e4f4",
         "entry_order_id": "34c08728-18f3-4bf6-947f-c1835e52f3f0",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "DAIC",
@@ -7794,7 +8028,8 @@
         "exit_order_id": "c8e5612d-0dfb-4dcd-8990-ef2246e0b54d",
         "entry_order_id": "7d208c22-4e76-433a-b333-26e76d3a22f1",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "CRAI",
@@ -7814,7 +8049,8 @@
         "exit_order_id": "d6ef98c4-72cc-4a8f-817e-d7f32b2e0e5a",
         "entry_order_id": "450ef1a5-ec3c-4872-a1d7-aba752977f5e",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "CLRO",
@@ -7834,7 +8070,8 @@
         "exit_order_id": "99d6658d-3f6c-41b5-9e6c-a42ef97638bd",
         "entry_order_id": "bb307303-3915-4726-b687-7f548e94d4f4",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "EAT",
@@ -7854,7 +8091,8 @@
         "exit_order_id": "f316c9cd-ff2e-42cd-87bb-7f7e19d67b9a",
         "entry_order_id": "43b5003f-ec5d-44e2-a018-a02558ff4da5",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "DAIC",
@@ -7874,7 +8112,8 @@
         "exit_order_id": "c8e5612d-0dfb-4dcd-8990-ef2246e0b54d",
         "entry_order_id": "7d208c22-4e76-433a-b333-26e76d3a22f1",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "CRAI",
@@ -7894,7 +8133,8 @@
         "exit_order_id": "d6ef98c4-72cc-4a8f-817e-d7f32b2e0e5a",
         "entry_order_id": "450ef1a5-ec3c-4872-a1d7-aba752977f5e",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "CLRO",
@@ -7914,7 +8154,8 @@
         "exit_order_id": "99d6658d-3f6c-41b5-9e6c-a42ef97638bd",
         "entry_order_id": "bb307303-3915-4726-b687-7f548e94d4f4",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "DASH",
@@ -7934,7 +8175,8 @@
         "exit_order_id": "461386ca-9fb8-4e8f-a021-3a483e26e4f4",
         "entry_order_id": "34c08728-18f3-4bf6-947f-c1835e52f3f0",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "DASH",
@@ -7954,7 +8196,8 @@
         "exit_order_id": "461386ca-9fb8-4e8f-a021-3a483e26e4f4",
         "entry_order_id": "34c08728-18f3-4bf6-947f-c1835e52f3f0",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "DASH",
@@ -7974,7 +8217,8 @@
         "exit_order_id": "461386ca-9fb8-4e8f-a021-3a483e26e4f4",
         "entry_order_id": "34c08728-18f3-4bf6-947f-c1835e52f3f0",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "CLRO",
@@ -7994,7 +8238,8 @@
         "exit_order_id": "99d6658d-3f6c-41b5-9e6c-a42ef97638bd",
         "entry_order_id": "bb307303-3915-4726-b687-7f548e94d4f4",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "FBRX",
@@ -8014,7 +8259,8 @@
         "exit_order_id": "1fb05791-4146-461d-879a-7d24099088ae",
         "entry_order_id": "3eda909c-67e8-4166-89cf-eae633306c84",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "EAT",
@@ -8034,7 +8280,8 @@
         "exit_order_id": "f316c9cd-ff2e-42cd-87bb-7f7e19d67b9a",
         "entry_order_id": "43b5003f-ec5d-44e2-a018-a02558ff4da5",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "DAIC",
@@ -8054,7 +8301,8 @@
         "exit_order_id": "c8e5612d-0dfb-4dcd-8990-ef2246e0b54d",
         "entry_order_id": "7d208c22-4e76-433a-b333-26e76d3a22f1",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "DAIC",
@@ -8074,7 +8322,8 @@
         "exit_order_id": "c8e5612d-0dfb-4dcd-8990-ef2246e0b54d",
         "entry_order_id": "7d208c22-4e76-433a-b333-26e76d3a22f1",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "DAIC",
@@ -8094,7 +8343,8 @@
         "exit_order_id": "c8e5612d-0dfb-4dcd-8990-ef2246e0b54d",
         "entry_order_id": "7d208c22-4e76-433a-b333-26e76d3a22f1",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "DAIC",
@@ -8114,7 +8364,8 @@
         "exit_order_id": "c8e5612d-0dfb-4dcd-8990-ef2246e0b54d",
         "entry_order_id": "7d208c22-4e76-433a-b333-26e76d3a22f1",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "DAIC",
@@ -8134,7 +8385,8 @@
         "exit_order_id": "c8e5612d-0dfb-4dcd-8990-ef2246e0b54d",
         "entry_order_id": "7d208c22-4e76-433a-b333-26e76d3a22f1",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "DAIC",
@@ -8154,7 +8406,8 @@
         "exit_order_id": "c8e5612d-0dfb-4dcd-8990-ef2246e0b54d",
         "entry_order_id": "7d208c22-4e76-433a-b333-26e76d3a22f1",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "DAIC",
@@ -8174,7 +8427,8 @@
         "exit_order_id": "c8e5612d-0dfb-4dcd-8990-ef2246e0b54d",
         "entry_order_id": "7d208c22-4e76-433a-b333-26e76d3a22f1",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "CRAI",
@@ -8194,7 +8448,8 @@
         "exit_order_id": "d6ef98c4-72cc-4a8f-817e-d7f32b2e0e5a",
         "entry_order_id": "450ef1a5-ec3c-4872-a1d7-aba752977f5e",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "EAT",
@@ -8214,7 +8469,8 @@
         "exit_order_id": "f316c9cd-ff2e-42cd-87bb-7f7e19d67b9a",
         "entry_order_id": "43b5003f-ec5d-44e2-a018-a02558ff4da5",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "GMM",
@@ -8234,7 +8490,8 @@
         "exit_order_id": "550122c1-308a-44ca-8f9d-2c4f00b5277f",
         "entry_order_id": "36b05a9d-eee4-44ab-9119-230eedab442e",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "FBRX",
@@ -8254,7 +8511,8 @@
         "exit_order_id": "1fb05791-4146-461d-879a-7d24099088ae",
         "entry_order_id": "3eda909c-67e8-4166-89cf-eae633306c84",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "FBRX",
@@ -8274,7 +8532,8 @@
         "exit_order_id": "1fb05791-4146-461d-879a-7d24099088ae",
         "entry_order_id": "3eda909c-67e8-4166-89cf-eae633306c84",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "FBRX",
@@ -8294,7 +8553,8 @@
         "exit_order_id": "1fb05791-4146-461d-879a-7d24099088ae",
         "entry_order_id": "3eda909c-67e8-4166-89cf-eae633306c84",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "FBRX",
@@ -8314,7 +8574,8 @@
         "exit_order_id": "1fb05791-4146-461d-879a-7d24099088ae",
         "entry_order_id": "3eda909c-67e8-4166-89cf-eae633306c84",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "GRND",
@@ -8334,7 +8595,8 @@
         "exit_order_id": "e99d5477-3ca1-4a2f-a596-cd0c3d4abbec",
         "entry_order_id": "4d506731-1e7d-4967-800f-3c9b893745fc",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "GRND",
@@ -8354,7 +8616,8 @@
         "exit_order_id": "e99d5477-3ca1-4a2f-a596-cd0c3d4abbec",
         "entry_order_id": "4d506731-1e7d-4967-800f-3c9b893745fc",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "FBRX",
@@ -8374,7 +8637,8 @@
         "exit_order_id": "1fb05791-4146-461d-879a-7d24099088ae",
         "entry_order_id": "3eda909c-67e8-4166-89cf-eae633306c84",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "GRND",
@@ -8394,7 +8658,8 @@
         "exit_order_id": "e99d5477-3ca1-4a2f-a596-cd0c3d4abbec",
         "entry_order_id": "4d506731-1e7d-4967-800f-3c9b893745fc",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "GSHD",
@@ -8414,7 +8679,8 @@
         "exit_order_id": "f5cfd767-1f26-4df5-9f1b-27947e3087b0",
         "entry_order_id": "d9e8fadb-1d2e-4589-b615-0543f6f05490",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "GSHD",
@@ -8434,7 +8700,8 @@
         "exit_order_id": "f5cfd767-1f26-4df5-9f1b-27947e3087b0",
         "entry_order_id": "d9e8fadb-1d2e-4589-b615-0543f6f05490",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "FBRX",
@@ -8454,7 +8721,8 @@
         "exit_order_id": "1fb05791-4146-461d-879a-7d24099088ae",
         "entry_order_id": "3eda909c-67e8-4166-89cf-eae633306c84",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "INDP",
@@ -8474,7 +8742,8 @@
         "exit_order_id": "c6712938-4b2f-4676-97ed-5aa9f36f7477",
         "entry_order_id": "74fa1d6d-71f1-41aa-a22b-03ba940edb02",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "INDP",
@@ -8494,7 +8763,8 @@
         "exit_order_id": "c6712938-4b2f-4676-97ed-5aa9f36f7477",
         "entry_order_id": "74fa1d6d-71f1-41aa-a22b-03ba940edb02",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "INDP",
@@ -8514,7 +8784,8 @@
         "exit_order_id": "c6712938-4b2f-4676-97ed-5aa9f36f7477",
         "entry_order_id": "74fa1d6d-71f1-41aa-a22b-03ba940edb02",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "GRND",
@@ -8534,7 +8805,8 @@
         "exit_order_id": "e99d5477-3ca1-4a2f-a596-cd0c3d4abbec",
         "entry_order_id": "4d506731-1e7d-4967-800f-3c9b893745fc",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "ICCM",
@@ -8554,7 +8826,8 @@
         "exit_order_id": "f24b7bf3-2cec-4967-922b-10c25b7f9994",
         "entry_order_id": "79ecf8a5-1f96-4d0b-9709-01c7ada05466",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "ICCM",
@@ -8574,7 +8847,8 @@
         "exit_order_id": "f24b7bf3-2cec-4967-922b-10c25b7f9994",
         "entry_order_id": "79ecf8a5-1f96-4d0b-9709-01c7ada05466",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "INSM",
@@ -8594,7 +8868,8 @@
         "exit_order_id": "6e2e5ed0-ecbd-4f38-b98a-1c7d92925b38",
         "entry_order_id": "717733a2-8566-4ea3-83d0-00b735d81a38",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "GRND",
@@ -8614,7 +8889,8 @@
         "exit_order_id": "e99d5477-3ca1-4a2f-a596-cd0c3d4abbec",
         "entry_order_id": "4d506731-1e7d-4967-800f-3c9b893745fc",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "ICCM",
@@ -8634,7 +8910,8 @@
         "exit_order_id": "f24b7bf3-2cec-4967-922b-10c25b7f9994",
         "entry_order_id": "79ecf8a5-1f96-4d0b-9709-01c7ada05466",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "ICCM",
@@ -8654,7 +8931,8 @@
         "exit_order_id": "f24b7bf3-2cec-4967-922b-10c25b7f9994",
         "entry_order_id": "79ecf8a5-1f96-4d0b-9709-01c7ada05466",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "INSM",
@@ -8674,7 +8952,8 @@
         "exit_order_id": "6e2e5ed0-ecbd-4f38-b98a-1c7d92925b38",
         "entry_order_id": "717733a2-8566-4ea3-83d0-00b735d81a38",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "INSM",
@@ -8694,7 +8973,8 @@
         "exit_order_id": "6e2e5ed0-ecbd-4f38-b98a-1c7d92925b38",
         "entry_order_id": "717733a2-8566-4ea3-83d0-00b735d81a38",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "GRND",
@@ -8714,7 +8994,8 @@
         "exit_order_id": "e99d5477-3ca1-4a2f-a596-cd0c3d4abbec",
         "entry_order_id": "4d506731-1e7d-4967-800f-3c9b893745fc",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "GRND",
@@ -8734,7 +9015,8 @@
         "exit_order_id": "e99d5477-3ca1-4a2f-a596-cd0c3d4abbec",
         "entry_order_id": "4d506731-1e7d-4967-800f-3c9b893745fc",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "IRON",
@@ -8754,7 +9036,8 @@
         "exit_order_id": "557a5d76-50d6-4d28-973f-d5480e42e204",
         "entry_order_id": "64f8b082-b4d5-4238-bec5-4d6d588c35fb",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "ICCM",
@@ -8774,7 +9057,8 @@
         "exit_order_id": "f24b7bf3-2cec-4967-922b-10c25b7f9994",
         "entry_order_id": "79ecf8a5-1f96-4d0b-9709-01c7ada05466",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "KYMR",
@@ -8794,7 +9078,8 @@
         "exit_order_id": "f072d282-f1f2-4a37-9632-f619e034cb9b",
         "entry_order_id": "256e0b01-5904-44c3-a4f0-2afd67dfe85b",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "IRON",
@@ -8814,7 +9099,8 @@
         "exit_order_id": "557a5d76-50d6-4d28-973f-d5480e42e204",
         "entry_order_id": "64f8b082-b4d5-4238-bec5-4d6d588c35fb",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "ICCM",
@@ -8834,7 +9120,8 @@
         "exit_order_id": "f24b7bf3-2cec-4967-922b-10c25b7f9994",
         "entry_order_id": "79ecf8a5-1f96-4d0b-9709-01c7ada05466",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "KYMR",
@@ -8854,7 +9141,8 @@
         "exit_order_id": "f072d282-f1f2-4a37-9632-f619e034cb9b",
         "entry_order_id": "256e0b01-5904-44c3-a4f0-2afd67dfe85b",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "KYMR",
@@ -8874,7 +9162,8 @@
         "exit_order_id": "f072d282-f1f2-4a37-9632-f619e034cb9b",
         "entry_order_id": "256e0b01-5904-44c3-a4f0-2afd67dfe85b",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "KYMR",
@@ -8894,7 +9183,8 @@
         "exit_order_id": "f072d282-f1f2-4a37-9632-f619e034cb9b",
         "entry_order_id": "256e0b01-5904-44c3-a4f0-2afd67dfe85b",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "LESL",
@@ -8914,7 +9204,8 @@
         "exit_order_id": "420c7d8b-79b7-49c5-8fe6-eed81a3571cc",
         "entry_order_id": "8a887ee0-35a2-4270-bb63-9436b9757ab3",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "LESL",
@@ -8934,7 +9225,8 @@
         "exit_order_id": "420c7d8b-79b7-49c5-8fe6-eed81a3571cc",
         "entry_order_id": "8a887ee0-35a2-4270-bb63-9436b9757ab3",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "LESL",
@@ -8954,7 +9246,8 @@
         "exit_order_id": "420c7d8b-79b7-49c5-8fe6-eed81a3571cc",
         "entry_order_id": "8a887ee0-35a2-4270-bb63-9436b9757ab3",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "IRON",
@@ -8974,7 +9267,8 @@
         "exit_order_id": "557a5d76-50d6-4d28-973f-d5480e42e204",
         "entry_order_id": "64f8b082-b4d5-4238-bec5-4d6d588c35fb",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "ICCM",
@@ -8994,7 +9288,8 @@
         "exit_order_id": "f24b7bf3-2cec-4967-922b-10c25b7f9994",
         "entry_order_id": "79ecf8a5-1f96-4d0b-9709-01c7ada05466",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "LYB",
@@ -9014,7 +9309,8 @@
         "exit_order_id": "442c703e-06f6-46ba-9dd7-324c123c29f1",
         "entry_order_id": "a5b5700f-fee4-4c29-aff7-65994dae5a99",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "MGTX",
@@ -9034,7 +9330,8 @@
         "exit_order_id": "b3fd8774-807e-445a-89a9-2cf8463f9df5",
         "entry_order_id": "adde5eff-17e4-4b0a-b76e-21a365419928",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "MGTX",
@@ -9054,7 +9351,8 @@
         "exit_order_id": "b3fd8774-807e-445a-89a9-2cf8463f9df5",
         "entry_order_id": "adde5eff-17e4-4b0a-b76e-21a365419928",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "MGTX",
@@ -9074,7 +9372,8 @@
         "exit_order_id": "b3fd8774-807e-445a-89a9-2cf8463f9df5",
         "entry_order_id": "adde5eff-17e4-4b0a-b76e-21a365419928",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "LYB",
@@ -9094,7 +9393,8 @@
         "exit_order_id": "442c703e-06f6-46ba-9dd7-324c123c29f1",
         "entry_order_id": "a5b5700f-fee4-4c29-aff7-65994dae5a99",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "LYB",
@@ -9114,7 +9414,8 @@
         "exit_order_id": "442c703e-06f6-46ba-9dd7-324c123c29f1",
         "entry_order_id": "a5b5700f-fee4-4c29-aff7-65994dae5a99",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "LYB",
@@ -9134,7 +9435,8 @@
         "exit_order_id": "442c703e-06f6-46ba-9dd7-324c123c29f1",
         "entry_order_id": "a5b5700f-fee4-4c29-aff7-65994dae5a99",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "LYB",
@@ -9154,7 +9456,8 @@
         "exit_order_id": "442c703e-06f6-46ba-9dd7-324c123c29f1",
         "entry_order_id": "a5b5700f-fee4-4c29-aff7-65994dae5a99",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "MOH",
@@ -9174,7 +9477,8 @@
         "exit_order_id": "2efd2bb2-0fda-4144-b013-91dd35a61450",
         "entry_order_id": "15ebdbe0-9a6c-4489-b6a6-602c0b00d3cb",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "MOH",
@@ -9194,7 +9498,8 @@
         "exit_order_id": "2efd2bb2-0fda-4144-b013-91dd35a61450",
         "entry_order_id": "15ebdbe0-9a6c-4489-b6a6-602c0b00d3cb",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "MOH",
@@ -9214,7 +9519,8 @@
         "exit_order_id": "2efd2bb2-0fda-4144-b013-91dd35a61450",
         "entry_order_id": "15ebdbe0-9a6c-4489-b6a6-602c0b00d3cb",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "NICE",
@@ -9234,7 +9540,8 @@
         "exit_order_id": "9d2b2ebd-35e4-4e74-8f47-01d31856149e",
         "entry_order_id": "585a5b68-7e83-4899-9e99-1f2b266011a4",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "NTLA",
@@ -9254,7 +9561,8 @@
         "exit_order_id": "1e0aa50d-9e84-4698-aa07-715b91e237cd",
         "entry_order_id": "c6ed5135-ab2d-42d8-81be-8293b56c9b47",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "MOH",
@@ -9274,7 +9582,8 @@
         "exit_order_id": "2efd2bb2-0fda-4144-b013-91dd35a61450",
         "entry_order_id": "15ebdbe0-9a6c-4489-b6a6-602c0b00d3cb",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "PARR",
@@ -9294,7 +9603,8 @@
         "exit_order_id": "7dd7c8a7-52a8-4479-9144-79d338e6984a",
         "entry_order_id": "dec23e28-ab3c-48f9-94f9-66d9aff25148",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "NICE",
@@ -9314,7 +9624,8 @@
         "exit_order_id": "9d2b2ebd-35e4-4e74-8f47-01d31856149e",
         "entry_order_id": "585a5b68-7e83-4899-9e99-1f2b266011a4",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "NTLA",
@@ -9334,7 +9645,8 @@
         "exit_order_id": "1e0aa50d-9e84-4698-aa07-715b91e237cd",
         "entry_order_id": "c6ed5135-ab2d-42d8-81be-8293b56c9b47",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "PARR",
@@ -9354,7 +9666,8 @@
         "exit_order_id": "7dd7c8a7-52a8-4479-9144-79d338e6984a",
         "entry_order_id": "dec23e28-ab3c-48f9-94f9-66d9aff25148",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "PAVS",
@@ -9374,7 +9687,8 @@
         "exit_order_id": "213de85d-39bf-455e-b5a3-bc58c7187e24",
         "entry_order_id": "2eeca67b-00d7-450d-98a3-aa5e58dd0487",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "PAVS",
@@ -9394,7 +9708,8 @@
         "exit_order_id": "213de85d-39bf-455e-b5a3-bc58c7187e24",
         "entry_order_id": "2eeca67b-00d7-450d-98a3-aa5e58dd0487",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "PAVS",
@@ -9414,7 +9729,8 @@
         "exit_order_id": "213de85d-39bf-455e-b5a3-bc58c7187e24",
         "entry_order_id": "2eeca67b-00d7-450d-98a3-aa5e58dd0487",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "NICE",
@@ -9434,7 +9750,8 @@
         "exit_order_id": "9d2b2ebd-35e4-4e74-8f47-01d31856149e",
         "entry_order_id": "585a5b68-7e83-4899-9e99-1f2b266011a4",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "NTLA",
@@ -9454,7 +9771,8 @@
         "exit_order_id": "1e0aa50d-9e84-4698-aa07-715b91e237cd",
         "entry_order_id": "c6ed5135-ab2d-42d8-81be-8293b56c9b47",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "NTLA",
@@ -9474,7 +9792,8 @@
         "exit_order_id": "1e0aa50d-9e84-4698-aa07-715b91e237cd",
         "entry_order_id": "c6ed5135-ab2d-42d8-81be-8293b56c9b47",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "RARE",
@@ -9494,7 +9813,8 @@
         "exit_order_id": "dbde9d16-b932-416c-89ee-0ed9845b0fba",
         "entry_order_id": "cfa4b7b2-54f5-4820-a979-690ea3d3df82",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "RARE",
@@ -9514,7 +9834,8 @@
         "exit_order_id": "dbde9d16-b932-416c-89ee-0ed9845b0fba",
         "entry_order_id": "cfa4b7b2-54f5-4820-a979-690ea3d3df82",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "RARE",
@@ -9534,7 +9855,8 @@
         "exit_order_id": "dbde9d16-b932-416c-89ee-0ed9845b0fba",
         "entry_order_id": "cfa4b7b2-54f5-4820-a979-690ea3d3df82",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "PAVS",
@@ -9554,7 +9876,8 @@
         "exit_order_id": "213de85d-39bf-455e-b5a3-bc58c7187e24",
         "entry_order_id": "2eeca67b-00d7-450d-98a3-aa5e58dd0487",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "PAVS",
@@ -9574,7 +9897,8 @@
         "exit_order_id": "213de85d-39bf-455e-b5a3-bc58c7187e24",
         "entry_order_id": "2eeca67b-00d7-450d-98a3-aa5e58dd0487",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "PAVS",
@@ -9594,7 +9918,8 @@
         "exit_order_id": "213de85d-39bf-455e-b5a3-bc58c7187e24",
         "entry_order_id": "2eeca67b-00d7-450d-98a3-aa5e58dd0487",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "PAVS",
@@ -9614,7 +9939,8 @@
         "exit_order_id": "213de85d-39bf-455e-b5a3-bc58c7187e24",
         "entry_order_id": "2eeca67b-00d7-450d-98a3-aa5e58dd0487",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "PAVS",
@@ -9634,7 +9960,8 @@
         "exit_order_id": "213de85d-39bf-455e-b5a3-bc58c7187e24",
         "entry_order_id": "2eeca67b-00d7-450d-98a3-aa5e58dd0487",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "NICE",
@@ -9654,7 +9981,8 @@
         "exit_order_id": "9d2b2ebd-35e4-4e74-8f47-01d31856149e",
         "entry_order_id": "585a5b68-7e83-4899-9e99-1f2b266011a4",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "RGNX",
@@ -9674,7 +10002,8 @@
         "exit_order_id": "2d181a5d-f8fd-4b79-b817-39894def5648",
         "entry_order_id": "b2797a8f-7ef8-42cd-a38c-4f2a09fa2d19",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "NTLA",
@@ -9694,7 +10023,8 @@
         "exit_order_id": "1e0aa50d-9e84-4698-aa07-715b91e237cd",
         "entry_order_id": "c6ed5135-ab2d-42d8-81be-8293b56c9b47",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "RARE",
@@ -9714,7 +10044,8 @@
         "exit_order_id": "dbde9d16-b932-416c-89ee-0ed9845b0fba",
         "entry_order_id": "cfa4b7b2-54f5-4820-a979-690ea3d3df82",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "RARE",
@@ -9734,7 +10065,8 @@
         "exit_order_id": "dbde9d16-b932-416c-89ee-0ed9845b0fba",
         "entry_order_id": "cfa4b7b2-54f5-4820-a979-690ea3d3df82",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "RARE",
@@ -9754,7 +10086,8 @@
         "exit_order_id": "dbde9d16-b932-416c-89ee-0ed9845b0fba",
         "entry_order_id": "cfa4b7b2-54f5-4820-a979-690ea3d3df82",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "NICE",
@@ -9774,7 +10107,8 @@
         "exit_order_id": "9d2b2ebd-35e4-4e74-8f47-01d31856149e",
         "entry_order_id": "585a5b68-7e83-4899-9e99-1f2b266011a4",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "RGNX",
@@ -9794,7 +10128,8 @@
         "exit_order_id": "2d181a5d-f8fd-4b79-b817-39894def5648",
         "entry_order_id": "b2797a8f-7ef8-42cd-a38c-4f2a09fa2d19",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "RSI",
@@ -9814,7 +10149,8 @@
         "exit_order_id": "f41d9348-688f-447c-9542-1d35d079046d",
         "entry_order_id": "80da0a0d-d982-4e74-b6ef-0503e3033a0f",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "RSI",
@@ -9834,7 +10170,8 @@
         "exit_order_id": "f41d9348-688f-447c-9542-1d35d079046d",
         "entry_order_id": "80da0a0d-d982-4e74-b6ef-0503e3033a0f",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "NTLA",
@@ -9854,7 +10191,8 @@
         "exit_order_id": "1e0aa50d-9e84-4698-aa07-715b91e237cd",
         "entry_order_id": "c6ed5135-ab2d-42d8-81be-8293b56c9b47",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "NTLA",
@@ -9874,7 +10212,8 @@
         "exit_order_id": "1e0aa50d-9e84-4698-aa07-715b91e237cd",
         "entry_order_id": "c6ed5135-ab2d-42d8-81be-8293b56c9b47",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "RXT",
@@ -9894,7 +10233,8 @@
         "exit_order_id": "df18f454-bd04-4173-96a0-03f9acd5d01b",
         "entry_order_id": "23e1f8ca-e798-478c-a599-1729a14272b2",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "RGNX",
@@ -9914,7 +10254,8 @@
         "exit_order_id": "2d181a5d-f8fd-4b79-b817-39894def5648",
         "entry_order_id": "b2797a8f-7ef8-42cd-a38c-4f2a09fa2d19",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "RSI",
@@ -9934,7 +10275,8 @@
         "exit_order_id": "f41d9348-688f-447c-9542-1d35d079046d",
         "entry_order_id": "80da0a0d-d982-4e74-b6ef-0503e3033a0f",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "RXT",
@@ -9954,7 +10296,8 @@
         "exit_order_id": "df18f454-bd04-4173-96a0-03f9acd5d01b",
         "entry_order_id": "23e1f8ca-e798-478c-a599-1729a14272b2",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "SNDX",
@@ -9974,7 +10317,8 @@
         "exit_order_id": "a94c6bde-78c8-49bb-a2e8-ff3a22fa4659",
         "entry_order_id": "3b38757b-351d-4ad6-a475-0dec542a16bb",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "RGNX",
@@ -9994,7 +10338,8 @@
         "exit_order_id": "2d181a5d-f8fd-4b79-b817-39894def5648",
         "entry_order_id": "b2797a8f-7ef8-42cd-a38c-4f2a09fa2d19",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "RXT",
@@ -10014,7 +10359,8 @@
         "exit_order_id": "df18f454-bd04-4173-96a0-03f9acd5d01b",
         "entry_order_id": "23e1f8ca-e798-478c-a599-1729a14272b2",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "SNDX",
@@ -10034,7 +10380,8 @@
         "exit_order_id": "a94c6bde-78c8-49bb-a2e8-ff3a22fa4659",
         "entry_order_id": "3b38757b-351d-4ad6-a475-0dec542a16bb",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "SNDX",
@@ -10054,7 +10401,8 @@
         "exit_order_id": "a94c6bde-78c8-49bb-a2e8-ff3a22fa4659",
         "entry_order_id": "3b38757b-351d-4ad6-a475-0dec542a16bb",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "SONO",
@@ -10074,7 +10422,8 @@
         "exit_order_id": "e7e9769d-fef8-4073-a8fd-1fc880ef7ac8",
         "entry_order_id": "b314f7e2-6565-47c6-a3ef-e0290158e33c",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "SONO",
@@ -10094,7 +10443,8 @@
         "exit_order_id": "e7e9769d-fef8-4073-a8fd-1fc880ef7ac8",
         "entry_order_id": "b314f7e2-6565-47c6-a3ef-e0290158e33c",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "RXT",
@@ -10114,7 +10464,8 @@
         "exit_order_id": "df18f454-bd04-4173-96a0-03f9acd5d01b",
         "entry_order_id": "23e1f8ca-e798-478c-a599-1729a14272b2",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "STUB",
@@ -10134,7 +10485,8 @@
         "exit_order_id": "d272553d-c620-45ce-8fad-93474c42d26f",
         "entry_order_id": "d72eb479-8bae-46db-b98c-6110e86af60a",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "STUB",
@@ -10154,7 +10506,8 @@
         "exit_order_id": "d272553d-c620-45ce-8fad-93474c42d26f",
         "entry_order_id": "d72eb479-8bae-46db-b98c-6110e86af60a",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "STUB",
@@ -10174,7 +10527,8 @@
         "exit_order_id": "d272553d-c620-45ce-8fad-93474c42d26f",
         "entry_order_id": "d72eb479-8bae-46db-b98c-6110e86af60a",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "STUB",
@@ -10194,7 +10548,8 @@
         "exit_order_id": "d272553d-c620-45ce-8fad-93474c42d26f",
         "entry_order_id": "d72eb479-8bae-46db-b98c-6110e86af60a",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "RXT",
@@ -10214,7 +10569,8 @@
         "exit_order_id": "df18f454-bd04-4173-96a0-03f9acd5d01b",
         "entry_order_id": "23e1f8ca-e798-478c-a599-1729a14272b2",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "RXT",
@@ -10234,7 +10590,8 @@
         "exit_order_id": "df18f454-bd04-4173-96a0-03f9acd5d01b",
         "entry_order_id": "23e1f8ca-e798-478c-a599-1729a14272b2",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "RXT",
@@ -10254,7 +10611,8 @@
         "exit_order_id": "df18f454-bd04-4173-96a0-03f9acd5d01b",
         "entry_order_id": "23e1f8ca-e798-478c-a599-1729a14272b2",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "TDOC",
@@ -10274,7 +10632,8 @@
         "exit_order_id": "6c199063-cbba-4126-af26-5ab952345a0e",
         "entry_order_id": "b53c643e-7878-4652-b037-9981995619f6",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "SONO",
@@ -10294,7 +10653,8 @@
         "exit_order_id": "e7e9769d-fef8-4073-a8fd-1fc880ef7ac8",
         "entry_order_id": "b314f7e2-6565-47c6-a3ef-e0290158e33c",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "TDUP",
@@ -10314,7 +10674,8 @@
         "exit_order_id": "a91eb71a-0b4d-4c14-886a-333f565fd2bc",
         "entry_order_id": "d41fc332-70da-45d3-88f6-619eed0ce486",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "TDUP",
@@ -10334,7 +10695,8 @@
         "exit_order_id": "a91eb71a-0b4d-4c14-886a-333f565fd2bc",
         "entry_order_id": "d41fc332-70da-45d3-88f6-619eed0ce486",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "TDUP",
@@ -10354,7 +10716,8 @@
         "exit_order_id": "a91eb71a-0b4d-4c14-886a-333f565fd2bc",
         "entry_order_id": "d41fc332-70da-45d3-88f6-619eed0ce486",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "TDUP",
@@ -10374,7 +10737,8 @@
         "exit_order_id": "a91eb71a-0b4d-4c14-886a-333f565fd2bc",
         "entry_order_id": "d41fc332-70da-45d3-88f6-619eed0ce486",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "TDUP",
@@ -10394,7 +10758,8 @@
         "exit_order_id": "a91eb71a-0b4d-4c14-886a-333f565fd2bc",
         "entry_order_id": "d41fc332-70da-45d3-88f6-619eed0ce486",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "TDUP",
@@ -10414,7 +10779,8 @@
         "exit_order_id": "a91eb71a-0b4d-4c14-886a-333f565fd2bc",
         "entry_order_id": "d41fc332-70da-45d3-88f6-619eed0ce486",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "TDUP",
@@ -10434,7 +10800,8 @@
         "exit_order_id": "a91eb71a-0b4d-4c14-886a-333f565fd2bc",
         "entry_order_id": "d41fc332-70da-45d3-88f6-619eed0ce486",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "TDUP",
@@ -10454,7 +10821,8 @@
         "exit_order_id": "a91eb71a-0b4d-4c14-886a-333f565fd2bc",
         "entry_order_id": "d41fc332-70da-45d3-88f6-619eed0ce486",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "TDOC",
@@ -10474,7 +10842,8 @@
         "exit_order_id": "6c199063-cbba-4126-af26-5ab952345a0e",
         "entry_order_id": "b53c643e-7878-4652-b037-9981995619f6",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "TDOC",
@@ -10494,7 +10863,8 @@
         "exit_order_id": "6c199063-cbba-4126-af26-5ab952345a0e",
         "entry_order_id": "b53c643e-7878-4652-b037-9981995619f6",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "TDOC",
@@ -10514,7 +10884,8 @@
         "exit_order_id": "6c199063-cbba-4126-af26-5ab952345a0e",
         "entry_order_id": "b53c643e-7878-4652-b037-9981995619f6",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "TDOC",
@@ -10534,7 +10905,8 @@
         "exit_order_id": "6c199063-cbba-4126-af26-5ab952345a0e",
         "entry_order_id": "b53c643e-7878-4652-b037-9981995619f6",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "TDOC",
@@ -10554,7 +10926,8 @@
         "exit_order_id": "6c199063-cbba-4126-af26-5ab952345a0e",
         "entry_order_id": "b53c643e-7878-4652-b037-9981995619f6",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "SONO",
@@ -10574,7 +10947,8 @@
         "exit_order_id": "e7e9769d-fef8-4073-a8fd-1fc880ef7ac8",
         "entry_order_id": "b314f7e2-6565-47c6-a3ef-e0290158e33c",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "TENB",
@@ -10594,7 +10968,8 @@
         "exit_order_id": "9ee63076-f065-43c1-95f0-a7711ec6d06e",
         "entry_order_id": "9354d650-0381-4fd7-956c-c7bbf9d3e08d",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "TENB",
@@ -10614,7 +10989,8 @@
         "exit_order_id": "9ee63076-f065-43c1-95f0-a7711ec6d06e",
         "entry_order_id": "9354d650-0381-4fd7-956c-c7bbf9d3e08d",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "TRNR",
@@ -10634,7 +11010,8 @@
         "exit_order_id": "96c5b4c6-7732-4a60-abd7-c8be1defd8df",
         "entry_order_id": "d09ddaa9-bbca-4969-8785-defb9d255872",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "TENB",
@@ -10654,7 +11031,8 @@
         "exit_order_id": "9ee63076-f065-43c1-95f0-a7711ec6d06e",
         "entry_order_id": "9354d650-0381-4fd7-956c-c7bbf9d3e08d",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "TRNR",
@@ -10674,7 +11052,8 @@
         "exit_order_id": "96c5b4c6-7732-4a60-abd7-c8be1defd8df",
         "entry_order_id": "d09ddaa9-bbca-4969-8785-defb9d255872",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "TENB",
@@ -10694,7 +11073,8 @@
         "exit_order_id": "9ee63076-f065-43c1-95f0-a7711ec6d06e",
         "entry_order_id": "9354d650-0381-4fd7-956c-c7bbf9d3e08d",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "TENB",
@@ -10714,7 +11094,8 @@
         "exit_order_id": "9ee63076-f065-43c1-95f0-a7711ec6d06e",
         "entry_order_id": "9354d650-0381-4fd7-956c-c7bbf9d3e08d",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "TENB",
@@ -10734,7 +11115,8 @@
         "exit_order_id": "9ee63076-f065-43c1-95f0-a7711ec6d06e",
         "entry_order_id": "9354d650-0381-4fd7-956c-c7bbf9d3e08d",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "TENB",
@@ -10754,7 +11136,8 @@
         "exit_order_id": "9ee63076-f065-43c1-95f0-a7711ec6d06e",
         "entry_order_id": "9354d650-0381-4fd7-956c-c7bbf9d3e08d",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "TENB",
@@ -10774,7 +11157,8 @@
         "exit_order_id": "9ee63076-f065-43c1-95f0-a7711ec6d06e",
         "entry_order_id": "9354d650-0381-4fd7-956c-c7bbf9d3e08d",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "TENB",
@@ -10794,7 +11178,8 @@
         "exit_order_id": "9ee63076-f065-43c1-95f0-a7711ec6d06e",
         "entry_order_id": "9354d650-0381-4fd7-956c-c7bbf9d3e08d",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "TRNR",
@@ -10814,7 +11199,8 @@
         "exit_order_id": "96c5b4c6-7732-4a60-abd7-c8be1defd8df",
         "entry_order_id": "d09ddaa9-bbca-4969-8785-defb9d255872",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "TRNR",
@@ -10834,7 +11220,8 @@
         "exit_order_id": "96c5b4c6-7732-4a60-abd7-c8be1defd8df",
         "entry_order_id": "d09ddaa9-bbca-4969-8785-defb9d255872",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "TRNR",
@@ -10854,7 +11241,8 @@
         "exit_order_id": "96c5b4c6-7732-4a60-abd7-c8be1defd8df",
         "entry_order_id": "d09ddaa9-bbca-4969-8785-defb9d255872",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "XENE",
@@ -10874,7 +11262,8 @@
         "exit_order_id": "6c8069e0-618f-4cc5-ae90-3553c4e7addb",
         "entry_order_id": "88707286-3adf-477c-a9bd-027f7423f05b",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "XENE",
@@ -10894,7 +11283,8 @@
         "exit_order_id": "6c8069e0-618f-4cc5-ae90-3553c4e7addb",
         "entry_order_id": "88707286-3adf-477c-a9bd-027f7423f05b",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "ZCMD",
@@ -10914,7 +11304,8 @@
         "exit_order_id": "f003b05c-cce4-4d10-b2a3-dc73792b191a",
         "entry_order_id": "1d1dc4b0-52d6-43da-849d-8aab57740f13",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "ZCMD",
@@ -10934,7 +11325,8 @@
         "exit_order_id": "f003b05c-cce4-4d10-b2a3-dc73792b191a",
         "entry_order_id": "1d1dc4b0-52d6-43da-849d-8aab57740f13",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "XENE",
@@ -10954,7 +11346,8 @@
         "exit_order_id": "6c8069e0-618f-4cc5-ae90-3553c4e7addb",
         "entry_order_id": "88707286-3adf-477c-a9bd-027f7423f05b",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "XENE",
@@ -10974,7 +11367,8 @@
         "exit_order_id": "6c8069e0-618f-4cc5-ae90-3553c4e7addb",
         "entry_order_id": "88707286-3adf-477c-a9bd-027f7423f05b",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "ZCMD",
@@ -10994,7 +11388,8 @@
         "exit_order_id": "f003b05c-cce4-4d10-b2a3-dc73792b191a",
         "entry_order_id": "1d1dc4b0-52d6-43da-849d-8aab57740f13",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "XENE",
@@ -11014,7 +11409,8 @@
         "exit_order_id": "6c8069e0-618f-4cc5-ae90-3553c4e7addb",
         "entry_order_id": "88707286-3adf-477c-a9bd-027f7423f05b",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "XENE",
@@ -11034,7 +11430,8 @@
         "exit_order_id": "6c8069e0-618f-4cc5-ae90-3553c4e7addb",
         "entry_order_id": "88707286-3adf-477c-a9bd-027f7423f05b",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "VEEE",
@@ -11054,7 +11451,8 @@
         "exit_order_id": "bd6b351f-99ac-480f-ae32-00491743c006",
         "entry_order_id": "51b4b96c-2f48-447e-a3ac-565ecce5060d",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "VEEE",
@@ -11074,7 +11472,8 @@
         "exit_order_id": "bd6b351f-99ac-480f-ae32-00491743c006",
         "entry_order_id": "51b4b96c-2f48-447e-a3ac-565ecce5060d",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       },
       {
         "symbol": "VEEE",
@@ -11094,116 +11493,28 @@
         "exit_order_id": "bd6b351f-99ac-480f-ae32-00491743c006",
         "entry_order_id": "51b4b96c-2f48-447e-a3ac-565ecce5060d",
         "system_source": "entry_order",
-        "system_unknown_reason": null
+        "system_unknown_reason": null,
+        "symbol_aliases": []
       }
     ],
-    "n_closed_trades_total": 652,
+    "n_closed_trades_total": 663,
     "measurement": {
       "measured": true,
-      "complete": false,
-      "reasons": [
-        "lot_mismatch: 再構成建玉が broker position と不一致 [AGNT, CHRN, EKSO, EXPI, FI, FISV, MF, UBXG]"
-      ],
+      "complete": true,
+      "reasons": [],
       "fills_seen": 1057,
       "coverage_start": "2025-11-03T14:30:06.353687Z",
       "coverage_end": "2026-07-22T13:31:30.27863Z",
-      "unmeasured_symbols": [
-        "AGNT",
-        "CHRN",
-        "EKSO",
-        "EXPI",
-        "FI",
-        "FISV",
-        "MF",
-        "UBXG"
-      ],
-      "discrepancies": [
-        {
-          "symbol": "AGNT",
-          "reconstructed_qty": -150.0,
-          "broker_qty": 0.0,
-          "reason": "reconstructed_only: fill 上は建玉が残るが broker に position 無し (ticker rename / corporate action の疑い)"
-        },
-        {
-          "symbol": "CHRN",
-          "reconstructed_qty": -119.0,
-          "broker_qty": 0.0,
-          "reason": "reconstructed_only: fill 上は建玉が残るが broker に position 無し (ticker rename / corporate action の疑い)"
-        },
-        {
-          "symbol": "EKSO",
-          "reconstructed_qty": 119.0,
-          "broker_qty": 0.0,
-          "reason": "reconstructed_only: fill 上は建玉が残るが broker に position 無し (ticker rename / corporate action の疑い)"
-        },
-        {
-          "symbol": "EXPI",
-          "reconstructed_qty": 150.0,
-          "broker_qty": 0.0,
-          "reason": "reconstructed_only: fill 上は建玉が残るが broker に position 無し (ticker rename / corporate action の疑い)"
-        },
-        {
-          "symbol": "FI",
-          "reconstructed_qty": 23.0,
-          "broker_qty": 0.0,
-          "reason": "reconstructed_only: fill 上は建玉が残るが broker に position 無し (ticker rename / corporate action の疑い)"
-        },
-        {
-          "symbol": "FISV",
-          "reconstructed_qty": -23.0,
-          "broker_qty": 0.0,
-          "reason": "reconstructed_only: fill 上は建玉が残るが broker に position 無し (ticker rename / corporate action の疑い)"
-        },
-        {
-          "symbol": "MF",
-          "reconstructed_qty": 0.0,
-          "broker_qty": 100.0,
-          "reason": "broker_only: broker に position があるが fill 履歴から再構成できない (fill 取りこぼしの疑い)"
-        },
-        {
-          "symbol": "UBXG",
-          "reconstructed_qty": 100.0,
-          "broker_qty": 0.0,
-          "reason": "reconstructed_only: fill 上は建玉が残るが broker に position 無し (ticker rename / corporate action の疑い)"
-        }
-      ],
-      "rename_candidates": [
-        {
-          "from_symbol": "EKSO",
-          "to_symbol": "CHRN",
-          "qty": 119.0,
-          "evidence": "EKSO に 119.0 株の残玉があり CHRN 側の不足と株数が一致 (rename / corporate action の疑い)",
-          "confirmed": false
-        },
-        {
-          "from_symbol": "EXPI",
-          "to_symbol": "AGNT",
-          "qty": 150.0,
-          "evidence": "EXPI に 150.0 株の残玉があり AGNT 側の不足と株数が一致 (rename / corporate action の疑い)",
-          "confirmed": false
-        },
-        {
-          "from_symbol": "FI",
-          "to_symbol": "FISV",
-          "qty": 23.0,
-          "evidence": "FI に 23.0 株の残玉があり FISV 側の不足と株数が一致 (rename / corporate action の疑い)",
-          "confirmed": false
-        },
-        {
-          "from_symbol": "UBXG",
-          "to_symbol": "MF",
-          "qty": 100.0,
-          "evidence": "UBXG に 100.0 株の残玉があり MF 側の不足と株数が一致 (rename / corporate action の疑い)",
-          "confirmed": false
-        }
-      ]
+      "unmeasured_symbols": [],
+      "discrepancies": [],
+      "rename_candidates": []
     },
     "attribution": {
-      "n_trades": 652,
-      "n_attributed": 567,
-      "n_unknown": 85,
+      "n_trades": 663,
+      "n_attributed": 572,
+      "n_unknown": 91,
       "n_ground_truth": 351,
-      "ground_truth_pct": 53.8,
+      "ground_truth_pct": 52.9,
       "by_source": [
         {
           "source": "entry_order",
@@ -11213,7 +11524,7 @@
         {
           "source": "symbol_map",
           "label": "symbol_system_map.json (symbol 単位・時点情報なし)",
-          "n_trades": 179
+          "n_trades": 184
         },
         {
           "source": "order_file",
@@ -11225,8 +11536,8 @@
         {
           "reason": "entry_order_untagged",
           "label": "entry 注文の client_order_id に system tag が無い (system tag を付ける前の発注。事後に判別する術が無い)",
-          "n_trades": 85,
-          "realized_pl": 2982.49,
+          "n_trades": 91,
+          "realized_pl": 3388.53,
           "symbols": [
             "A",
             "ANF",
@@ -11236,7 +11547,9 @@
             "CLH",
             "COGT",
             "CVI",
+            "EKSO",
             "ELVA",
+            "EXPI",
             "HYMC",
             "IBM",
             "INFY",
@@ -11259,6 +11572,50 @@
           ]
         }
       ]
+    },
+    "renames": {
+      "source": "config/ticker_renames.json (手動・broker 側の裏づけ無し)",
+      "confirmed_by_broker": false,
+      "applied": [
+        {
+          "alias": "FISV",
+          "canonical": "FI",
+          "qty": 23,
+          "evidence": "FI を 2025-11-03 に 23 株買い、FISV を 2025-12-12 に 23 株売り。どちらも反対売買が無く残差が一意に打ち消す。FI は symbol_system_map で system3。",
+          "confirmed_by_broker": false,
+          "observed_qty": 23.0,
+          "corroboration": "FI に 23.0 株の残玉があり FISV 側の不足と株数が一致 (rename / corporate action の疑い)"
+        },
+        {
+          "alias": "AGNT",
+          "canonical": "EXPI",
+          "qty": 150,
+          "evidence": "EXPI を 2026-01-05 に 150 株買い、AGNT を 2026-07-06 に 150 株売り。残差が一意に打ち消す。EXPI の asset は Alpaca から既に消えている (asset not found)。",
+          "confirmed_by_broker": false,
+          "observed_qty": 150.0,
+          "corroboration": "EXPI に 150.0 株の残玉があり AGNT 側の不足と株数が一致 (rename / corporate action の疑い)"
+        },
+        {
+          "alias": "CHRN",
+          "canonical": "EKSO",
+          "qty": 119,
+          "evidence": "EKSO を 2026-01-05 に 119 株買い、CHRN を 2026-07-06 に 119 株売り。残差が一意に打ち消す。EKSO は inactive、CHRN は active。",
+          "confirmed_by_broker": false,
+          "observed_qty": 119.0,
+          "corroboration": "EKSO に 119.0 株の残玉があり CHRN 側の不足と株数が一致 (rename / corporate action の疑い)"
+        },
+        {
+          "alias": "MF",
+          "canonical": "UBXG",
+          "qty": 100,
+          "evidence": "UBXG を 2026-07-13 に 100 株買った約定はあるが broker に UBXG が無く、代わりに MF を 100 株保有 (MF の約定は 1 件も無い)。UBXG の entry client_order_id は system3-UBXG-20260713 なので、この建玉は system3。未決済。",
+          "confirmed_by_broker": false,
+          "observed_qty": 100.0,
+          "corroboration": "UBXG に 100.0 株の残玉があり MF 側の不足と株数が一致 (rename / corporate action の疑い)"
+        }
+      ],
+      "rejected": [],
+      "n_synthesized_trades": 11
     },
     "exit_intent_reconciliation": {
       "session_date": "2026-07-27",
@@ -11376,12 +11733,12 @@
     }
   },
   "exposure": {
-    "long_usd": 58542.07,
+    "long_usd": 58597.86,
     "short_usd": 20319.09,
-    "gross_usd": 78861.16,
-    "net_usd": 38222.98,
-    "gross_pct": 76.133,
-    "net_pct": 36.901,
+    "gross_usd": 78916.95,
+    "net_usd": 38278.77,
+    "gross_pct": 76.146,
+    "net_pct": 36.935,
     "gross_cap_pct": 100.0,
     "net_cap_pct": 50.0,
     "by_system": {
@@ -11390,21 +11747,21 @@
         "short_usd": 20319.09,
         "count": 10,
         "unrealized_pl": 209.04,
-        "pct_of_gross": 25.77
+        "pct_of_gross": 25.75
       },
       "system1": {
-        "long_usd": 9106.8,
+        "long_usd": 9107.83,
         "short_usd": 0.0,
         "count": 9,
-        "unrealized_pl": 223.53,
-        "pct_of_gross": 11.55
+        "unrealized_pl": 224.56,
+        "pct_of_gross": 11.54
       },
       "system4": {
-        "long_usd": 34596.38,
+        "long_usd": 34644.33,
         "short_usd": 0.0,
         "count": 29,
-        "unrealized_pl": 297.89,
-        "pct_of_gross": 43.87
+        "unrealized_pl": 345.84,
+        "pct_of_gross": 43.9
       },
       "delisted": {
         "long_usd": 4285.87,
@@ -11414,18 +11771,11 @@
         "pct_of_gross": 5.43
       },
       "system3": {
-        "long_usd": 3293.17,
+        "long_usd": 3845.01,
         "short_usd": 0.0,
-        "count": 6,
-        "unrealized_pl": -355.32,
-        "pct_of_gross": 4.18
-      },
-      "unknown": {
-        "long_usd": 545.0,
-        "short_usd": 0.0,
-        "count": 1,
-        "unrealized_pl": 75.0,
-        "pct_of_gross": 0.69
+        "count": 7,
+        "unrealized_pl": -273.48,
+        "pct_of_gross": 4.87
       },
       "system5": {
         "long_usd": 6714.83,
@@ -11443,8 +11793,8 @@
     "n_winning": 35,
     "n_losing": 26,
     "win_rate_pct": 57.4,
-    "unrealized_pl_total": 155.13,
-    "exit_soon_count": 20,
+    "unrealized_pl_total": 210.92,
+    "exit_soon_count": 21,
     "biggest_winner": {
       "symbol": "FA",
       "pl": 313.75,
@@ -11472,6 +11822,7 @@
       "intraday_pl": -400.95,
       "intraday_pl_pct": -22.18,
       "entry_date": "2026-07-20",
+      "renamed_from": null,
       "holding_days": 7,
       "max_holding_days": 2,
       "days_remaining": -5,
@@ -11498,6 +11849,7 @@
       "intraday_pl": 0.0,
       "intraday_pl_pct": 0.0,
       "entry_date": "2026-07-20",
+      "renamed_from": null,
       "holding_days": 7,
       "max_holding_days": 2,
       "days_remaining": -5,
@@ -11524,6 +11876,7 @@
       "intraday_pl": 0.0,
       "intraday_pl_pct": 0.0,
       "entry_date": "2026-07-20",
+      "renamed_from": null,
       "holding_days": 7,
       "max_holding_days": 6,
       "days_remaining": -1,
@@ -11550,6 +11903,7 @@
       "intraday_pl": 7.51,
       "intraday_pl_pct": 3.064,
       "entry_date": "2026-07-20",
+      "renamed_from": null,
       "holding_days": 7,
       "max_holding_days": 3,
       "days_remaining": -4,
@@ -11576,6 +11930,7 @@
       "intraday_pl": 4.86,
       "intraday_pl_pct": 0.232,
       "entry_date": "2026-07-20",
+      "renamed_from": null,
       "holding_days": 7,
       "max_holding_days": 2,
       "days_remaining": -5,
@@ -11602,6 +11957,7 @@
       "intraday_pl": -28.8,
       "intraday_pl_pct": -1.752,
       "entry_date": "2026-07-20",
+      "renamed_from": null,
       "holding_days": 7,
       "max_holding_days": 2,
       "days_remaining": -5,
@@ -11628,6 +11984,7 @@
       "intraday_pl": 0.0,
       "intraday_pl_pct": 0.0,
       "entry_date": "2026-07-20",
+      "renamed_from": null,
       "holding_days": 7,
       "max_holding_days": 6,
       "days_remaining": -1,
@@ -11654,6 +12011,7 @@
       "intraday_pl": 27.36,
       "intraday_pl_pct": 1.151,
       "entry_date": "2026-07-20",
+      "renamed_from": null,
       "holding_days": 7,
       "max_holding_days": 2,
       "days_remaining": -5,
@@ -11680,6 +12038,7 @@
       "intraday_pl": -18.99,
       "intraday_pl_pct": -4.054,
       "entry_date": "2026-07-20",
+      "renamed_from": null,
       "holding_days": 7,
       "max_holding_days": 3,
       "days_remaining": -4,
@@ -11706,6 +12065,7 @@
       "intraday_pl": 14.35,
       "intraday_pl_pct": 4.202,
       "entry_date": "2026-07-20",
+      "renamed_from": null,
       "holding_days": 7,
       "max_holding_days": 3,
       "days_remaining": -4,
@@ -11716,6 +12076,33 @@
       "target_price_est": 1.612,
       "distance_to_stop_pct": -51.613,
       "distance_to_target_pct": 30.0
+    },
+    {
+      "symbol": "MF",
+      "system": "system3",
+      "side": "long",
+      "qty": 100.0,
+      "avg_entry_price": 4.7,
+      "current_price": 5.45,
+      "lastday_price": 5.23,
+      "market_value": 545.0,
+      "cost_basis": 470.0,
+      "unrealized_pl": 75.0,
+      "unrealized_pl_pct": 15.957,
+      "intraday_pl": 22.0,
+      "intraday_pl_pct": 4.207,
+      "entry_date": "2026-07-13",
+      "renamed_from": "UBXG",
+      "holding_days": 14,
+      "max_holding_days": 3,
+      "days_remaining": -11,
+      "exit_date": "2026-07-16",
+      "exit_type": "time",
+      "exit_expected": "time_based",
+      "stop_price_est": null,
+      "target_price_est": 4.888,
+      "distance_to_stop_pct": null,
+      "distance_to_target_pct": -10.312
     },
     {
       "symbol": "EPC",
@@ -11732,6 +12119,7 @@
       "intraday_pl": 0.0,
       "intraday_pl_pct": 0.0,
       "entry_date": "2026-07-20",
+      "renamed_from": null,
       "holding_days": 7,
       "max_holding_days": 2,
       "days_remaining": -5,
@@ -11744,46 +12132,21 @@
       "distance_to_target_pct": 0.539
     },
     {
-      "symbol": "MXL",
-      "system": "system3",
-      "side": "long",
-      "qty": 12.389221,
-      "avg_entry_price": 77.0,
-      "current_price": 74.56,
-      "lastday_price": 71.59,
-      "market_value": 923.74,
-      "cost_basis": 953.97,
-      "unrealized_pl": -30.23,
-      "unrealized_pl_pct": -3.169,
-      "intraday_pl": 36.8,
-      "intraday_pl_pct": 4.149,
-      "entry_date": "2026-07-20",
-      "holding_days": 7,
-      "max_holding_days": 3,
-      "days_remaining": -4,
-      "exit_date": "2026-07-23",
-      "exit_type": "time",
-      "exit_expected": "time_based",
-      "stop_price_est": 48.225,
-      "target_price_est": 80.08,
-      "distance_to_stop_pct": -35.321,
-      "distance_to_target_pct": 7.403
-    },
-    {
       "symbol": "PENG",
       "system": "system3",
       "side": "long",
       "qty": 15.007523,
       "avg_entry_price": 53.202,
-      "current_price": 55.14,
+      "current_price": 55.81,
       "lastday_price": 53.85,
-      "market_value": 827.51,
+      "market_value": 837.57,
       "cost_basis": 798.430001,
-      "unrealized_pl": 29.08,
-      "unrealized_pl_pct": 3.643,
-      "intraday_pl": 19.36,
-      "intraday_pl_pct": 2.396,
+      "unrealized_pl": 39.14,
+      "unrealized_pl_pct": 4.902,
+      "intraday_pl": 29.41,
+      "intraday_pl_pct": 3.64,
       "entry_date": "2026-07-20",
+      "renamed_from": null,
       "holding_days": 7,
       "max_holding_days": 3,
       "days_remaining": -4,
@@ -11792,8 +12155,35 @@
       "exit_expected": "time_based",
       "stop_price_est": 34.277,
       "target_price_est": 55.3301,
-      "distance_to_stop_pct": -37.836,
-      "distance_to_target_pct": 0.345
+      "distance_to_stop_pct": -38.583,
+      "distance_to_target_pct": -0.86
+    },
+    {
+      "symbol": "MXL",
+      "system": "system3",
+      "side": "long",
+      "qty": 12.389221,
+      "avg_entry_price": 77.0,
+      "current_price": 74.3,
+      "lastday_price": 71.59,
+      "market_value": 920.52,
+      "cost_basis": 953.97,
+      "unrealized_pl": -33.45,
+      "unrealized_pl_pct": -3.506,
+      "intraday_pl": 33.57,
+      "intraday_pl_pct": 3.785,
+      "entry_date": "2026-07-20",
+      "renamed_from": null,
+      "holding_days": 7,
+      "max_holding_days": 3,
+      "days_remaining": -4,
+      "exit_date": "2026-07-23",
+      "exit_type": "time",
+      "exit_expected": "time_based",
+      "stop_price_est": 48.225,
+      "target_price_est": 80.08,
+      "distance_to_stop_pct": -35.094,
+      "distance_to_target_pct": 7.779
     },
     {
       "symbol": "GMM",
@@ -11810,6 +12200,7 @@
       "intraday_pl": -8.88,
       "intraday_pl_pct": -1.801,
       "entry_date": "2026-07-20",
+      "renamed_from": null,
       "holding_days": 7,
       "max_holding_days": 3,
       "days_remaining": -4,
@@ -11836,6 +12227,7 @@
       "intraday_pl": 0.0,
       "intraday_pl_pct": 0.0,
       "entry_date": "2026-07-20",
+      "renamed_from": null,
       "holding_days": 7,
       "max_holding_days": 6,
       "days_remaining": -1,
@@ -11862,6 +12254,7 @@
       "intraday_pl": 0.0,
       "intraday_pl_pct": 0.0,
       "entry_date": "2026-07-20",
+      "renamed_from": null,
       "holding_days": 7,
       "max_holding_days": 6,
       "days_remaining": -1,
@@ -11888,6 +12281,7 @@
       "intraday_pl": 26.66,
       "intraday_pl_pct": 0.801,
       "entry_date": "2026-07-20",
+      "renamed_from": null,
       "holding_days": 7,
       "max_holding_days": 2,
       "days_remaining": -5,
@@ -11914,6 +12308,7 @@
       "intraday_pl": 0.0,
       "intraday_pl_pct": 0.0,
       "entry_date": "2026-07-20",
+      "renamed_from": null,
       "holding_days": 7,
       "max_holding_days": 2,
       "days_remaining": -5,
@@ -11940,6 +12335,7 @@
       "intraday_pl": 0.0,
       "intraday_pl_pct": 0.0,
       "entry_date": "2026-07-20",
+      "renamed_from": null,
       "holding_days": 7,
       "max_holding_days": 2,
       "days_remaining": -5,
@@ -11966,6 +12362,7 @@
       "intraday_pl": 0.0,
       "intraday_pl_pct": 0.0,
       "entry_date": "2026-07-20",
+      "renamed_from": null,
       "holding_days": 7,
       "max_holding_days": 2,
       "days_remaining": -5,
@@ -11992,6 +12389,7 @@
       "intraday_pl": 0.0,
       "intraday_pl_pct": 0.0,
       "entry_date": "2026-07-13",
+      "renamed_from": null,
       "holding_days": 14,
       "max_holding_days": 0,
       "days_remaining": null,
@@ -12018,6 +12416,7 @@
       "intraday_pl": 1.91,
       "intraday_pl_pct": 0.1,
       "entry_date": "2026-07-13",
+      "renamed_from": null,
       "holding_days": 14,
       "max_holding_days": 0,
       "days_remaining": null,
@@ -12044,6 +12443,7 @@
       "intraday_pl": 0.0,
       "intraday_pl_pct": 0.0,
       "entry_date": "2026-07-13",
+      "renamed_from": null,
       "holding_days": 14,
       "max_holding_days": 0,
       "days_remaining": null,
@@ -12070,6 +12470,7 @@
       "intraday_pl": 0.0,
       "intraday_pl_pct": 0.0,
       "entry_date": "2026-07-20",
+      "renamed_from": null,
       "holding_days": 7,
       "max_holding_days": 0,
       "days_remaining": null,
@@ -12096,6 +12497,7 @@
       "intraday_pl": 0.0,
       "intraday_pl_pct": 0.0,
       "entry_date": "2026-07-13",
+      "renamed_from": null,
       "holding_days": 14,
       "max_holding_days": 0,
       "days_remaining": null,
@@ -12122,6 +12524,7 @@
       "intraday_pl": 0.0,
       "intraday_pl_pct": 0.0,
       "entry_date": "2026-07-20",
+      "renamed_from": null,
       "holding_days": 7,
       "max_holding_days": 0,
       "days_remaining": null,
@@ -12148,6 +12551,7 @@
       "intraday_pl": 16.13,
       "intraday_pl_pct": 1.613,
       "entry_date": "2026-07-13",
+      "renamed_from": null,
       "holding_days": 14,
       "max_holding_days": 0,
       "days_remaining": null,
@@ -12157,32 +12561,6 @@
       "stop_price_est": 35.31,
       "target_price_est": null,
       "distance_to_stop_pct": -43.952,
-      "distance_to_target_pct": null
-    },
-    {
-      "symbol": "MF",
-      "system": "unknown",
-      "side": "long",
-      "qty": 100.0,
-      "avg_entry_price": 4.7,
-      "current_price": 5.45,
-      "lastday_price": 5.23,
-      "market_value": 545.0,
-      "cost_basis": 470.0,
-      "unrealized_pl": 75.0,
-      "unrealized_pl_pct": 15.957,
-      "intraday_pl": 22.0,
-      "intraday_pl_pct": 4.207,
-      "entry_date": null,
-      "holding_days": null,
-      "max_holding_days": 0,
-      "days_remaining": null,
-      "exit_date": null,
-      "exit_type": "unknown",
-      "exit_expected": null,
-      "stop_price_est": null,
-      "target_price_est": null,
-      "distance_to_stop_pct": null,
       "distance_to_target_pct": null
     },
     {
@@ -12200,6 +12578,7 @@
       "intraday_pl": 6.98,
       "intraday_pl_pct": 0.744,
       "entry_date": "2026-07-13",
+      "renamed_from": null,
       "holding_days": 14,
       "max_holding_days": 0,
       "days_remaining": null,
@@ -12226,6 +12605,7 @@
       "intraday_pl": -0.47,
       "intraday_pl_pct": -0.088,
       "entry_date": "2026-07-13",
+      "renamed_from": null,
       "holding_days": 14,
       "max_holding_days": 0,
       "days_remaining": null,
@@ -12243,15 +12623,16 @@
       "side": "long",
       "qty": 33.153612,
       "avg_entry_price": 59.11,
-      "current_price": 60.96,
+      "current_price": 61.01,
       "lastday_price": 60.96,
-      "market_value": 2021.04,
+      "market_value": 2022.7,
       "cost_basis": 1959.71,
-      "unrealized_pl": 61.33,
-      "unrealized_pl_pct": 3.13,
-      "intraday_pl": 0.0,
-      "intraday_pl_pct": 0.0,
+      "unrealized_pl": 62.99,
+      "unrealized_pl_pct": 3.214,
+      "intraday_pl": 1.66,
+      "intraday_pl_pct": 0.082,
       "entry_date": "2026-07-14",
+      "renamed_from": null,
       "holding_days": 13,
       "max_holding_days": 0,
       "days_remaining": null,
@@ -12260,7 +12641,7 @@
       "exit_expected": null,
       "stop_price_est": 56.995,
       "target_price_est": null,
-      "distance_to_stop_pct": -6.504,
+      "distance_to_stop_pct": -6.581,
       "distance_to_target_pct": null
     },
     {
@@ -12278,6 +12659,7 @@
       "intraday_pl": -3.7,
       "intraday_pl_pct": -0.434,
       "entry_date": "2026-07-15",
+      "renamed_from": null,
       "holding_days": 12,
       "max_holding_days": 0,
       "days_remaining": null,
@@ -12304,6 +12686,7 @@
       "intraday_pl": -6.79,
       "intraday_pl_pct": -0.576,
       "entry_date": "2026-07-13",
+      "renamed_from": null,
       "holding_days": 14,
       "max_holding_days": 0,
       "days_remaining": null,
@@ -12330,6 +12713,7 @@
       "intraday_pl": 0.0,
       "intraday_pl_pct": 0.0,
       "entry_date": "2026-07-20",
+      "renamed_from": null,
       "holding_days": 7,
       "max_holding_days": 0,
       "days_remaining": null,
@@ -12356,6 +12740,7 @@
       "intraday_pl": 0.0,
       "intraday_pl_pct": 0.0,
       "entry_date": "2026-07-14",
+      "renamed_from": null,
       "holding_days": 13,
       "max_holding_days": 0,
       "days_remaining": null,
@@ -12365,32 +12750,6 @@
       "stop_price_est": 570.154,
       "target_price_est": null,
       "distance_to_stop_pct": -9.234,
-      "distance_to_target_pct": null
-    },
-    {
-      "symbol": "SPCX",
-      "system": "system1",
-      "side": "long",
-      "qty": 1.62406,
-      "avg_entry_price": 140.666,
-      "current_price": 113.73,
-      "lastday_price": 115.07,
-      "market_value": 184.7,
-      "cost_basis": 228.45,
-      "unrealized_pl": -43.75,
-      "unrealized_pl_pct": -19.149,
-      "intraday_pl": -2.18,
-      "intraday_pl_pct": -1.165,
-      "entry_date": "2026-07-13",
-      "holding_days": 14,
-      "max_holding_days": 0,
-      "days_remaining": null,
-      "exit_date": null,
-      "exit_type": "trailing",
-      "exit_expected": null,
-      "stop_price_est": 94.916,
-      "target_price_est": null,
-      "distance_to_stop_pct": -16.543,
       "distance_to_target_pct": null
     },
     {
@@ -12408,6 +12767,7 @@
       "intraday_pl": 0.0,
       "intraday_pl_pct": 0.0,
       "entry_date": "2026-07-13",
+      "renamed_from": null,
       "holding_days": 14,
       "max_holding_days": 0,
       "days_remaining": null,
@@ -12420,20 +12780,48 @@
       "distance_to_target_pct": null
     },
     {
+      "symbol": "SPCX",
+      "system": "system1",
+      "side": "long",
+      "qty": 1.62406,
+      "avg_entry_price": 140.666,
+      "current_price": 114.36,
+      "lastday_price": 115.07,
+      "market_value": 185.73,
+      "cost_basis": 228.45,
+      "unrealized_pl": -42.72,
+      "unrealized_pl_pct": -18.701,
+      "intraday_pl": -1.15,
+      "intraday_pl_pct": -0.617,
+      "entry_date": "2026-07-13",
+      "renamed_from": null,
+      "holding_days": 14,
+      "max_holding_days": 0,
+      "days_remaining": null,
+      "exit_date": null,
+      "exit_type": "trailing",
+      "exit_expected": null,
+      "stop_price_est": 94.916,
+      "target_price_est": null,
+      "distance_to_stop_pct": -17.002,
+      "distance_to_target_pct": null
+    },
+    {
       "symbol": "C",
       "system": "system4",
       "side": "long",
       "qty": 11.551615,
       "avg_entry_price": 129.71,
-      "current_price": 133.24,
+      "current_price": 133.4,
       "lastday_price": 132.19,
-      "market_value": 1539.14,
+      "market_value": 1540.99,
       "cost_basis": 1498.36,
-      "unrealized_pl": 40.78,
-      "unrealized_pl_pct": 2.721,
-      "intraday_pl": 12.13,
-      "intraday_pl_pct": 0.794,
+      "unrealized_pl": 42.63,
+      "unrealized_pl_pct": 2.845,
+      "intraday_pl": 13.98,
+      "intraday_pl_pct": 0.915,
       "entry_date": "2026-07-20",
+      "renamed_from": null,
       "holding_days": 7,
       "max_holding_days": 0,
       "days_remaining": null,
@@ -12442,33 +12830,7 @@
       "exit_expected": null,
       "stop_price_est": 124.1,
       "target_price_est": null,
-      "distance_to_stop_pct": -6.86,
-      "distance_to_target_pct": null
-    },
-    {
-      "symbol": "TEVA",
-      "system": "system4",
-      "side": "long",
-      "qty": 41.480552,
-      "avg_entry_price": 31.88,
-      "current_price": 30.9052,
-      "lastday_price": 30.81,
-      "market_value": 1281.96,
-      "cost_basis": 1322.4,
-      "unrealized_pl": -40.44,
-      "unrealized_pl_pct": -3.058,
-      "intraday_pl": 3.95,
-      "intraday_pl_pct": 0.309,
-      "entry_date": "2026-07-14",
-      "holding_days": 13,
-      "max_holding_days": 0,
-      "days_remaining": null,
-      "exit_date": null,
-      "exit_type": "trailing",
-      "exit_expected": null,
-      "stop_price_est": 30.155,
-      "target_price_est": null,
-      "distance_to_stop_pct": -2.427,
+      "distance_to_stop_pct": -6.972,
       "distance_to_target_pct": null
     },
     {
@@ -12486,6 +12848,7 @@
       "intraday_pl": 14.81,
       "intraday_pl_pct": 1.087,
       "entry_date": "2026-07-14",
+      "renamed_from": null,
       "holding_days": 13,
       "max_holding_days": 0,
       "days_remaining": null,
@@ -12512,6 +12875,7 @@
       "intraday_pl": 0.0,
       "intraday_pl_pct": 0.0,
       "entry_date": null,
+      "renamed_from": null,
       "holding_days": null,
       "max_holding_days": 0,
       "days_remaining": null,
@@ -12521,32 +12885,6 @@
       "stop_price_est": null,
       "target_price_est": null,
       "distance_to_stop_pct": null,
-      "distance_to_target_pct": null
-    },
-    {
-      "symbol": "LUV",
-      "system": "system4",
-      "side": "long",
-      "qty": 19.090814,
-      "avg_entry_price": 47.57,
-      "current_price": 45.85,
-      "lastday_price": 45.08,
-      "market_value": 875.31,
-      "cost_basis": 908.15,
-      "unrealized_pl": -32.84,
-      "unrealized_pl_pct": -3.616,
-      "intraday_pl": 14.7,
-      "intraday_pl_pct": 1.708,
-      "entry_date": "2026-07-14",
-      "holding_days": 13,
-      "max_holding_days": 0,
-      "days_remaining": null,
-      "exit_date": null,
-      "exit_type": "trailing",
-      "exit_expected": null,
-      "stop_price_est": 44.975,
-      "target_price_est": null,
-      "distance_to_stop_pct": -1.908,
       "distance_to_target_pct": null
     },
     {
@@ -12564,6 +12902,7 @@
       "intraday_pl": 0.0,
       "intraday_pl_pct": 0.0,
       "entry_date": "2026-07-20",
+      "renamed_from": null,
       "holding_days": 7,
       "max_holding_days": 0,
       "days_remaining": null,
@@ -12590,6 +12929,7 @@
       "intraday_pl": 13.39,
       "intraday_pl_pct": 1.261,
       "entry_date": "2026-07-13",
+      "renamed_from": null,
       "holding_days": 14,
       "max_holding_days": 0,
       "days_remaining": null,
@@ -12599,6 +12939,33 @@
       "stop_price_est": 94.55,
       "target_price_est": null,
       "distance_to_stop_pct": -7.286,
+      "distance_to_target_pct": null
+    },
+    {
+      "symbol": "TEVA",
+      "system": "system4",
+      "side": "long",
+      "qty": 41.480552,
+      "avg_entry_price": 31.88,
+      "current_price": 31.2,
+      "lastday_price": 30.81,
+      "market_value": 1294.19,
+      "cost_basis": 1322.4,
+      "unrealized_pl": -28.21,
+      "unrealized_pl_pct": -2.133,
+      "intraday_pl": 16.18,
+      "intraday_pl_pct": 1.266,
+      "entry_date": "2026-07-14",
+      "renamed_from": null,
+      "holding_days": 13,
+      "max_holding_days": 0,
+      "days_remaining": null,
+      "exit_date": null,
+      "exit_type": "trailing",
+      "exit_expected": null,
+      "stop_price_est": 30.155,
+      "target_price_est": null,
+      "distance_to_stop_pct": -3.349,
       "distance_to_target_pct": null
     },
     {
@@ -12616,6 +12983,7 @@
       "intraday_pl": 0.0,
       "intraday_pl_pct": 0.0,
       "entry_date": "2026-07-13",
+      "renamed_from": null,
       "holding_days": 14,
       "max_holding_days": 0,
       "days_remaining": null,
@@ -12625,6 +12993,33 @@
       "stop_price_est": 210.27,
       "target_price_est": null,
       "distance_to_stop_pct": -7.264,
+      "distance_to_target_pct": null
+    },
+    {
+      "symbol": "RIO",
+      "system": "system4",
+      "side": "long",
+      "qty": 14.945836,
+      "avg_entry_price": 90.6487,
+      "current_price": 92.34,
+      "lastday_price": 91.22,
+      "market_value": 1380.1,
+      "cost_basis": 1354.820002,
+      "unrealized_pl": 25.28,
+      "unrealized_pl_pct": 1.866,
+      "intraday_pl": 16.74,
+      "intraday_pl_pct": 1.228,
+      "entry_date": "2026-07-13",
+      "renamed_from": null,
+      "holding_days": 14,
+      "max_holding_days": 0,
+      "days_remaining": null,
+      "exit_date": null,
+      "exit_type": "trailing",
+      "exit_expected": null,
+      "stop_price_est": 87.0187,
+      "target_price_est": null,
+      "distance_to_stop_pct": -5.763,
       "distance_to_target_pct": null
     },
     {
@@ -12642,6 +13037,7 @@
       "intraday_pl": 0.0,
       "intraday_pl_pct": 0.0,
       "entry_date": "2026-07-20",
+      "renamed_from": null,
       "holding_days": 7,
       "max_holding_days": 0,
       "days_remaining": null,
@@ -12668,6 +13064,7 @@
       "intraday_pl": -6.01,
       "intraday_pl_pct": -0.404,
       "entry_date": "2026-07-20",
+      "renamed_from": null,
       "holding_days": 7,
       "max_holding_days": 0,
       "days_remaining": null,
@@ -12694,6 +13091,7 @@
       "intraday_pl": 0.0,
       "intraday_pl_pct": 0.0,
       "entry_date": "2026-07-14",
+      "renamed_from": null,
       "holding_days": 13,
       "max_holding_days": 0,
       "days_remaining": null,
@@ -12720,6 +13118,7 @@
       "intraday_pl": 0.0,
       "intraday_pl_pct": 0.0,
       "entry_date": "2026-07-13",
+      "renamed_from": null,
       "holding_days": 14,
       "max_holding_days": 0,
       "days_remaining": null,
@@ -12729,6 +13128,33 @@
       "stop_price_est": 525.229,
       "target_price_est": null,
       "distance_to_stop_pct": -2.938,
+      "distance_to_target_pct": null
+    },
+    {
+      "symbol": "LUV",
+      "system": "system4",
+      "side": "long",
+      "qty": 19.090814,
+      "avg_entry_price": 47.57,
+      "current_price": 46.66,
+      "lastday_price": 45.08,
+      "market_value": 890.78,
+      "cost_basis": 908.15,
+      "unrealized_pl": -17.37,
+      "unrealized_pl_pct": -1.913,
+      "intraday_pl": 30.16,
+      "intraday_pl_pct": 3.505,
+      "entry_date": "2026-07-14",
+      "renamed_from": null,
+      "holding_days": 13,
+      "max_holding_days": 0,
+      "days_remaining": null,
+      "exit_date": null,
+      "exit_type": "trailing",
+      "exit_expected": null,
+      "stop_price_est": 44.975,
+      "target_price_est": null,
+      "distance_to_stop_pct": -3.611,
       "distance_to_target_pct": null
     },
     {
@@ -12746,6 +13172,7 @@
       "intraday_pl": 0.0,
       "intraday_pl_pct": 0.0,
       "entry_date": "2026-07-13",
+      "renamed_from": null,
       "holding_days": 14,
       "max_holding_days": 0,
       "days_remaining": null,
@@ -12772,6 +13199,7 @@
       "intraday_pl": 0.0,
       "intraday_pl_pct": 0.0,
       "entry_date": "2026-07-20",
+      "renamed_from": null,
       "holding_days": 7,
       "max_holding_days": 0,
       "days_remaining": null,
@@ -12798,6 +13226,7 @@
       "intraday_pl": 0.0,
       "intraday_pl_pct": 0.0,
       "entry_date": "2026-07-14",
+      "renamed_from": null,
       "holding_days": 13,
       "max_holding_days": 0,
       "days_remaining": null,
@@ -12807,32 +13236,6 @@
       "stop_price_est": 310.485,
       "target_price_est": null,
       "distance_to_stop_pct": -4.457,
-      "distance_to_target_pct": null
-    },
-    {
-      "symbol": "RIO",
-      "system": "system4",
-      "side": "long",
-      "qty": 14.945836,
-      "avg_entry_price": 90.6487,
-      "current_price": 91.22,
-      "lastday_price": 91.22,
-      "market_value": 1363.36,
-      "cost_basis": 1354.820002,
-      "unrealized_pl": 8.54,
-      "unrealized_pl_pct": 0.63,
-      "intraday_pl": 0.0,
-      "intraday_pl_pct": 0.0,
-      "entry_date": "2026-07-13",
-      "holding_days": 14,
-      "max_holding_days": 0,
-      "days_remaining": null,
-      "exit_date": null,
-      "exit_type": "trailing",
-      "exit_expected": null,
-      "stop_price_est": 87.0187,
-      "target_price_est": null,
-      "distance_to_stop_pct": -4.606,
       "distance_to_target_pct": null
     },
     {
@@ -12850,6 +13253,7 @@
       "intraday_pl": 0.0,
       "intraday_pl_pct": 0.0,
       "entry_date": "2026-07-20",
+      "renamed_from": null,
       "holding_days": 7,
       "max_holding_days": 0,
       "days_remaining": null,
@@ -12876,6 +13280,7 @@
       "intraday_pl": -3.9,
       "intraday_pl_pct": -0.294,
       "entry_date": "2026-07-20",
+      "renamed_from": null,
       "holding_days": 7,
       "max_holding_days": 0,
       "days_remaining": null,
@@ -12902,6 +13307,7 @@
       "intraday_pl": 0.0,
       "intraday_pl_pct": 0.0,
       "entry_date": "2026-07-20",
+      "renamed_from": null,
       "holding_days": 7,
       "max_holding_days": 0,
       "days_remaining": null,
@@ -12928,6 +13334,7 @@
       "intraday_pl": 11.32,
       "intraday_pl_pct": 1.018,
       "entry_date": "2026-07-14",
+      "renamed_from": null,
       "holding_days": 13,
       "max_holding_days": 0,
       "days_remaining": null,
@@ -12954,6 +13361,7 @@
       "intraday_pl": 0.0,
       "intraday_pl_pct": 0.0,
       "entry_date": "2026-07-13",
+      "renamed_from": null,
       "holding_days": 14,
       "max_holding_days": 0,
       "days_remaining": null,
@@ -12980,6 +13388,7 @@
       "intraday_pl": 0.0,
       "intraday_pl_pct": 0.0,
       "entry_date": null,
+      "renamed_from": null,
       "holding_days": null,
       "max_holding_days": 0,
       "days_remaining": null,
@@ -13006,6 +13415,7 @@
       "intraday_pl": 1.0,
       "intraday_pl_pct": 0.132,
       "entry_date": "2026-07-14",
+      "renamed_from": null,
       "holding_days": 13,
       "max_holding_days": 0,
       "days_remaining": null,
@@ -13032,6 +13442,7 @@
       "intraday_pl": 0.0,
       "intraday_pl_pct": 0.0,
       "entry_date": "2026-07-14",
+      "renamed_from": null,
       "holding_days": 13,
       "max_holding_days": 0,
       "days_remaining": null,
