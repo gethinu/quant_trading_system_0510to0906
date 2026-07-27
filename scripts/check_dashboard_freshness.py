@@ -39,6 +39,7 @@ Exit codes
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -49,6 +50,19 @@ _SIGNAL_RE = re.compile(r"today_signals_(\d{8})\.json$")
 
 # repo layout: <root>/scripts/check_dashboard_freshness.py
 _REPO_ROOT_DEFAULT = Path(__file__).resolve().parents[1]
+
+# ``python scripts/check_dashboard_freshness.py`` puts *scripts/* on sys.path[0],
+# NOT the repo root, and cwd is not on sys.path for file-invoked scripts. Without
+# this insert ``from common.publishers.ntfy import ...`` raises
+# ``ModuleNotFoundError: No module named 'common'`` whenever the launcher runs us
+# from any cwd -- which silently killed 4 consecutive stale alerts (2026-07-23..26).
+# Anchor on __file__ so the import is cwd-independent by construction.
+if str(_REPO_ROOT_DEFAULT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT_DEFAULT))
+
+# Failed sends are queued here and retried on the next invocation so a transient
+# (or systemic) ntfy outage degrades into a late alert, never a silent one.
+_PENDING_NAME = "ntfy_pending_dashboard_freshness.json"
 
 
 def newest_signal_date(directory: Path) -> int | None:
@@ -123,8 +137,56 @@ def check_freshness(results_dir: Path, data_dir: Path) -> dict:
     }
 
 
-def _notify_stale(result: dict) -> None:
-    """Fire a single ntfy WARN when a publish gap is detected."""
+def _pending_path(root: Path) -> Path:
+    return root / "logs" / _PENDING_NAME
+
+
+def _load_pending(root: Path) -> list[dict]:
+    try:
+        raw = json.loads(_pending_path(root).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return [x for x in raw if isinstance(x, dict)] if isinstance(raw, list) else []
+
+
+def _save_pending(root: Path, items: list[dict]) -> None:
+    path = _pending_path(root)
+    try:
+        if not items:
+            path.unlink(missing_ok=True)
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    except OSError as exc:
+        print(f"[ntfy] pending キューの永続化に失敗 (次回持ち越し不可): {exc}")
+
+
+def _send_one(item: dict) -> tuple[bool, str]:
+    """Attempt one ntfy send. Returns (ok, detail). Never raises."""
+    try:
+        from common.publishers.ntfy import NtfyPublisher
+
+        pub = NtfyPublisher()
+        if not pub.is_configured():
+            return False, "NTFY_TOPIC 未設定"
+        res = pub.send_text(
+            item["title"], item["body"], tags="rotating_light,warning", priority=5
+        )
+        ok = bool(getattr(res, "ok", False))
+        return ok, f"ok={ok}"
+    except Exception as exc:  # noqa: BLE001
+        return False, f"{type(exc).__name__}: {exc}"
+
+
+def _notify_stale(result: dict, root: Path, now: str) -> None:
+    """Fire an ntfy WARN for this gap, flushing any carried-over failures first.
+
+    A send failure is NOT swallowed: the alert is queued to ``logs/`` and retried
+    on every later invocation (including "fresh" ones) until it lands, so a broken
+    notifier degrades into a late alert instead of a silent one.
+    """
     title = (
         f"Dashboard STALE: served {result['data_date_str']} < "
         f"generated {result['results_date_str']}"
@@ -138,17 +200,44 @@ def _notify_stale(result: dict) -> None:
         f"@ {result.get('data_generated_at') or '?'}\n"
         "self-heal: publish_data_to_vercel.ps1 -AutoLatest"
     )
-    try:
-        from common.publishers.ntfy import NtfyPublisher
+    _flush_pending(root, now, extra={"title": title, "body": body, "queued_at": now})
 
-        pub = NtfyPublisher()
-        if not pub.is_configured():
-            print("[ntfy] NTFY_TOPIC 未設定のため送信スキップ")
-            return
-        res = pub.send_text(title, body, tags="rotating_light,warning", priority=5)
-        print(f"[ntfy] 送信 ok={getattr(res, 'ok', '?')}")
-    except Exception as exc:  # noqa: BLE001
-        print(f"[ntfy] 送信失敗: {exc}")
+
+def _flush_pending(root: Path, now: str, extra: dict | None = None) -> None:
+    """Retry every queued alert (plus ``extra``); keep whatever still fails."""
+    queue = _load_pending(root)
+    if extra is not None:
+        # Collapse duplicates: the same gap re-detected daily is one alert.
+        if not any(x.get("title") == extra["title"] for x in queue):
+            queue.append(extra)
+    if not queue:
+        return
+
+    carried = [x for x in queue if x.get("queued_at") != now]
+    if carried:
+        print(f"[ntfy] 前回までの未送信 {len(carried)} 件を再送します (持ち越し)")
+
+    still: list[dict] = []
+    for item in queue:
+        ok, detail = _send_one(item)
+        age = item.get("queued_at", "?")
+        if ok:
+            print(f"[ntfy] 送信 ok=True (queued_at={age})")
+            continue
+        item["attempts"] = int(item.get("attempts", 0)) + 1
+        item["last_error"] = detail
+        item["last_attempt_at"] = now
+        still.append(item)
+        print(
+            f"[ntfy] 送信失敗 ({detail}) -> 次回に持ち越し "
+            f"[queued_at={age} attempts={item['attempts']}]"
+        )
+    _save_pending(root, still)
+    if still:
+        print(
+            f"[ntfy][PENDING] 未送信 {len(still)} 件が "
+            f"{_pending_path(root)} に残っています"
+        )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -200,6 +289,8 @@ def main(argv: list[str] | None = None) -> int:
             f"served={result['data_date_str']}"
         )
 
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
     if result["status"] == "stale":
         print(
             "[dashboard_freshness] STALE: dashboard publish was missed "
@@ -208,9 +299,13 @@ def main(argv: list[str] | None = None) -> int:
             "Run publish_data_to_vercel.ps1 -AutoLatest to self-heal."
         )
         if args.notify:
-            _notify_stale(result)
+            _notify_stale(result, root, now)
         return 2
 
+    # Fresh now, but an earlier alert may never have landed. Retry it here so a
+    # missed warning still reaches the phone once ntfy recovers.
+    if args.notify:
+        _flush_pending(root, now)
     return 0
 
 
