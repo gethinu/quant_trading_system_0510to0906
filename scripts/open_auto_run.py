@@ -29,6 +29,19 @@
     実行できる。よって薄シグナルは entry 専用ゲートに降格した。
     切り戻しは --thin-aborts-run / env OPEN_RUN_THIN_ABORTS_RUN=1。
 
+    判定基準の修正 (2026-07-27):
+    ゲートの本来の目的は「データがまだ来ていない状態で発注しない」こと
+    (design_open_auto_run_20260708.md L15: 06:00 は Polygon 403 / EODHD 401 で
+    今日 1 件しか出ない)。しかし判定に使っていたのは ``systems[*].signals`` =
+    **portfolio cap 適用後**の本数で、これは
+    ``allow_total = max_total_positions(70) - held_total`` で上から抑えられた残枠。
+    結果、建玉が 61 まで積み上がると残枠 9 < 閾値 10 が固定化し、
+    2026-07-22..27 の 5 営業日連続で entry が SKIP された
+    (候補数は 44-48 件で健全なまま = データ欠測ではない)。しかも entry が止まると
+    建玉が減らないので残枠も戻らず、cap の最後の 9 枠が構造的に使えない。
+    よって判定を **cap 前の候補数** (funnel.candidate_count 合計) に戻した。
+    データ欠測時は候補数自体が 0-2 件になるため、本来の保護は維持される。
+
 一回限りランナーが踏んだ 2 バグを恒久修正:
     - subprocess の cp932 UnicodeDecodeError -> encoding="utf-8", errors="replace" +
       子プロセスへ PYTHONUTF8=1 / PYTHONIOENCODING=utf-8 を伝播。
@@ -184,6 +197,50 @@ class Runner:
         self.record["signals_json_date"] = (data or {}).get("date")
         return total
 
+    def _count_candidates(self) -> int | None:
+        """portfolio cap 適用**前**の候補数 (= シグナル生成の健全性) を返す。
+
+        薄シグナルゲートの本来の目的は「データがまだ来ていない状態で発注しない」こと
+        (`logs/design_open_auto_run_20260708.md` L15: 06:00 は Polygon 403 / EODHD 401
+        で今日 1 件しか出ない)。ところが判定に使っていた `_count_signals()` は
+        ``systems[*].signals`` = **portfolio cap 適用後**の本数で、
+        `core/final_allocation.py::_apply_portfolio_caps` が
+        ``allow_total = max_total_positions - held_total`` で上から抑えた残数でしかない。
+
+        そのため建玉が積み上がると「データは健全なのに本数が閾値未満」になり、
+        entry が毎日止まる (2026-07-22..27 の実測: 候補 44-48 件は健全なまま、
+        cap 後だけが 39 -> 8/9 に落ちて `thin_signals:9<10` で 5 営業日連続 SKIP)。
+
+        判定を cap 前の候補数に戻すことで、本来の意図 (データ欠測の検出) を保ったまま
+        cap 由来の誤発火だけを消す。``funnel.candidate_count`` が無い旧 JSON では
+        ``n_candidates_input`` にフォールバックし、どちらも無ければ None を返して
+        呼び出し側が従来どおり cap 後の本数で判定する (後方互換)。
+        """
+        if not self.signals_json.exists():
+            return None
+        try:
+            data = json.loads(self.signals_json.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+        systems = ((data or {}).get("systems") or {}).values()
+        total = 0
+        seen = False
+        for blk in systems:
+            if not isinstance(blk, dict):
+                continue
+            funnel = blk.get("funnel")
+            raw = funnel.get("candidate_count") if isinstance(funnel, dict) else None
+            if raw is None:
+                raw = blk.get("n_candidates_input")
+            if raw is None:
+                continue
+            try:
+                total += int(raw)
+            except (TypeError, ValueError):
+                continue
+            seen = True
+        return total if seen else None
+
     # -- stages ------------------------------------------------------------
     def gate(self) -> bool:
         # paper 断言 (最優先。live なら即 abort)
@@ -233,16 +290,37 @@ class Runner:
             if code != 0:
                 self.log(f"[signals] WARN exit={code} (JSON があれば継続)")
 
-        n = self._count_signals()
-        self.record["signal_count"] = n
+        n_out = (
+            self._count_signals()
+        )  # portfolio cap 適用**後** = 実際に submit する本数
+        self.record["signal_count"] = n_out
+        # 薄シグナル判定は **cap 前の候補数** (データ健全性) で行う。cap 後の本数は
+        # portfolio cap の残枠 (max_total_positions - held_total) に上から抑えられる
+        # ため、建玉が積み上がると健全なデータでも閾値未満になり entry が恒久停止する。
+        n_raw = self._count_candidates()
+        self.record["candidate_count"] = n_raw
+        n = n_out if n_raw is None else n_raw
+        gate_basis = "signals(post-cap)" if n_raw is None else "candidates(pre-cap)"
+        self.record["thin_gate_basis"] = gate_basis
         self.log(
-            f"[gate] signal_count={n} (threshold={self.args.min_signals}) "
+            f"[gate] signal_count={n_out} candidate_count={n_raw} "
+            f"-> 判定={n} basis={gate_basis} (threshold={self.args.min_signals}) "
             f"signals_date={self.record.get('signals_json_date')}"
         )
         thin = n < self.args.min_signals
         self.entry_allowed = not thin
         self.record["entry_allowed"] = self.entry_allowed
         if not thin:
+            # データは健全だが cap 適用後に 1 件も残らなかった場合、submit しても no-op。
+            # 「entry を通したのに 0 件」を黙って通さず、明示的に SKIP として記録する。
+            if n_out == 0:
+                self.entry_allowed = False
+                self.record["entry_allowed"] = False
+                self.record["entry_skip_reason"] = "no_submittable_signals_after_caps"
+                self.log(
+                    "[gate] 候補は健全 (>= 閾値) だが portfolio cap 適用後に 0 件 -> "
+                    "entry SKIP (submit するものが無い)。exit は継続する"
+                )
             return True
 
         # 薄シグナルは **entry 専用ゲート**。手仕舞い (exit) を新規シグナルの本数で
