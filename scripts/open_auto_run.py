@@ -3,8 +3,9 @@
 `logs/design_open_auto_run_20260708.md` の設計を恒久実装したもの。今日の一回限り
 `C:\\tmp\\open_run_20260708.py` (削除済) を汎用化し、以下を段で行う:
 
-    1. [gate]    paper env 断言 + market-open (Alpaca clock) + データ鮮度 +
-                 シグナル数 < 閾値 なら **ABORT** (薄データで自動発注しない)。
+    1. [gate]    paper env 断言 + market-open (Alpaca clock)。ここで落ちたら run 全体 ABORT。
+                 シグナル数 < 閾値 は **entry 専用ゲート** で、exit は必ず通す
+                 (薄データで新規建てはしないが、手仕舞いは止めない)。
     2. [signals] apps/app_today_signals.py --headless --date <d> で当日シグナル生成。
     3. [exit]    scripts/paper_exit_check.py --confirm --yes で計画/protective exit を先に発注。
     4. [wait]    market close (order_type=market) の fill をポーリング → post-exit を確定。
@@ -18,8 +19,15 @@
 
 安全ガード:
     - paper 固定 (assert_paper_env)。live/実マネーは一切扱わない。
-    - market-open gate + 薄シグナル ABORT + 冪等ロック (DONE.lock)。
+    - market-open gate + 薄シグナル entry SKIP + 冪等ロック (DONE.lock)。
     - exit fill 確認後にのみ entry (exit->entry 順の強制)。
+
+薄シグナルゲートについて (2026-07-27 修正):
+    かつては薄シグナルで run 全体を ABORT していたため、2026-07-21..24 の 4 営業日で
+    exit_stage() に到達せず時間 exit が停止し 20 建玉が期限超過した。exit は保有
+    ポジションのみに依存し today_signals JSON を参照しないため、薄シグナルでも安全に
+    実行できる。よって薄シグナルは entry 専用ゲートに降格した。
+    切り戻しは --thin-aborts-run / env OPEN_RUN_THIN_ABORTS_RUN=1。
 
 一回限りランナーが踏んだ 2 バグを恒久修正:
     - subprocess の cp932 UnicodeDecodeError -> encoding="utf-8", errors="replace" +
@@ -63,12 +71,22 @@ def _child_env() -> dict[str, str]:
     return env
 
 
+def _env_flag(name: str, default: bool = False) -> bool:
+    """env の truthy 判定 (未設定なら default)。切り戻しスイッチ用。"""
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
 class Runner:
     def __init__(self, args: argparse.Namespace) -> None:
         self.args = args
         self.date = args.date or datetime.now().strftime("%Y-%m-%d")
         self.compact = self.date.replace("-", "")
         self.dry_run = bool(args.dry_run)
+        # 薄シグナルは entry のみを止める。exit は必ず通す (下記 signals() 参照)。
+        self.entry_allowed = True
         self.out = ROOT / "logs" / f"open_run_{self.compact}"
         self.out.mkdir(parents=True, exist_ok=True)
         self.results = ROOT / "results_csv"
@@ -221,17 +239,41 @@ class Runner:
             f"[gate] signal_count={n} (threshold={self.args.min_signals}) "
             f"signals_date={self.record.get('signals_json_date')}"
         )
-        if n < self.args.min_signals:
+        thin = n < self.args.min_signals
+        self.entry_allowed = not thin
+        self.record["entry_allowed"] = self.entry_allowed
+        if not thin:
+            return True
+
+        # 薄シグナルは **entry 専用ゲート**。手仕舞い (exit) を新規シグナルの本数で
+        # 止めるのは設計ミスで、実際 2026-07-21..24 の 4 営業日は本ゲートが run 全体を
+        # ABORT し、時間 exit が停止して 20 建玉が期限超過した。exit は保有ポジション
+        # だけに依存し today_signals JSON を一切参照しないので、薄シグナルでも安全に
+        # 通せる。ここでは entry のみを落とす。
+        reason = f"thin_signals:{n}<{self.args.min_signals}"
+        self.record["entry_skip_reason"] = reason
+        if self.args.thin_aborts_run:
+            # 切り戻しスイッチ (--thin-aborts-run / OPEN_RUN_THIN_ABORTS_RUN=1)。
+            # 旧挙動 = run 全体 ABORT。exit も止まる点に注意。
             self.log(
                 f"[gate] 薄シグナル ({n} < {self.args.min_signals}) -> ABORT "
-                "(06:00 薄データ事故の再発防止)"
+                "(--thin-aborts-run 指定: 旧挙動)"
             )
-            self.record["abort"] = f"thin_signals:{n}<{self.args.min_signals}"
+            self.record["abort"] = reason
             self._ntfy_warn(
                 f"OpenAutoRun ABORT {self.date}",
                 f"signals={n} < 閾値{self.args.min_signals}: 薄データのため自動発注を中止 (paper)。",
             )
             return False
+        self.log(
+            f"[gate] 薄シグナル ({n} < {self.args.min_signals}) -> **entry のみ SKIP**。"
+            "exit は継続する (手仕舞いはシグナル本数に依存しない)"
+        )
+        self._ntfy_warn(
+            f"OpenAutoRun entry SKIP {self.date}",
+            f"signals={n} < 閾値{self.args.min_signals}: 新規 entry を見送り (paper)。"
+            "exit (時間/保護) は通常どおり実行します。",
+        )
         return True
 
     def exit_stage(self) -> list[str]:
@@ -601,6 +643,11 @@ class Runner:
         if aborted:
             lines.append(f"- **ABORTED**: {self.record.get('abort')}")
         else:
+            if not self.entry_allowed:
+                lines.append(
+                    f"- **ENTRY SKIPPED**: {self.record.get('entry_skip_reason')} "
+                    "(exit は実行済み)"
+                )
             lines += [
                 f"- exit_count: {self.record.get('exit_count')}",
                 f"- entry: submitted={self.record.get('entry_submitted')} "
@@ -637,7 +684,15 @@ class Runner:
         eq = self.equity()
         market_ids = self.exit_stage()
         self.wait_exit_fills(market_ids)  # exit->entry 順の担保点
-        self.entry_stage(eq)
+        if self.entry_allowed:
+            self.entry_stage(eq)
+        else:
+            self.log(
+                f"[entry] SKIP: {self.record.get('entry_skip_reason')} "
+                "(exit は実行済み)"
+            )
+            self.record["entry_status"] = "skipped_thin_signals"
+            self.record["entry_submitted"] = 0
         self.record_stage()
         self.publish()  # post-entry snapshot 再生成 + Vercel monitor へ data/ publish
         self.notify(eq)
@@ -653,7 +708,17 @@ def main(argv: list[str] | None = None) -> int:
         "--min-signals",
         type=int,
         default=10,
-        help="この件数未満なら薄データ ABORT (default 10)",
+        help="この件数未満なら **entry のみ** 見送り (exit は継続。default 10)",
+    )
+    p.add_argument(
+        "--thin-aborts-run",
+        action="store_true",
+        default=_env_flag("OPEN_RUN_THIN_ABORTS_RUN", False),
+        help=(
+            "[切り戻し] 薄シグナルで run 全体を ABORT する旧挙動に戻す。"
+            "exit も止まるため時間 exit が滞留する点に注意 "
+            "(env OPEN_RUN_THIN_ABORTS_RUN=1 でも可)。"
+        ),
     )
     p.add_argument(
         "--poll-timeout",
