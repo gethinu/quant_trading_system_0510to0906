@@ -13,58 +13,19 @@ import type {
   RealizedDay,
   SystemExposure,
 } from '@/lib/types';
-
-// --------------------------------------------------------------------------
-// formatters
-// --------------------------------------------------------------------------
-function fmtUsd(v: number | null | undefined, digits = 0): string {
-  if (v == null) return '—';
-  const abs = Math.abs(v);
-  if (abs >= 1_000_000) return `$${(v / 1_000_000).toFixed(2)}M`;
-  if (abs >= 10_000) return `$${(v / 1_000).toFixed(1)}K`;
-  return `$${v.toLocaleString('en-US', { maximumFractionDigits: digits })}`;
-}
-
-function fmtSignedUsd(v: number | null | undefined): string {
-  if (v == null) return '—';
-  const s = v >= 0 ? '+' : '−';
-  return `${s}${fmtUsd(Math.abs(v), 2)}`;
-}
-
-function fmtPct(v: number | null | undefined, digits = 2): string {
-  if (v == null) return '—';
-  const s = v >= 0 ? '+' : '−';
-  return `${s}${Math.abs(v).toFixed(digits)}%`;
-}
-
-function fmtPrice(v: number | null | undefined): string {
-  if (v == null) return '—';
-  return v < 1 ? `$${v.toFixed(4)}` : `$${v.toFixed(2)}`;
-}
-
-function fmtQty(v: number): string {
-  return Number.isInteger(v) ? String(v) : v.toFixed(3);
-}
-
-const pnlText = (v: number | null | undefined) =>
-  v == null ? 'text-muted' : v > 0 ? 'text-ok' : v < 0 ? 'text-fail' : 'text-muted';
-
-// system → accent color (tag chip / allocation bar)
-const SYSTEM_COLOR: Record<string, string> = {
-  system1: '#38bdf8',
-  system2: '#f472b6',
-  system3: '#a78bfa',
-  system4: '#34d399',
-  system5: '#fbbf24',
-  system6: '#fb7185',
-  system7: '#94a3b8',
-  // 上場廃止 (INACTIVE / 非tradable) で API から close 不能なポジション。
-  // muted terracotta で「取引不能・要注意」を示し、system 各色とも被らない。
-  delisted: '#c08457',
-  unknown: '#64748b',
-};
-const sysColor = (s: string) => SYSTEM_COLOR[s] ?? '#64748b';
-const sysShort = (s: string) => (s.startsWith('system') ? 'S' + s.slice(6) : s);
+import { Collapsible } from '@/components/Collapsible';
+import { computeStatus } from '@/lib/status';
+// formatters / system 色は lib/format.ts に集約 (サマリーと詳細で表記を揃えるため)。
+import {
+  fmtPct,
+  fmtPrice,
+  fmtQty,
+  fmtSignedUsd,
+  fmtUsd,
+  pnlText,
+  sysColor,
+  sysShort,
+} from '@/lib/format';
 
 // --------------------------------------------------------------------------
 // KPI hero
@@ -585,9 +546,14 @@ function PositionsTable({ positions }: { positions: AlpacaPosition[] }) {
   const [sideFilter, setSideFilter] = useState<string>('all');
   const [q, setQ] = useState('');
   const [exitOnly, setExitOnly] = useState(false);
+  const [overdueOnly, setOverdueOnly] = useState(false);
 
   const systemsList = useMemo(
     () => Array.from(new Set(positions.map((p) => p.system))).sort(),
+    [positions],
+  );
+  const nOverdue = useMemo(
+    () => positions.filter((p) => p.days_remaining != null && p.days_remaining < 0).length,
     [positions],
   );
 
@@ -595,6 +561,8 @@ function PositionsTable({ positions }: { positions: AlpacaPosition[] }) {
     let out = positions.slice();
     if (sysFilter !== 'all') out = out.filter((p) => p.system === sysFilter);
     if (sideFilter !== 'all') out = out.filter((p) => p.side === sideFilter);
+    if (overdueOnly)
+      out = out.filter((p) => p.days_remaining != null && p.days_remaining < 0);
     if (exitOnly)
       out = out.filter(
         (p) => p.exit_expected != null || (p.days_remaining != null && p.days_remaining <= 2),
@@ -631,7 +599,7 @@ function PositionsTable({ positions }: { positions: AlpacaPosition[] }) {
       return asc ? cmp : -cmp;
     });
     return out;
-  }, [positions, sysFilter, sideFilter, exitOnly, q, sortKey, asc]);
+  }, [positions, sysFilter, sideFilter, overdueOnly, exitOnly, q, sortKey, asc]);
 
   const toggleSort = (k: SortKey) => {
     if (k === sortKey) setAsc((v) => !v);
@@ -693,6 +661,19 @@ function PositionsTable({ positions }: { positions: AlpacaPosition[] }) {
           <option value="long">Long</option>
           <option value="short">Short</option>
         </select>
+        {nOverdue > 0 ? (
+          <button
+            onClick={() => setOverdueOnly((v) => !v)}
+            className={`px-2 py-1 rounded text-xs border tabular-nums ${
+              overdueOnly
+                ? 'bg-fail/25 text-fail border-fail/40'
+                : 'bg-fail/10 text-fail/80 border-fail/20'
+            }`}
+            title="max_hold を過ぎたのに残っている建玉だけを表示"
+          >
+            期限超過 {nOverdue}
+          </button>
+        ) : null}
         <button
           onClick={() => setExitOnly((v) => !v)}
           className={`px-2 py-1 rounded text-xs border ${
@@ -753,6 +734,16 @@ function PositionsTable({ positions }: { positions: AlpacaPosition[] }) {
                         {isLong ? 'L' : 'S'}
                       </span>
                       <span className="font-medium">{p.symbol}</span>
+                      {/* system が旧 ticker 経由でしか引けなかった建玉。
+                          「なぜこの system なのか」を辿れるよう出典を出す。 */}
+                      {p.renamed_from ? (
+                        <span
+                          className="text-[9px] text-muted/60"
+                          title={`ticker rename: ${p.renamed_from} の発注記録から system を解決（手動マップ）`}
+                        >
+                          ={p.renamed_from}
+                        </span>
+                      ) : null}
                     </div>
                   </td>
                   <td className="py-1.5 px-1.5">
@@ -939,6 +930,54 @@ const SOURCE_SHORT: Record<string, string> = {
   order_file: '推定',
   symbol_map: '推定',
 };
+
+/**
+ * ticker rename で統合した決済の開示。
+ *
+ * 統合すると建玉の食い違いが消えて MeasurementBanner が「計測済み」の緑になる。
+ * そこで消えてしまうと「手動マップで繋いだ結果である」ことが画面から失われるので、
+ * complete かどうかに関係なく **常に** 出す。
+ */
+function RenameNote({ realized }: { realized: RealizedBlock }) {
+  const r = realized.renames ?? null;
+  if (!r || r.applied.length === 0) return null;
+
+  return (
+    <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-[11px] leading-relaxed text-muted space-y-1">
+      <div>
+        <span className="text-cardfg font-medium">ticker rename を手動で統合</span>{' '}
+        — {r.applied.length} 対を繋ぎ、分断されていた{' '}
+        <span className="text-cardfg">{r.n_synthesized_trades} 本</span>{' '}
+        の決済を実現損益に算入しています。
+      </div>
+      <ul className="space-y-0.5 pl-3">
+        {r.applied.map((a) => (
+          <li key={`${a.alias}-${a.canonical}`}>
+            · <span className="text-cardfg">{a.canonical}</span> ={' '}
+            <span className="text-cardfg">{a.alias}</span>
+            {a.observed_qty != null ? `（${fmtQty(a.observed_qty)} 株が一意に打ち消し）` : ''}
+            {a.evidence ? (
+              <span className="text-muted/60"> — {a.evidence}</span>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+      {r.rejected.length > 0 ? (
+        <div className="text-warn/80">
+          · 裏づけが取れず統合しなかった対: {r.rejected.length} 件 —{' '}
+          {r.rejected.map((x) => `${x.alias}/${x.canonical}`).join(', ')}
+        </div>
+      ) : null}
+      <div className="text-muted/60">
+        ※ 出典は {r.source}。
+        {r.confirmed_by_broker
+          ? ''
+          : ' broker 側に corporate action の記録が無く、株数が一意に打ち消し合う' +
+            ' という状態証拠に基づく判断です（API による確認ではありません）。'}
+      </div>
+    </div>
+  );
+}
 
 /**
  * system 帰属の内訳。「unknown = N」で終わらせず、
@@ -1277,7 +1316,19 @@ function ClosedTradesTable({
                 key={`${t.symbol}-${t.exit_time}-${i}`}
                 className="border-b border-white/5 hover:bg-white/[0.03]"
               >
-                <td className="py-1 pr-2 font-medium text-cardfg">{t.symbol}</td>
+                <td className="py-1 pr-2 font-medium text-cardfg whitespace-nowrap">
+                  {t.symbol}
+                  {/* rename で統合した決済は、決済時の ticker が違う。
+                      画面から約定を辿れなくならないよう元の symbol も出す。 */}
+                  {t.symbol_aliases && t.symbol_aliases.length > 0 ? (
+                    <span
+                      className="ml-1 text-[9px] font-normal text-muted/60"
+                      title="ticker rename で統合（手動マップ）"
+                    >
+                      ={t.symbol_aliases.join('/')}
+                    </span>
+                  ) : null}
+                </td>
                 <td className="py-1 pr-2 whitespace-nowrap">
                   <span
                     className="px-1 rounded text-[10px]"
@@ -1378,6 +1429,7 @@ function RealizedSection({ snap }: { snap: AlpacaSnapshot }) {
   return (
     <div className="space-y-4">
       <MeasurementBanner realized={realized} />
+      <RenameNote realized={realized} />
 
       {realized.stale ? (
         <div className="rounded-lg border border-warn/25 bg-warn/[0.06] px-3 py-2 text-[11px] text-muted">
@@ -1515,35 +1567,48 @@ export function AlpacaSection({ payload }: { payload: AlpacaSnapshot | null }) {
 
   const a = payload.account;
   const s = payload.summary;
+  const st = computeStatus(payload);
+  const realized = payload.realized ?? null;
+  const eqRange = payload.equity_ranges?.['1M'] ?? null;
 
   return (
-    <div className="space-y-4">
-      {/* hero: equity + today's P&L */}
-      <section className="bg-card rounded-xl p-4 shadow-lg">
-        <div className="flex items-baseline justify-between mb-1">
-          <h2 className="text-xs uppercase tracking-widest text-muted">
-            Alpaca · paper account
-          </h2>
-          <span className="flex items-center gap-2 text-[10px] text-muted">
-            {a.trading_blocked ? (
-              <span className="px-1.5 py-0.5 rounded bg-fail/20 text-fail">取引停止</span>
-            ) : (
-              <span className="px-1.5 py-0.5 rounded bg-ok/15 text-ok">{a.status || 'ACTIVE'}</span>
-            )}
-            {a.pattern_day_trader ? (
-              <span className="px-1.5 py-0.5 rounded bg-warn/20 text-warn">PDT</span>
-            ) : null}
-            <span className="tabular-nums">{payload.date}</span>
-          </span>
-        </div>
+    <div className="space-y-3">
+      {/* 常時見えるのはこの 1 行だけ。数字の本体は上の「状態」サマリーが持ち、
+          ここから下は開いた時だけ出す詳細。 */}
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-1">
+        <span className="text-xs uppercase tracking-widest text-muted">
+          Alpaca · paper
+        </span>
+        <span className="text-2xl font-semibold tabular-nums leading-none">
+          {fmtUsd(a.equity, 0)}
+        </span>
+        <span className="text-[11px] text-muted">equity</span>
+        <span className="ml-auto flex items-center gap-2 text-[10px] text-muted">
+          {a.trading_blocked ? (
+            <span className="px-1.5 py-0.5 rounded bg-fail/20 text-fail">取引停止</span>
+          ) : (
+            <span className="px-1.5 py-0.5 rounded bg-ok/15 text-ok">{a.status || 'ACTIVE'}</span>
+          )}
+          {a.pattern_day_trader ? (
+            <span className="px-1.5 py-0.5 rounded bg-warn/20 text-warn">PDT</span>
+          ) : null}
+          <span className="tabular-nums">{payload.date}</span>
+        </span>
+      </div>
 
-        <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1 mb-3">
-          <div className="flex items-baseline gap-2">
-            <span className="text-4xl sm:text-5xl font-semibold tabular-nums leading-none">
-              {fmtUsd(a.equity, 0)}
+      {/* 口座 (現金 / 買付余力 / 含み損益) */}
+      <Collapsible
+        title="口座"
+        meta={
+          <>
+            現金 {fmtUsd(a.cash, 0)} · 含み{' '}
+            <span className={pnlText(s.unrealized_pl_total)}>
+              {fmtSignedUsd(s.unrealized_pl_total)}
             </span>
-            <span className="text-sm text-muted">equity</span>
-          </div>
+          </>
+        }
+      >
+        <div className="mb-3">
           <TodayPnl snap={payload} />
         </div>
 
@@ -1594,47 +1659,92 @@ export function AlpacaSection({ payload }: { payload: AlpacaSnapshot | null }) {
             ) : null}
           </div>
         ) : null}
-      </section>
+      </Collapsible>
 
       {/* equity curve (期間切替) */}
-      <section className="bg-card rounded-xl p-4 shadow-lg">
-        <h3 className="text-xs uppercase tracking-widest text-muted mb-2">エクイティ</h3>
+      <Collapsible
+        title="エクイティ"
+        meta={
+          eqRange ? (
+            <>
+              1月 {fmtPct(eqRange.period_return_pct, 1)} · 最大DD{' '}
+              {fmtPct(eqRange.max_drawdown_pct, 1)}
+            </>
+          ) : (
+            <>{payload.equity_curve.period}</>
+          )
+        }
+      >
         <EquityPanel snap={payload} />
-      </section>
+      </Collapsible>
 
       {/* 実現損益 (決済済み) */}
-      <section className="bg-card rounded-xl p-4 shadow-lg">
-        <h3 className="text-xs uppercase tracking-widest text-muted mb-3">
-          実現損益 · exit 履歴
-        </h3>
+      <Collapsible
+        title="実現損益 · exit 履歴"
+        meta={
+          realized?.available && realized.all_time ? (
+            <>
+              累計{' '}
+              <span className={pnlText(realized.all_time.total_realized_pl)}>
+                {fmtSignedUsd(realized.all_time.total_realized_pl)}
+              </span>{' '}
+              · {realized.all_time.n_trades} 本 · 勝率{' '}
+              {realized.all_time.win_rate_pct != null
+                ? `${realized.all_time.win_rate_pct}%`
+                : '—'}
+            </>
+          ) : (
+            <>未計測</>
+          )
+        }
+      >
         <RealizedSection snap={payload} />
-      </section>
+      </Collapsible>
 
       {/* exposure */}
-      <section className="bg-card rounded-xl p-4 shadow-lg">
-        <h3 className="text-xs uppercase tracking-widest text-muted mb-3">
-          エクスポージャ
-        </h3>
+      <Collapsible
+        title="エクスポージャ"
+        meta={
+          <>
+            gross {payload.exposure.gross_pct?.toFixed(1) ?? '—'}% · net{' '}
+            {payload.exposure.net_pct?.toFixed(1) ?? '—'}%
+          </>
+        }
+      >
         <ExposureBlock snap={payload} />
-      </section>
+      </Collapsible>
 
       {/* signals → held bridge */}
-      <section className="bg-card rounded-xl p-4 shadow-lg">
-        <h3 className="text-xs uppercase tracking-widest text-muted mb-3">
-          配信 → 口座 (recon)
-        </h3>
+      <Collapsible
+        title="配信 → 口座 (recon)"
+        meta={
+          <>
+            配信 {payload.reconciliation.signals_total ?? '—'} → 保有{' '}
+            {payload.reconciliation.held_now}
+          </>
+        }
+      >
         <ReconStrip snap={payload} />
-      </section>
+      </Collapsible>
 
-      {/* positions */}
-      <section className="bg-card rounded-xl p-4 shadow-lg">
-        <h3 className="text-xs uppercase tracking-widest text-muted mb-3">
-          保有ポジション
-        </h3>
+      {/* positions — 期限超過は閉じたままでも件数が見えるよう badge に出す */}
+      <Collapsible
+        title="保有ポジション"
+        badge={
+          st.overdue.length > 0
+            ? { text: `期限超過 ${st.overdue.length}`, tone: 'fail' }
+            : undefined
+        }
+        meta={
+          <>
+            {s.n_positions} (L{s.n_long}/S{s.n_short})
+          </>
+        }
+      >
         <PositionsTable positions={payload.positions} />
-      </section>
+      </Collapsible>
 
-      <footer className="text-[10px] text-muted leading-relaxed">
+      <footer className="text-[10px] text-muted leading-relaxed px-1">
         alpaca_snapshot_YYYYMMDD.json ({payload.schema}) · {payload.provider} ·
         read-only / paper · generated {payload.generated_at}
       </footer>
