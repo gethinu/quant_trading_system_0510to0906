@@ -45,6 +45,39 @@ SESSION_OPEN = "open"
 SESSION_CLOSED = "closed"
 SESSION_UNKNOWN = "unknown"
 
+# --- system 帰属の「根拠の強さ」 ---------------------------------------------
+# どの system が建てた玉かを *何を根拠に* 決めたか。強い順に並べてある。
+# 強さを残さないと「symbol 単位の当て推量」と「trade 単位の ground truth」が
+# 表示上 同じ顔をしてしまうため、必ず trade ごとに記録する。
+SYSTEM_SOURCE_ENTRY_ORDER = "entry_order"  # entry 注文の client_order_id (trade 単位)
+SYSTEM_SOURCE_ORDER_FILE = "order_file"  # paper_orders_*.json (symbol 単位)
+SYSTEM_SOURCE_SYMBOL_MAP = "symbol_map"  # symbol_system_map.json (symbol 単位)
+
+SYSTEM_SOURCE_LABEL = {
+    SYSTEM_SOURCE_ENTRY_ORDER: "entry 注文の client_order_id (trade 単位の確定根拠)",
+    SYSTEM_SOURCE_ORDER_FILE: "発注記録 paper_orders_*.json (symbol 単位)",
+    SYSTEM_SOURCE_SYMBOL_MAP: "symbol_system_map.json (symbol 単位・時点情報なし)",
+}
+
+# --- なぜ system 不明なのか ---------------------------------------------------
+# 「unknown」で終わらせず種別を残す。どれも *推測で埋めない* ことが前提。
+UNKNOWN_NO_ENTRY_ORDER_ID = "no_entry_order_id"
+UNKNOWN_ENTRY_ORDER_NOT_FOUND = "entry_order_not_found"
+UNKNOWN_ENTRY_ORDER_UNTAGGED = "entry_order_untagged"
+
+UNKNOWN_REASON_LABEL = {
+    UNKNOWN_NO_ENTRY_ORDER_ID: (
+        "約定に order_id が無く entry 注文を特定できない (broker 側の記録欠落)"
+    ),
+    UNKNOWN_ENTRY_ORDER_NOT_FOUND: (
+        "entry 注文が broker の注文履歴に見つからない (履歴の保持期間外など)"
+    ),
+    UNKNOWN_ENTRY_ORDER_UNTAGGED: (
+        "entry 注文の client_order_id に system tag が無い"
+        " (system tag を付ける前の発注。事後に判別する術が無い)"
+    ),
+}
+
 
 def session_date_of(timestamp: str) -> str:
     """ISO8601 (UTC) の約定時刻 -> その約定が属する立会日 (``YYYY-MM-DD``, ET)。
@@ -96,6 +129,8 @@ class OpenLot:
     qty: Decimal  # 符号つき: 正 = long, 負 = short
     price: Decimal
     opened_at: str
+    # この玉を建てた注文。system 帰属の ground truth を round-trip まで運ぶ。
+    order_id: str | None = None
 
 
 @dataclass
@@ -113,6 +148,11 @@ class ClosedTrade:
     system: str | None = None
     exit_reason: str | None = None
     exit_order_id: str | None = None
+    entry_order_id: str | None = None
+    # system を「何を根拠に」付けたか / 付かなかったのは「なぜ」か。
+    # 片方だけが埋まる (system があれば source、無ければ unknown_reason)。
+    system_source: str | None = None
+    system_unknown_reason: str | None = None
 
     @property
     def entry_session(self) -> str:
@@ -162,6 +202,9 @@ class ClosedTrade:
             "realized_pl_pct": round(float(pct), 3) if pct is not None else None,
             "exit_reason": self.exit_reason,
             "exit_order_id": self.exit_order_id,
+            "entry_order_id": self.entry_order_id,
+            "system_source": self.system_source,
+            "system_unknown_reason": self.system_unknown_reason,
         }
 
 
@@ -315,6 +358,7 @@ def reconstruct_round_trips(fills: Sequence[Fill]) -> LedgerResult:
                     exit_price=f.price,
                     realized_pl=realized,
                     exit_order_id=f.order_id,
+                    entry_order_id=lot.order_id,
                 )
             )
             lot.qty -= direction * take
@@ -329,6 +373,7 @@ def reconstruct_round_trips(fills: Sequence[Fill]) -> LedgerResult:
                     qty=remaining,
                     price=f.price,
                     opened_at=f.transaction_time,
+                    order_id=f.order_id,
                 )
             )
 
@@ -475,6 +520,212 @@ def summarize_by_system(trades: Sequence[ClosedTrade]) -> dict[str, dict[str, An
     for t in trades:
         buckets.setdefault(t.system or "unknown", []).append(t)
     return {k: summarize_realized(v) for k, v in sorted(buckets.items())}
+
+
+def summarize_by_exit_reason(trades: Sequence[ClosedTrade]) -> list[dict[str, Any]]:
+    """exit 理由別の件数 (**全件**が母数)。理由が残っていないものは ``None`` キー。
+
+    dashboard の履歴表は直近 N 件しか載せないので、そこで数えた理由別件数は
+    *表示分の内訳* にしかならない。「全 652 本」と並べて出すと母数が違う数字が
+    同じ画面に並ぶことになるため、全件基準の内訳をここで別に出す。
+
+    なお exit 理由 (``exit_reason``) と system 帰属 (``system``) は**別の軸**。
+    「理由が記録なし」と「system が unknown」は互いに独立で、二重計上ではない。
+    """
+    buckets: dict[str | None, list[ClosedTrade]] = {}
+    for t in trades:
+        buckets.setdefault(t.exit_reason, []).append(t)
+    rows = [
+        {
+            "reason": reason,
+            "n_trades": len(rows_),
+            "realized_pl": round(
+                float(sum((r.realized_pl for r in rows_), Decimal(0))), 2
+            ),
+        }
+        for reason, rows_ in buckets.items()
+    ]
+    return sorted(rows, key=lambda r: (-r["n_trades"], str(r["reason"])))
+
+
+# ---------------------------------------------------------------------------
+# system 帰属 (どの system が建てた玉か)
+# ---------------------------------------------------------------------------
+
+
+def attribute_systems(
+    trades: Sequence[ClosedTrade],
+    *,
+    system_by_order_id: Mapping[str, str] | None = None,
+    known_order_ids: Iterable[str] | None = None,
+    order_file_system_map: Mapping[str, str] | None = None,
+    symbol_system_map: Mapping[str, str] | None = None,
+) -> None:
+    """各 round-trip に system を帰属させ、**その根拠**も一緒に残す (in-place)。
+
+    優先順位 (根拠が強い順):
+
+    1. ``system_by_order_id`` — *entry 注文* の ``client_order_id`` から解決した
+       system。round-trip 単位で確定するので取り違えが起きない **ground truth**。
+    2. ``order_file_system_map`` — ``paper_orders_*.json`` の発注記録 (symbol 単位)。
+    3. ``symbol_system_map`` — ``data/symbol_system_map.json`` (symbol 単位)。
+
+    2 と 3 は *symbol 単位* なので「同じ銘柄を別の system が別の時期に扱った」
+    ケースを取り違えうる。だから付けた system だけでなく
+    :attr:`ClosedTrade.system_source` に **どの根拠で付けたか** を必ず残し、
+    ground truth と symbol 単位の推定を表示上も区別できるようにする。
+
+    どれでも解決できないものは **推測で埋めない**。``system`` は ``None`` のまま、
+    :attr:`ClosedTrade.system_unknown_reason` に *なぜ不明か* を入れる。
+
+    引数
+    ----
+    system_by_order_id:
+        order_id -> system。``client_order_id`` の解析は呼び出し側の責務
+        (この module を broker SDK から独立に保つため)。
+    known_order_ids:
+        「注文履歴として観測できた」order_id の集合。
+        *履歴に無い* (照会不能) と *履歴にはあるが system tag が無い* を
+        区別するために使う。省略時は ``system_by_order_id`` の key を使う。
+    """
+    by_order = {str(k): str(v) for k, v in (system_by_order_id or {}).items() if v}
+    known = (
+        {str(x) for x in known_order_ids}
+        if known_order_ids is not None
+        else set(by_order)
+    )
+    order_file = {
+        str(k).upper(): str(v) for k, v in (order_file_system_map or {}).items() if v
+    }
+    sym_map = {
+        str(k).upper(): str(v) for k, v in (symbol_system_map or {}).items() if v
+    }
+
+    for t in trades:
+        t.system = None
+        t.system_source = None
+        t.system_unknown_reason = None
+
+        oid = t.entry_order_id
+        if oid and oid in by_order:
+            t.system = by_order[oid]
+            t.system_source = SYSTEM_SOURCE_ENTRY_ORDER
+            continue
+
+        # entry 注文からは取れなかった。まず「なぜ取れなかったか」を確定させる。
+        if not oid:
+            unknown_reason = UNKNOWN_NO_ENTRY_ORDER_ID
+        elif oid in known:
+            unknown_reason = UNKNOWN_ENTRY_ORDER_UNTAGGED
+        else:
+            unknown_reason = UNKNOWN_ENTRY_ORDER_NOT_FOUND
+
+        sym = t.symbol.upper()
+        fallback = order_file.get(sym)
+        if fallback:
+            t.system = fallback
+            t.system_source = SYSTEM_SOURCE_ORDER_FILE
+            continue
+        fallback = sym_map.get(sym)
+        if fallback:
+            t.system = fallback
+            t.system_source = SYSTEM_SOURCE_SYMBOL_MAP
+            continue
+
+        t.system_unknown_reason = unknown_reason
+
+
+def summarize_attribution(trades: Sequence[ClosedTrade]) -> dict[str, Any]:
+    """system 帰属の内訳 = 「どれだけを何を根拠に付けられたか / 残りはなぜ不明か」。
+
+    dashboard が unknown を *黙って* 一塊にしないための材料。unknown は理由別に
+    件数・銘柄・実現損益まで出す (金額を伴わない「不明」は軽く見えてしまうため)。
+    """
+    n = len(trades)
+    by_source: dict[str, int] = {}
+    unknown: dict[str, list[ClosedTrade]] = {}
+    for t in trades:
+        if t.system:
+            by_source[t.system_source or "unspecified"] = (
+                by_source.get(t.system_source or "unspecified", 0) + 1
+            )
+        else:
+            unknown.setdefault(t.system_unknown_reason or "unspecified", []).append(t)
+
+    n_unknown = sum(len(v) for v in unknown.values())
+    n_ground_truth = by_source.get(SYSTEM_SOURCE_ENTRY_ORDER, 0)
+    return {
+        "n_trades": n,
+        "n_attributed": n - n_unknown,
+        "n_unknown": n_unknown,
+        "n_ground_truth": n_ground_truth,
+        "ground_truth_pct": round(n_ground_truth / n * 100.0, 1) if n else None,
+        "by_source": [
+            {
+                "source": src,
+                "label": SYSTEM_SOURCE_LABEL.get(src, src),
+                "n_trades": cnt,
+            }
+            for src, cnt in sorted(by_source.items(), key=lambda kv: -kv[1])
+        ],
+        "unknown_by_reason": [
+            {
+                "reason": reason,
+                "label": UNKNOWN_REASON_LABEL.get(reason, reason),
+                "n_trades": len(rows),
+                "realized_pl": round(
+                    float(sum((r.realized_pl for r in rows), Decimal(0))), 2
+                ),
+                "symbols": sorted({r.symbol for r in rows}),
+                "entry_sessions": sorted({r.entry_session for r in rows}),
+            }
+            for reason, rows in sorted(unknown.items(), key=lambda kv: -len(kv[1]))
+        ],
+    }
+
+
+def pair_rename_candidates(
+    discrepancies: Sequence[LotDiscrepancy],
+    *,
+    epsilon: Decimal = QTY_EPSILON,
+) -> list[dict[str, Any]]:
+    """建玉の食い違いを「旧 symbol -> 新 symbol」の ticker rename 候補に組む。
+
+    ``reconstructed_only`` (fill 上は建玉が残るのに broker に無い) と
+    ``broker_only`` / 逆符号の残玉は、ticker rename なら必ず **対** で現れ、
+    残株数がちょうど打ち消し合う。その対を拾って提示する。
+
+    これは **仮説であって断定ではない**。株数一致は状態証拠にすぎないので、
+    自動で round-trip を合成したり実現損益に混ぜたりは *しない*
+    (架空の損益を作らないため)。人間が判断できるよう表に出すのが目的。
+    突き合わせ先が一意に定まらない場合は候補にしない (当て推量を避ける)。
+    """
+    residuals = [
+        (d, d.reconstructed_qty - d.broker_qty)
+        for d in discrepancies
+        if abs(d.reconstructed_qty - d.broker_qty) > epsilon
+    ]
+    out: list[dict[str, Any]] = []
+    for src, r in residuals:
+        if r <= 0:
+            continue  # 残玉が居座っている側 (= 旧 symbol) だけを起点にする
+        matches = [d for d, r2 in residuals if abs(r2 + r) <= epsilon]
+        if len(matches) != 1:
+            continue  # 一意でなければ組まない
+        dst = matches[0]
+        out.append(
+            {
+                "from_symbol": src.symbol,
+                "to_symbol": dst.symbol,
+                "qty": float(r),
+                "evidence": (
+                    f"{src.symbol} に {float(r)} 株の残玉があり "
+                    f"{dst.symbol} 側の不足と株数が一致 (rename / corporate action の疑い)"
+                ),
+                "confirmed": False,
+            }
+        )
+    return sorted(out, key=lambda x: x["from_symbol"])
 
 
 # ---------------------------------------------------------------------------

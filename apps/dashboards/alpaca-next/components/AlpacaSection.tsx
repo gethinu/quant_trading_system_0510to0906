@@ -8,6 +8,7 @@ import type {
   EquityCurve,
   EquityRange,
   EquityRangeKey,
+  ExitReasonTotal,
   RealizedBlock,
   RealizedDay,
   SystemExposure,
@@ -930,6 +931,79 @@ const EXIT_REASON_LABEL: Record<string, string> = {
 const exitReasonLabel = (r: string | null) =>
   r == null ? '記録なし' : (EXIT_REASON_LABEL[r] ?? r);
 
+// system 帰属の根拠。entry 注文の client_order_id だけが trade 単位で確定できる
+// ground truth で、他は symbol 単位の推定。表示上も必ず区別する。
+const GROUND_TRUTH_SOURCE = 'entry_order';
+const SOURCE_SHORT: Record<string, string> = {
+  entry_order: '確定',
+  order_file: '推定',
+  symbol_map: '推定',
+};
+
+/**
+ * system 帰属の内訳。「unknown = N」で終わらせず、
+ * 何本を確定根拠で付けられたか / 残りはなぜ不明かまで出す。
+ */
+function AttributionNote({ realized }: { realized: RealizedBlock }) {
+  const a = realized.attribution ?? null;
+  if (!a) {
+    // 旧 snapshot は内訳を持たない。持っていないことを黙らず言う。
+    return (
+      <div className="mt-1 text-[10px] text-muted/60">
+        system が特定できない決済は unknown にまとめています（捨てていません）。
+        この snapshot は帰属根拠の内訳を持ちません（旧 exporter が生成）。
+      </div>
+    );
+  }
+  const inferred = a.by_source
+    .filter((s) => s.source !== GROUND_TRUTH_SOURCE)
+    .reduce((n, s) => n + s.n_trades, 0);
+
+  return (
+    <div className="mt-1.5 space-y-1 text-[10px] text-muted/70 leading-relaxed">
+      <div>
+        帰属の根拠: 全 {a.n_trades} 本のうち{' '}
+        <span className="text-cardfg">{a.n_ground_truth} 本</span> は entry 注文の
+        client_order_id から確定（trade 単位）
+        {a.ground_truth_pct != null ? `・${a.ground_truth_pct}%` : ''}、
+        <span className="text-cardfg"> {inferred} 本</span> は symbol
+        単位の発注記録からの推定（同じ銘柄を別 system が扱った時期があると取り違えうる）。
+      </div>
+      {a.unknown_by_reason.length > 0 ? (
+        <div>
+          <div>
+            unknown <span className="text-cardfg">{a.n_unknown} 本</span> の内訳（
+            <span className="text-muted/60">推測で system を埋めていません</span>）:
+          </div>
+          <ul className="mt-0.5 space-y-0.5 pl-3">
+            {a.unknown_by_reason.map((u) => (
+              <li key={u.reason}>
+                · {u.label} — {u.n_trades} 本 / 実現 {fmtSignedUsd(u.realized_pl)}
+                {u.entry_sessions.length > 0 ? (
+                  <span className="text-muted/50">
+                    {' '}
+                    （entry {u.entry_sessions[0]}
+                    {u.entry_sessions.length > 1
+                      ? `〜${u.entry_sessions[u.entry_sessions.length - 1]}`
+                      : ''}
+                    ・{u.symbols.length} 銘柄）
+                  </span>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : (
+        <div>unknown はありません（全件に帰属根拠あり）。</div>
+      )}
+      <div className="text-muted/50">
+        ※ この「unknown」は system の帰属が不明という意味で、下の履歴表の「記録なし」
+        （exit 理由が残っていない）とは別の軸です。重複して数えてはいません。
+      </div>
+    </div>
+  );
+}
+
 function MeasurementBanner({ realized }: { realized: RealizedBlock }) {
   const m = realized.measurement;
   const recon = realized.exit_intent_reconciliation ?? null;
@@ -994,6 +1068,23 @@ function MeasurementBanner({ realized }: { realized: RealizedBlock }) {
               </tbody>
             </table>
           </div>
+          {(m?.rename_candidates ?? []).length > 0 ? (
+            <div className="pt-1 text-muted/70">
+              <div className="text-muted/80">
+                ticker rename の疑い（株数が打ち消し合う対）— 未確定のため損益には
+                含めていません:
+              </div>
+              <ul className="mt-0.5 space-y-0.5 pl-3">
+                {(m?.rename_candidates ?? []).map((c) => (
+                  <li key={`${c.from_symbol}-${c.to_symbol}`}>
+                    · <span className="text-cardfg">{c.from_symbol}</span> →{' '}
+                    <span className="text-cardfg">{c.to_symbol}</span>（
+                    {fmtQty(c.qty)} 株）
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -1082,7 +1173,16 @@ function RealizedByDayChart({ rows }: { rows: RealizedDay[] }) {
   );
 }
 
-function ClosedTradesTable({ trades }: { trades: ClosedTrade[] }) {
+function ClosedTradesTable({
+  trades,
+  totalByReason,
+  nTotal,
+}: {
+  trades: ClosedTrade[];
+  /** 全決済が母数の理由別件数。chip は載っている分しか数えられないため別で受ける。 */
+  totalByReason?: ExitReasonTotal[];
+  nTotal?: number;
+}) {
   const [limit, setLimit] = useState(40);
   const [reasonFilter, setReasonFilter] = useState<string>('all');
 
@@ -1110,9 +1210,16 @@ function ClosedTradesTable({ trades }: { trades: ClosedTrade[] }) {
   }
 
   const shown = filtered.slice(0, limit);
+  // chip が数えられるのは *載っている* 分だけ。全件と母数が違うなら黙らず言う。
+  const truncated = nTotal != null && nTotal > trades.length;
   return (
     <div>
       <div className="mb-2 flex flex-wrap items-center gap-1 text-[11px]">
+        {truncated ? (
+          <span className="text-[10px] text-muted/60 mr-1">
+            この表に載っている {trades.length} 件の内訳:
+          </span>
+        ) : null}
         <button
           type="button"
           onClick={() => setReasonFilter('all')}
@@ -1140,6 +1247,15 @@ function ClosedTradesTable({ trades }: { trades: ClosedTrade[] }) {
         })}
       </div>
 
+      {truncated && totalByReason && totalByReason.length > 0 ? (
+        <div className="mb-2 text-[10px] text-muted/60">
+          全 {nTotal} 本での内訳:{' '}
+          {totalByReason
+            .map((r) => `${exitReasonLabel(r.reason)} ${r.n_trades}`)
+            .join(' · ')}
+        </div>
+      ) : null}
+
       <div className="overflow-x-auto">
         <table className="w-full text-[11px] tabular-nums">
           <thead className="text-muted text-[10px] uppercase tracking-wide">
@@ -1162,16 +1278,30 @@ function ClosedTradesTable({ trades }: { trades: ClosedTrade[] }) {
                 className="border-b border-white/5 hover:bg-white/[0.03]"
               >
                 <td className="py-1 pr-2 font-medium text-cardfg">{t.symbol}</td>
-                <td className="py-1 pr-2">
+                <td className="py-1 pr-2 whitespace-nowrap">
                   <span
                     className="px-1 rounded text-[10px]"
                     style={{
                       color: sysColor(t.system ?? 'unknown'),
                       background: `${sysColor(t.system ?? 'unknown')}22`,
                     }}
+                    title={
+                      t.system
+                        ? `帰属根拠: ${t.system_source ?? '不明'}`
+                        : `system 不明: ${t.system_unknown_reason ?? '理由の記録なし'}`
+                    }
                   >
                     {t.system ? sysShort(t.system) : '—'}
                   </span>
+                  {/* symbol 単位の推定は ground truth と見分けられるようにする。 */}
+                  {t.system && t.system_source && t.system_source !== GROUND_TRUTH_SOURCE ? (
+                    <span
+                      className="ml-0.5 text-[9px] text-muted/50"
+                      title="symbol 単位の発注記録からの推定（trade 単位の確定根拠ではない）"
+                    >
+                      {SOURCE_SHORT[t.system_source] ?? '推定'}
+                    </span>
+                  ) : null}
                 </td>
                 <td className={`py-1 pr-2 ${t.side === 'long' ? 'text-ok/80' : 'text-fail/80'}`}>
                   {t.side === 'long' ? 'L' : 'S'}
@@ -1330,9 +1460,7 @@ function RealizedSection({ snap }: { snap: AlpacaSnapshot }) {
               </tbody>
             </table>
           </div>
-          <div className="mt-1 text-[10px] text-muted/60">
-            system が特定できない決済は unknown にまとめています（捨てていません）。
-          </div>
+          <AttributionNote realized={realized} />
         </div>
       ) : null}
 
@@ -1348,7 +1476,11 @@ function RealizedSection({ snap }: { snap: AlpacaSnapshot }) {
             </span>
           ) : null}
         </h4>
-        <ClosedTradesTable trades={realized.closed_trades} />
+        <ClosedTradesTable
+          trades={realized.closed_trades}
+          totalByReason={realized.by_exit_reason}
+          nTotal={realized.n_closed_trades_total}
+        />
       </div>
 
       <div className="text-[10px] text-muted/60 leading-relaxed">

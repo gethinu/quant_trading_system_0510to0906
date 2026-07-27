@@ -52,16 +52,21 @@ from common.exit_ledger import (  # noqa: E402
     SESSION_OPEN,
     SESSION_UNKNOWN,
     ExitLedgerError,
+    attribute_systems,
+    pair_rename_candidates,
     parse_fills,
     realized_by_day,
     realized_cumulative,
     reconcile_intents_with_fills,
     reconcile_with_broker,
     reconstruct_round_trips,
+    summarize_attribution,
+    summarize_by_exit_reason,
     summarize_by_system,
     summarize_realized,
 )
 from common.signal_export import generate_run_id  # noqa: E402
+from common.symbol_map import load_symbol_system_map  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA = "exit_ledger/v1"
@@ -154,22 +159,67 @@ def fetch_broker_positions(client: Any) -> dict[str, float]:
     return out
 
 
-def build_system_map(client: Any, results_dir: Path) -> dict[str, str]:
-    """symbol -> system tag。client_order_id と保存済み map の両方から拾う。"""
-    mapping: dict[str, str] = {}
+def fetch_orders_index(
+    client: Any, *, page_size: int = 500, max_pages: int = 40
+) -> dict[str, str]:
+    """order_id -> client_order_id を **全期間** 分取得する (read-only)。
 
-    map_file = ROOT / "data" / "symbol_system_map.json"
-    if map_file.exists():
+    round-trip の system 帰属をこれで *trade 単位* に確定させる。
+    ``limit`` 1 回きりだと直近しか返らず、古い entry が丸ごと「system 不明」に
+    落ちるので ``until`` cursor で最後まで遡る。
+
+    取得に失敗したら空 dict を返す (= 帰属は symbol 単位の fallback に縮退する)。
+    ここで例外にすると台帳そのものが作れなくなるため。
+    """
+    try:
+        from alpaca.trading.enums import QueryOrderStatus
+        from alpaca.trading.requests import GetOrdersRequest
+    except ImportError:
+        return {}
+
+    out: dict[str, str] = {}
+    until: Any = None
+    for _ in range(max_pages):
         try:
-            raw = json.loads(map_file.read_text(encoding="utf-8")) or {}
-            for k, v in raw.items():
-                if isinstance(v, str):
-                    mapping[str(k).upper()] = v
-        except (OSError, ValueError):
-            pass
+            batch = client.get_orders(
+                GetOrdersRequest(
+                    status=QueryOrderStatus.ALL,
+                    limit=page_size,
+                    direction="desc",
+                    until=until,
+                )
+            )
+        except Exception as exc:
+            print(f"[WARN] 注文履歴の取得に失敗 ({exc}) -> system 帰属は fallback のみ")
+            return out
+        if not batch:
+            return out
+        oldest = None
+        added = 0
+        for o in batch:
+            oid = str(getattr(o, "id", "") or "")
+            if oid and oid not in out:
+                out[oid] = str(getattr(o, "client_order_id", "") or "")
+                added += 1
+            submitted = getattr(o, "submitted_at", None)
+            if submitted is not None and (oldest is None or submitted < oldest):
+                oldest = submitted
+        # 1 件も増えなければ同じ page を掘り続けているので打ち切る (無限ループ防止)。
+        if added == 0 or len(batch) < page_size or oldest is None:
+            return out
+        until = oldest
+    print(
+        f"[WARN] 注文履歴の page 上限 ({max_pages}) に到達。古い entry の帰属が欠ける可能性"
+    )
+    return out
 
-    # 発注 intent 側 (paper_orders_*.json) の system tag を上書き適用
-    for f in sorted(results_dir.glob("paper_orders_*.json"), reverse=True)[:60]:
+
+def build_order_file_system_map(
+    results_dir: Path, *, max_files: int = 200
+) -> dict[str, str]:
+    """``paper_orders_*.json`` の発注記録から symbol -> system (symbol 単位)。"""
+    mapping: dict[str, str] = {}
+    for f in sorted(results_dir.glob("paper_orders_*.json"), reverse=True)[:max_files]:
         try:
             data = json.loads(f.read_text(encoding="utf-8")) or {}
         except (OSError, ValueError):
@@ -182,8 +232,21 @@ def build_system_map(client: Any, results_dir: Path) -> dict[str, str]:
                 row.get("client_order_id")
             )
             if tag:
-                mapping.setdefault(sym, tag)
+                mapping.setdefault(sym, str(tag).lower())
     return mapping
+
+
+def build_symbol_system_map() -> dict[str, str]:
+    """``data/symbol_system_map.json`` -> symbol(大文字) -> primary system。
+
+    値が ``["system1"]`` のような **list** 形式なのが正 (``dump_symbol_system_map``
+    がそう書く)。以前ここで ``isinstance(v, str)`` を要求していたため map が
+    丸ごと捨てられ、古い決済が全部「system 不明」に落ちていた。
+    形式の揺れ (str / list / dict) の吸収は正本である
+    :func:`common.symbol_map.load_symbol_system_map` に任せる。
+    """
+    raw = load_symbol_system_map(ROOT / "data" / "symbol_system_map.json")
+    return {str(k).upper(): str(v).lower() for k, v in raw.items() if v}
 
 
 def load_exit_intents(results_dir: Path, date_compact: str) -> list[dict[str, Any]]:
@@ -321,9 +384,22 @@ def main(argv: list[str] | None = None) -> int:
     result = reconstruct_round_trips(fills)
     reconcile_with_broker(result, broker_positions)
 
-    system_map = build_system_map(client, results_dir)
-    for t in result.closed_trades:
-        t.system = system_map.get(t.symbol)
+    # system 帰属: entry 注文の client_order_id (trade 単位の ground truth) を第一に、
+    # 取れないものだけ symbol 単位の記録へ縮退する。根拠は trade ごとに残す。
+    orders_index = fetch_orders_index(client)
+    system_by_order_id = {
+        oid: tag
+        for oid, coid in orders_index.items()
+        if (tag := parse_system_from_client_order_id(coid))
+    }
+    attribute_systems(
+        result.closed_trades,
+        system_by_order_id=system_by_order_id,
+        known_order_ids=orders_index.keys(),
+        order_file_system_map=build_order_file_system_map(results_dir),
+        symbol_system_map=build_symbol_system_map(),
+    )
+    attribution = summarize_attribution(result.closed_trades)
 
     intents = load_exit_intents(results_dir, date_compact)
     _attach_exit_reasons(result.closed_trades, intents, date_str)
@@ -387,7 +463,12 @@ def main(argv: list[str] | None = None) -> int:
             "coverage_end": result.coverage_end,
             "unmeasured_symbols": result.unmeasured_symbols,
             "discrepancies": [d.to_row() for d in result.discrepancies],
+            # 建玉の食い違いを rename の「対」に組んだ仮説。断定ではないので
+            # 実現損益には一切混ぜない (confirmed=false のまま表に出すだけ)。
+            "rename_candidates": pair_rename_candidates(result.discrepancies),
         },
+        # system 帰属の内訳。unknown を黙って一塊にせず「なぜ不明か」を出す。
+        "attribution": attribution,
         "today": {
             "date": date_str,
             # 「当日 exit が 1 件も無かった」(= 0, 事実) と
@@ -409,6 +490,9 @@ def main(argv: list[str] | None = None) -> int:
             "all_time": summarize_realized(result.closed_trades),
             "by_day": realized_cumulative(by_day),
             "by_system": summarize_by_system(result.closed_trades),
+            # 全件が母数の exit 理由内訳。dashboard の履歴表は直近 N 件しか
+            # 載せないので、そこで数えた内訳と母数が違うことを明示するために出す。
+            "by_exit_reason": summarize_by_exit_reason(result.closed_trades),
         },
         "closed_trades": [t.to_row() for t in result.closed_trades],
         "exit_intent_reconciliation": intent_recon,
@@ -426,6 +510,16 @@ def main(argv: list[str] | None = None) -> int:
         f"session={date_str}/{session_state} pending_intents={n_pending} "
         f"measured={measured} complete={complete} run_id={run_id}"
     )
+    print(
+        f"[exit_ledger][attribution] system 判明 {attribution['n_attributed']}/"
+        f"{attribution['n_trades']} (うち entry 注文から確定 {attribution['n_ground_truth']}"
+        f" = {attribution['ground_truth_pct']}%) unknown={attribution['n_unknown']}"
+    )
+    for row in attribution["unknown_by_reason"]:
+        print(
+            f"[exit_ledger][attribution][unknown] {row['reason']}: "
+            f"{row['n_trades']} 本 (実現 {row['realized_pl']}) -- {row['label']}"
+        )
     for r in completeness_reasons:
         print(f"[exit_ledger][UNMEASURED] {r}")
     print(f"[write] {output_path}")

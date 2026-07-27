@@ -759,6 +759,7 @@ def _realized_block(ledger: dict[str, Any] | None, date_str: str) -> dict[str, A
             "by_system": {},
             "closed_trades": [],
             "measurement": None,
+            "attribution": None,
         }
     measurement = ledger.get("measurement") or {}
     realized = ledger.get("realized") or {}
@@ -780,10 +781,14 @@ def _realized_block(ledger: dict[str, Any] | None, date_str: str) -> dict[str, A
         "all_time": realized.get("all_time"),
         "by_day": realized.get("by_day") or [],
         "by_system": realized.get("by_system") or {},
+        # 全件が母数の exit 理由内訳 (履歴表は直近分しか載せないので母数が違う)。
+        "by_exit_reason": realized.get("by_exit_reason") or [],
         # dashboard の履歴表は直近分だけあれば十分。全件は台帳側に残る。
         "closed_trades": list(ledger.get("closed_trades") or [])[-400:],
         "n_closed_trades_total": len(ledger.get("closed_trades") or []),
         "measurement": measurement,
+        # system 帰属の根拠内訳 (unknown を「なぜ不明か」まで出すため)。
+        "attribution": ledger.get("attribution"),
         "exit_intent_reconciliation": ledger.get("exit_intent_reconciliation"),
         "today": ledger.get("today"),
     }

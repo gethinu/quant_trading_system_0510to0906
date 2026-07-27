@@ -292,6 +292,11 @@ export interface ClosedTrade {
   realized_pl_pct: number | null;
   exit_reason: string | null;
   exit_order_id: string | null;
+  entry_order_id?: string | null;
+  /** system を何を根拠に付けたか ("entry_order" が trade 単位の確定根拠)。 */
+  system_source?: string | null;
+  /** system が付かなかった理由 (system が null の時だけ入る)。 */
+  system_unknown_reason?: string | null;
 }
 
 export interface RealizedSummary {
@@ -327,6 +332,39 @@ export interface ExitMeasurement {
     broker_qty: number;
     reason: string;
   }[];
+  /** 建玉の食い違いを ticker rename の「対」に組んだ仮説 (断定ではない)。 */
+  rename_candidates?: {
+    from_symbol: string;
+    to_symbol: string;
+    qty: number;
+    evidence: string;
+    confirmed: boolean;
+  }[];
+}
+
+/** system 帰属の内訳。unknown を「なぜ不明か」まで割る。 */
+export interface ExitAttribution {
+  n_trades: number;
+  n_attributed: number;
+  n_unknown: number;
+  n_ground_truth: number;
+  ground_truth_pct: number | null;
+  by_source: { source: string; label: string; n_trades: number }[];
+  unknown_by_reason: {
+    reason: string;
+    label: string;
+    n_trades: number;
+    realized_pl: number;
+    symbols: string[];
+    entry_sessions: string[];
+  }[];
+}
+
+/** exit 理由別の件数。母数は **全決済** (履歴表の直近 N 件ではない)。 */
+export interface ExitReasonTotal {
+  reason: string | null;
+  n_trades: number;
+  realized_pl: number;
 }
 
 export interface ExitIntentRecon {
@@ -374,6 +412,10 @@ export interface RealizedBlock {
   closed_trades: ClosedTrade[];
   n_closed_trades_total?: number;
   measurement: ExitMeasurement | null;
+  /** 旧 snapshot には無い → 内訳を出さない (0 と混同しないため)。 */
+  attribution?: ExitAttribution | null;
+  /** 全決済が母数の exit 理由内訳。旧 snapshot には無い。 */
+  by_exit_reason?: ExitReasonTotal[];
   exit_intent_reconciliation?: ExitIntentRecon | null;
   today?: LedgerToday | null;
 }
