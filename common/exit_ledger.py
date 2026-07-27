@@ -131,6 +131,8 @@ class OpenLot:
     opened_at: str
     # この玉を建てた注文。system 帰属の ground truth を round-trip まで運ぶ。
     order_id: str | None = None
+    # 建てた時点の生の symbol (rename 前)。canonical と違う時だけ意味を持つ。
+    raw_symbol: str | None = None
 
 
 @dataclass
@@ -149,6 +151,9 @@ class ClosedTrade:
     exit_reason: str | None = None
     exit_order_id: str | None = None
     entry_order_id: str | None = None
+    # ticker rename で symbol が変わった場合の *元の* symbol 群 (canonical 以外)。
+    # 「EKSO の決済なのに 07-06 の CHRN の値段」が追えなくならないよう残す。
+    symbol_aliases: list[str] = field(default_factory=list)
     # system を「何を根拠に」付けたか / 付かなかったのは「なぜ」か。
     # 片方だけが埋まる (system があれば source、無ければ unknown_reason)。
     system_source: str | None = None
@@ -205,6 +210,7 @@ class ClosedTrade:
             "entry_order_id": self.entry_order_id,
             "system_source": self.system_source,
             "system_unknown_reason": self.system_unknown_reason,
+            "symbol_aliases": list(self.symbol_aliases),
         }
 
 
@@ -322,12 +328,96 @@ def parse_fills(rows: Iterable[Mapping[str, Any]]) -> list[Fill]:
 # ---------------------------------------------------------------------------
 
 
-def reconstruct_round_trips(fills: Sequence[Fill]) -> LedgerResult:
+def normalize_rename_map(rows: Iterable[Mapping[str, Any]] | None) -> dict[str, str]:
+    """rename 定義 -> ``alias(大文字) -> canonical(大文字)``。
+
+    自己参照 (alias == canonical) と、alias が別の alias を指す **連鎖** は落とす。
+    連鎖を許すと A->B->C の解決順で結果が変わり、静かに間違った統合が起きるため。
+    """
+    raw: dict[str, str] = {}
+    for row in rows or []:
+        alias = str(row.get("alias", "") or "").strip().upper()
+        canonical = str(row.get("canonical", "") or "").strip().upper()
+        if not alias or not canonical or alias == canonical:
+            continue
+        raw[alias] = canonical
+    # canonical 側がさらに alias になっている (= 連鎖) 対は採用しない。
+    return {a: c for a, c in raw.items() if c not in raw}
+
+
+def canonical_symbol(symbol: str, aliases: Mapping[str, str] | None) -> str:
+    """rename マップを 1 段だけ適用した symbol (マップが無ければそのまま)。"""
+    sym = str(symbol).upper()
+    if not aliases:
+        return sym
+    return str(aliases.get(sym, sym)).upper()
+
+
+def select_applicable_renames(
+    rows: Sequence[Mapping[str, Any]],
+    candidates: Sequence[Mapping[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """手で書いた rename 定義のうち、**約定履歴が独立に裏づけた対だけ**を採用する。
+
+    ``candidates`` は :func:`pair_rename_candidates` の出力 = 「建玉の残差が
+    *一意に* 打ち消し合う対」。config に書いてあっても、この裏づけが無い対は
+    採用しない。設定ファイルを書き換えるだけでは架空の round-trip を作れない、
+    という保証がこの関数の存在理由。
+
+    戻り値は ``(applied, rejected)``。``rejected`` には理由が入る。
+    """
+    proposed = {
+        frozenset(
+            (
+                str(c.get("from_symbol", "")).upper(),
+                str(c.get("to_symbol", "")).upper(),
+            )
+        ): c
+        for c in candidates
+    }
+    applied: list[dict[str, Any]] = []
+    rejected: list[dict[str, Any]] = []
+    for row in rows:
+        alias = str(row.get("alias", "") or "").strip().upper()
+        canonical = str(row.get("canonical", "") or "").strip().upper()
+        entry = dict(row)
+        entry["alias"] = alias
+        entry["canonical"] = canonical
+        if not alias or not canonical:
+            entry["rejected_reason"] = "incomplete: alias / canonical が空"
+            rejected.append(entry)
+            continue
+        if alias == canonical:
+            entry["rejected_reason"] = "self_reference: alias と canonical が同じ"
+            rejected.append(entry)
+            continue
+        match = proposed.get(frozenset((alias, canonical)))
+        if match is None:
+            entry["rejected_reason"] = (
+                "unique_offset_not_found: 約定履歴から再構成した建玉の残差が"
+                " 一意に打ち消し合う対として現れない (裏づけ無しなので統合しない)"
+            )
+            rejected.append(entry)
+            continue
+        entry["observed_qty"] = match.get("qty")
+        entry["corroboration"] = match.get("evidence")
+        applied.append(entry)
+    return applied, rejected
+
+
+def reconstruct_round_trips(
+    fills: Sequence[Fill], *, symbol_aliases: Mapping[str, str] | None = None
+) -> LedgerResult:
     """時系列 fill から FIFO で round-trip を組み、実現損益を確定させる。
 
     long / short 両対応。反対売買が入った時に古い lot から消し込み、
     消し込んだ分だけ ``ClosedTrade`` を生成する。建玉が反転する fill
     (例: long 100 を 150 売る) も残り 50 を新規 short lot として扱う。
+
+    ``symbol_aliases`` (alias -> canonical) を渡すと、ticker rename で分断された
+    約定を **同じ建玉として** 消し込む。旧 symbol で建てて新 symbol で決済した
+    round-trip はこれが無いと永久に決済されず、実現損益が台帳から抜け落ちる。
+    合成した trade には元の symbol を :attr:`ClosedTrade.symbol_aliases` に残す。
     """
     result = LedgerResult(fills_seen=len(fills))
     if fills:
@@ -337,7 +427,8 @@ def reconstruct_round_trips(fills: Sequence[Fill]) -> LedgerResult:
     books: dict[str, deque[OpenLot]] = {}
 
     for f in fills:
-        book = books.setdefault(f.symbol, deque())
+        key = canonical_symbol(f.symbol, symbol_aliases)
+        book = books.setdefault(key, deque())
         remaining = f.signed_qty
 
         # 反対側の lot がある限り消し込む
@@ -347,9 +438,10 @@ def reconstruct_round_trips(fills: Sequence[Fill]) -> LedgerResult:
             direction = Decimal(1) if lot.qty > 0 else Decimal(-1)
             # long: (exit - entry) * qty / short: (entry - exit) * qty
             realized = (f.price - lot.price) * take * direction
+            aliases = sorted({lot.raw_symbol or key, f.symbol.upper()} - {key})
             result.closed_trades.append(
                 ClosedTrade(
-                    symbol=f.symbol,
+                    symbol=key,
                     side="long" if direction > 0 else "short",
                     qty=take,
                     entry_time=lot.opened_at,
@@ -359,6 +451,7 @@ def reconstruct_round_trips(fills: Sequence[Fill]) -> LedgerResult:
                     realized_pl=realized,
                     exit_order_id=f.order_id,
                     entry_order_id=lot.order_id,
+                    symbol_aliases=aliases,
                 )
             )
             lot.qty -= direction * take
@@ -369,11 +462,12 @@ def reconstruct_round_trips(fills: Sequence[Fill]) -> LedgerResult:
         if remaining != 0:
             book.append(
                 OpenLot(
-                    symbol=f.symbol,
+                    symbol=key,
                     qty=remaining,
                     price=f.price,
                     opened_at=f.transaction_time,
                     order_id=f.order_id,
+                    raw_symbol=f.symbol.upper(),
                 )
             )
 
@@ -396,6 +490,7 @@ def reconcile_with_broker(
     broker_positions: Mapping[str, Any],
     *,
     epsilon: Decimal = QTY_EPSILON,
+    symbol_aliases: Mapping[str, str] | None = None,
 ) -> list[LotDiscrepancy]:
     """再構成建玉 と broker の実 position を突合し、食い違いを列挙する。
 
@@ -408,11 +503,16 @@ def reconcile_with_broker(
       - corporate action (分割・併合) による株数変化
     """
     recon = net_open_qty(result)
-    broker = {
-        str(k).upper(): Decimal(str(v))
-        for k, v in broker_positions.items()
-        if Decimal(str(v)) != 0
-    }
+    # broker 側も同じ canonical に寄せてから突合する。片側だけ寄せると
+    # rename 対が「復元にはあるが broker に無い」と永久に食い違い続ける。
+    broker: dict[str, Decimal] = {}
+    for k, v in broker_positions.items():
+        qty = Decimal(str(v))
+        if qty == 0:
+            continue
+        key = canonical_symbol(str(k), symbol_aliases)
+        broker[key] = broker.get(key, Decimal(0)) + qty
+    broker = {k: v for k, v in broker.items() if v != 0}
 
     discrepancies: list[LotDiscrepancy] = []
     for sym in sorted(set(recon) | set(broker)):

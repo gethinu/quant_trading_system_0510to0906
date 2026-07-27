@@ -209,6 +209,8 @@ export interface AlpacaPosition {
   intraday_pl: number | null;
   intraday_pl_pct: number | null;
   entry_date: string | null;
+  /** ticker rename の旧 symbol 経由で system を引いた場合の旧 symbol。 */
+  renamed_from?: string | null;
   holding_days: number | null;
   max_holding_days: number;
   days_remaining: number | null;
@@ -293,6 +295,8 @@ export interface ClosedTrade {
   exit_reason: string | null;
   exit_order_id: string | null;
   entry_order_id?: string | null;
+  /** ticker rename で統合した場合の元の symbol 群 (canonical 以外)。 */
+  symbol_aliases?: string[];
   /** system を何を根拠に付けたか ("entry_order" が trade 単位の確定根拠)。 */
   system_source?: string | null;
   /** system が付かなかった理由 (system が null の時だけ入る)。 */
@@ -367,6 +371,24 @@ export interface ExitReasonTotal {
   realized_pl: number;
 }
 
+/** ticker rename の統合結果。手動マップであることを画面から隠さない。 */
+export interface ExitRenames {
+  source: string;
+  /** 常に false = broker 側に corporate action の裏づけが無い。 */
+  confirmed_by_broker: boolean;
+  applied: {
+    alias: string;
+    canonical: string;
+    qty?: number;
+    observed_qty?: number;
+    evidence?: string;
+    corroboration?: string;
+  }[];
+  rejected: { alias?: string; canonical?: string; rejected_reason: string }[];
+  /** 統合によって復元された決済の本数。 */
+  n_synthesized_trades: number;
+}
+
 export interface ExitIntentRecon {
   session_date: string;
   /** "before_open" | "open" | "closed" | "unknown"。 */
@@ -416,6 +438,8 @@ export interface RealizedBlock {
   attribution?: ExitAttribution | null;
   /** 全決済が母数の exit 理由内訳。旧 snapshot には無い。 */
   by_exit_reason?: ExitReasonTotal[];
+  /** ticker rename の統合結果。旧 snapshot には無い。 */
+  renames?: ExitRenames | null;
   exit_intent_reconciliation?: ExitIntentRecon | null;
   today?: LedgerToday | null;
 }

@@ -226,6 +226,31 @@ def _load_entry_dates_file() -> dict[str, str]:
     return {str(k).upper(): str(v)[:10] for k, v in raw.items()}
 
 
+def _load_rename_aliases() -> dict[str, str]:
+    """``config/ticker_renames.json`` の alias -> canonical (無ければ空)。
+
+    ticker rename 後の symbol で保有している建玉は、発注記録が **旧 symbol** に
+    しか無いので system が引けない。旧 symbol に寄せて引き直すために使う。
+    表示する symbol は broker が返す現行のものから変えない。
+    """
+    p = ROOT / "config" / "ticker_renames.json"
+    if not p.exists():
+        return {}
+    try:
+        data = json.loads(p.read_text(encoding="utf-8")) or {}
+    except (OSError, ValueError):
+        return {}
+    out: dict[str, str] = {}
+    for row in data.get("renames") or []:
+        if not isinstance(row, dict):
+            continue
+        alias = str(row.get("alias", "") or "").strip().upper()
+        canonical = str(row.get("canonical", "") or "").strip().upper()
+        if alias and canonical and alias != canonical:
+            out[alias] = canonical
+    return out
+
+
 def _resolve_tags(
     symbol: str,
     *,
@@ -233,23 +258,44 @@ def _resolve_tags(
     tracker: dict[str, Any],
     symbol_map: dict[str, str],
     entry_file: dict[str, str],
-) -> tuple[str | None, str | None]:
-    """(system, entry_date) を優先順位付きで解決。"""
+    rename_aliases: dict[str, str] | None = None,
+) -> tuple[str | None, str | None, str | None]:
+    """(system, entry_date, renamed_from) を優先順位付きで解決。
+
+    現行 symbol で引けなかった時だけ ticker rename の旧 symbol で引き直す。
+    その経路で解決した場合は 3 つ目に旧 symbol を返す (由来を黙って隠さない)。
+    """
     sym = symbol.upper()
     system: str | None = None
     entry_date: str | None = None
 
-    for src in (orders_index.get(sym), tracker.get(sym)):
-        if isinstance(src, dict):
-            if system is None and src.get("system"):
-                system = str(src["system"]).lower()
-            if entry_date is None and src.get("entry_date"):
-                entry_date = str(src["entry_date"])[:10]
-    if system is None:
-        system = symbol_map.get(sym)
-    if entry_date is None:
-        entry_date = entry_file.get(sym)
-    return system, entry_date
+    def _lookup(key: str) -> tuple[str | None, str | None]:
+        sys_tag: str | None = None
+        ed: str | None = None
+        for src in (orders_index.get(key), tracker.get(key)):
+            if isinstance(src, dict):
+                if sys_tag is None and src.get("system"):
+                    sys_tag = str(src["system"]).lower()
+                if ed is None and src.get("entry_date"):
+                    ed = str(src["entry_date"])[:10]
+        if sys_tag is None:
+            sys_tag = symbol_map.get(key)
+        if ed is None:
+            ed = entry_file.get(key)
+        return sys_tag, ed
+
+    system, entry_date = _lookup(sym)
+
+    renamed_from: str | None = None
+    canonical = (rename_aliases or {}).get(sym)
+    if canonical and system is None:
+        alias_system, alias_entry = _lookup(canonical)
+        if alias_system:
+            system = alias_system
+            renamed_from = canonical
+            if entry_date is None:
+                entry_date = alias_entry
+    return system, entry_date, renamed_from
 
 
 # --------------------------------------------------------------------------
@@ -760,6 +806,7 @@ def _realized_block(ledger: dict[str, Any] | None, date_str: str) -> dict[str, A
             "closed_trades": [],
             "measurement": None,
             "attribution": None,
+            "renames": None,
         }
     measurement = ledger.get("measurement") or {}
     realized = ledger.get("realized") or {}
@@ -789,6 +836,8 @@ def _realized_block(ledger: dict[str, Any] | None, date_str: str) -> dict[str, A
         "measurement": measurement,
         # system 帰属の根拠内訳 (unknown を「なぜ不明か」まで出すため)。
         "attribution": ledger.get("attribution"),
+        # ticker rename の統合結果。手動マップである旨を画面から隠さない。
+        "renames": ledger.get("renames"),
         "exit_intent_reconciliation": ledger.get("exit_intent_reconciliation"),
         "today": ledger.get("today"),
     }
@@ -906,6 +955,7 @@ def build_snapshot(
     orders_index = _fetch_orders_index(client)
     tracker = load_tracker() or {}
     symbol_map = _load_symbol_system_map()
+    rename_aliases = _load_rename_aliases()
     entry_file = _load_entry_dates_file()
 
     symbols = [str(getattr(p, "symbol", "") or "").upper() for p in raw_positions]
@@ -923,6 +973,7 @@ def build_snapshot(
             tracker=tracker,
             symbol_map=symbol_map,
             entry_file=entry_file,
+            rename_aliases=rename_aliases,
         )[0]
         is None
     ]
@@ -952,12 +1003,13 @@ def build_snapshot(
         intr = _f(getattr(p, "unrealized_intraday_pl", None))
         intrpc = _f(getattr(p, "unrealized_intraday_plpc", None))
 
-        system, entry_date = _resolve_tags(
+        system, entry_date, renamed_from = _resolve_tags(
             sym,
             orders_index=orders_index,
             tracker=tracker,
             symbol_map=symbol_map,
             entry_file=entry_file,
+            rename_aliases=rename_aliases,
         )
         # tag 無し + Alpaca 上 INACTIVE/非tradable → "delisted" (事実ラベル)。
         # rules は本物の system で引く (delisted は取引ルール無し)。
@@ -1011,6 +1063,9 @@ def build_snapshot(
             "intraday_pl": round(intr, 2) if intr is not None else None,
             "intraday_pl_pct": round(intrpc * 100.0, 3) if intrpc is not None else None,
             "entry_date": entry_date,
+            # ticker rename の旧 symbol 経由で system を引いた場合のみ入る。
+            # 「なぜ MF が system3 なのか」を画面から辿れるようにするため。
+            "renamed_from": renamed_from,
             "holding_days": holding_days,
             "max_holding_days": max_hold,
             "days_remaining": days_remaining,

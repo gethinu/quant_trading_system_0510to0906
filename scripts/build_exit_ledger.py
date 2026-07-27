@@ -53,6 +53,7 @@ from common.exit_ledger import (  # noqa: E402
     SESSION_UNKNOWN,
     ExitLedgerError,
     attribute_systems,
+    normalize_rename_map,
     pair_rename_candidates,
     parse_fills,
     realized_by_day,
@@ -60,6 +61,7 @@ from common.exit_ledger import (  # noqa: E402
     reconcile_intents_with_fills,
     reconcile_with_broker,
     reconstruct_round_trips,
+    select_applicable_renames,
     summarize_attribution,
     summarize_by_exit_reason,
     summarize_by_system,
@@ -236,6 +238,31 @@ def build_order_file_system_map(
     return mapping
 
 
+RENAME_CONFIG = ROOT / "config" / "ticker_renames.json"
+
+
+def load_rename_definitions(path: Path | None = None) -> list[dict[str, Any]]:
+    """``config/ticker_renames.json`` の ``renames`` 行を読む (無ければ空)。
+
+    **手でメンテするマップ**であって broker の裏づけは無い。だからここでは
+    読むだけで、採用可否は :func:`common.exit_ledger.select_applicable_renames`
+    が約定履歴と突き合わせて決める。壊れた JSON は握り潰さずに空へ縮退させ、
+    「統合されなかった」が台帳の未計測理由として表に出るようにする。
+    """
+    target = path or RENAME_CONFIG
+    if not target.exists():
+        return []
+    try:
+        data = json.loads(target.read_text(encoding="utf-8")) or {}
+    except (OSError, ValueError) as exc:
+        print(f"[WARN] {target.name} を読めない ({exc}) -> rename 統合はしない")
+        return []
+    rows = data.get("renames")
+    if not isinstance(rows, list):
+        return []
+    return [r for r in rows if isinstance(r, dict)]
+
+
 def build_symbol_system_map() -> dict[str, str]:
     """``data/symbol_system_map.json`` -> symbol(大文字) -> primary system。
 
@@ -381,8 +408,38 @@ def main(argv: list[str] | None = None) -> int:
         clock = None
     session_state = resolve_session_state(date_str, clock)
 
-    result = reconstruct_round_trips(fills)
-    reconcile_with_broker(result, broker_positions)
+    # --- pass 1: rename マップ **無し** で組む -------------------------------
+    # 手で書いた rename 定義を無条件に信じない。まず素の約定履歴だけで建玉を
+    # 再構成し、残差が *一意に* 打ち消し合う対を機械的に洗い出す。config は
+    # その候補を「採用する」ことしかできない (= 設定だけでは対を捏造できない)。
+    baseline = reconstruct_round_trips(fills)
+    reconcile_with_broker(baseline, broker_positions)
+    candidates = pair_rename_candidates(baseline.discrepancies)
+    applied_renames, rejected_renames = select_applicable_renames(
+        load_rename_definitions(), candidates
+    )
+    alias_map = normalize_rename_map(applied_renames)
+
+    # --- pass 2: 裏づけの取れた対だけ統合して組み直す -------------------------
+    if alias_map:
+        result = reconstruct_round_trips(fills, symbol_aliases=alias_map)
+        reconcile_with_broker(result, broker_positions, symbol_aliases=alias_map)
+    else:
+        result = baseline
+
+    # rename 統合で *増えた* 決済本数 = 統合しなければ台帳から抜けていた round-trip。
+    n_synthesized = len(result.closed_trades) - len(baseline.closed_trades)
+
+    for row in applied_renames:
+        print(
+            f"[exit_ledger][rename] 統合: {row['alias']} -> {row['canonical']} "
+            f"({row.get('observed_qty')} 株, 手動マップ / broker 裏づけ無し)"
+        )
+    for row in rejected_renames:
+        print(
+            f"[exit_ledger][rename][REJECTED] {row.get('alias')} -> "
+            f"{row.get('canonical')}: {row['rejected_reason']}"
+        )
 
     # system 帰属: entry 注文の client_order_id (trade 単位の ground truth) を第一に、
     # 取れないものだけ symbol 単位の記録へ縮退する。根拠は trade ごとに残す。
@@ -463,9 +520,18 @@ def main(argv: list[str] | None = None) -> int:
             "coverage_end": result.coverage_end,
             "unmeasured_symbols": result.unmeasured_symbols,
             "discrepancies": [d.to_row() for d in result.discrepancies],
-            # 建玉の食い違いを rename の「対」に組んだ仮説。断定ではないので
-            # 実現損益には一切混ぜない (confirmed=false のまま表に出すだけ)。
+            # 統合後に *まだ残っている* 食い違いから組んだ rename 候補
+            # (= config に未登録の対)。断定ではないので損益には混ぜない。
             "rename_candidates": pair_rename_candidates(result.discrepancies),
+        },
+        # ticker rename の統合結果。手動マップであることと、採用/不採用の
+        # 理由を必ず添える (黙って round-trip を合成しない)。
+        "renames": {
+            "source": "config/ticker_renames.json (手動・broker 側の裏づけ無し)",
+            "confirmed_by_broker": False,
+            "applied": applied_renames,
+            "rejected": rejected_renames,
+            "n_synthesized_trades": n_synthesized,
         },
         # system 帰属の内訳。unknown を黙って一塊にせず「なぜ不明か」を出す。
         "attribution": attribution,
@@ -515,6 +581,11 @@ def main(argv: list[str] | None = None) -> int:
         f"{attribution['n_trades']} (うち entry 注文から確定 {attribution['n_ground_truth']}"
         f" = {attribution['ground_truth_pct']}%) unknown={attribution['n_unknown']}"
     )
+    if applied_renames:
+        print(
+            f"[exit_ledger][rename] 手動マップ {len(applied_renames)} 対を統合し "
+            f"{n_synthesized} 本の決済を復元 (broker 側の裏づけは無い)"
+        )
     for row in attribution["unknown_by_reason"]:
         print(
             f"[exit_ledger][attribution][unknown] {row['reason']}: "

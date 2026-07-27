@@ -1,0 +1,37 @@
+{
+  "schema": "ticker_renames/v1",
+  "note": "ticker rename / corporate action で symbol が変わり、約定履歴が旧 symbol と新 symbol に分断された対を手で繋ぐマップ。alias(新) を canonical(旧) に寄せる。canonical 側は entry の client_order_id に system tag が載っている方を選んでいる。",
+  "provenance": "手動。**ブローカー側に裏付けは無い** -- Alpaca paper の activities に corporate action (NC/CA) が一切無く、asset id も社名も一致しないため API からは断定できない。株数がちょうど打ち消し合うという状態証拠と、決裁による判断で入れている。",
+  "safety": "ここに書いても無条件では適用されない。約定履歴から独立に再構成した建玉の残差が **一意に打ち消し合う** 対だけが採用され、一意に決まらないものは reason つきで拒否される (config を書き換えても憶測の対は作れない)。",
+  "decided_at": "2026-07-27",
+  "renames": [
+    {
+      "alias": "FISV",
+      "canonical": "FI",
+      "qty": 23,
+      "evidence": "FI を 2025-11-03 に 23 株買い、FISV を 2025-12-12 に 23 株売り。どちらも反対売買が無く残差が一意に打ち消す。FI は symbol_system_map で system3。",
+      "confirmed_by_broker": false
+    },
+    {
+      "alias": "AGNT",
+      "canonical": "EXPI",
+      "qty": 150,
+      "evidence": "EXPI を 2026-01-05 に 150 株買い、AGNT を 2026-07-06 に 150 株売り。残差が一意に打ち消す。EXPI の asset は Alpaca から既に消えている (asset not found)。",
+      "confirmed_by_broker": false
+    },
+    {
+      "alias": "CHRN",
+      "canonical": "EKSO",
+      "qty": 119,
+      "evidence": "EKSO を 2026-01-05 に 119 株買い、CHRN を 2026-07-06 に 119 株売り。残差が一意に打ち消す。EKSO は inactive、CHRN は active。",
+      "confirmed_by_broker": false
+    },
+    {
+      "alias": "MF",
+      "canonical": "UBXG",
+      "qty": 100,
+      "evidence": "UBXG を 2026-07-13 に 100 株買った約定はあるが broker に UBXG が無く、代わりに MF を 100 株保有 (MF の約定は 1 件も無い)。UBXG の entry client_order_id は system3-UBXG-20260713 なので、この建玉は system3。未決済。",
+      "confirmed_by_broker": false
+    }
+  ]
+}
