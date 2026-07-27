@@ -1,5 +1,7 @@
 # HUMAN_TASK: Streamlit 常時起動化 + Tailscale 経由 private アクセス (2026-07-01)
 
+> **[2026-07-12 廃止 / DEPRECATED]** Streamlit UI (8501/8502) は Vercel モニターへ移行し常用廃止。`QuantTrading_StreamlitToday`/`QuantTrading_StreamlitAlpaca` タスクは Disabled。**ただし `apps/app_today_signals.py` は `daily_pipeline.ps1` の headless signals 生成 (`--headless`→`common.signal_export.run_headless`) として存続するため物理削除しない**（休眠 UI のみ廃止）。付随して、Streamlit UI 専用の端株 exit バグ (chip `task_d1f856b2`: `_evaluate_position_for_exit` L2576 / MOC-OPG 送信 L4175) は UI 未使用のため **WONTFIX**（自動発注経路は `common/alpaca_trading.py` 側で 2026-07-12 に修正済 = branch `claude/fix-fractional-exit-20260712`）。
+
 対象 branch: `claude/monitor-webapp`
 対象マシン: mini-PC (SERV870, Windows), Tailscale IP = `100.124.50.52`
 対象アプリ:

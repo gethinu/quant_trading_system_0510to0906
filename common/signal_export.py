@@ -227,6 +227,7 @@ def build_signals_json(
     status: str = "ok",
     abort_reason: str | None = None,
     stage_metrics: dict[str, Any] | None = None,
+    portfolio_caps: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """``(final_df, per_system)`` を version 1.0 の JSON dict に変換する。
 
@@ -382,6 +383,11 @@ def build_signals_json(
                 if funnel_by_sys
                 else None
             ),
+            # portfolio cap の held/allow/trimmed。per-system funnel は生成側しか
+            # 語らないため、cand が健全なのに signals=0 の system があると理由が
+            # JSON に残らない (2026-07-21..27 は held_long=51 > max_long=40 で
+            # allow_long=0 → long 4 system が毎日 0 本)。cap 未適用なら None。
+            "caps": dict(portfolio_caps) if portfolio_caps else None,
         },
         "meta": {
             "cli_version": cli_version,
@@ -529,16 +535,21 @@ def run_headless(argv: list[str]) -> int:
     # compute_today_signals は実行中に GLOBAL_STAGE_METRICS を副作用で埋める。
     # ここで snapshot を取り出し funnel (Tgt/FIL/STU/TRD/Entry/Exit) を JSON に載せる。
     stage_metrics: dict[str, Any] | None = None
+    # portfolio cap の trim 報告も同じ side-channel で受け取り、
+    # 「cand は健全なのに signals=0」の理由を JSON に残す。
+    portfolio_caps: dict[str, Any] | None = None
     try:
         from common.stage_metrics import GLOBAL_STAGE_METRICS
 
         snapshots = GLOBAL_STAGE_METRICS.all_snapshots()
         if snapshots:
             stage_metrics = dict(snapshots)
+        portfolio_caps = GLOBAL_STAGE_METRICS.get_portfolio_caps()
     except (
         Exception
     ):  # noqa: BLE001 - funnel は best-effort。失敗しても signals は出す。
         stage_metrics = None
+        portfolio_caps = None
 
     payload = build_signals_json(
         final_df,
@@ -549,6 +560,7 @@ def run_headless(argv: list[str]) -> int:
         status=status,
         abort_reason=abort_reason,
         stage_metrics=stage_metrics,
+        portfolio_caps=portfolio_caps,
     )
 
     out_path = (

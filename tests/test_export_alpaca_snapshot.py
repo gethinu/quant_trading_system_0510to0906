@@ -158,135 +158,206 @@ def test_latest_json_numeric_ordering(tmp_path):
     assert latest.name == "alpaca_snapshot_20260709.json"
 
 
-# --- freeze-aware today baseline (pure) -----------------------------------
-# 実データ (2026-07-14 snapshot / live probe) の値で回帰を固定する。
-_FREEZE = dict(
-    equity=106024.72,  # 07-14 snapshot equity (実勢)
-    last_equity=101812.81,  # 07-13 daily-close (凍結ラグで低く据え置き)
-    prev_intraday=105825.56,  # 07-13 intraday 最終 (実勢, 1H/ext 実測)
-)
+# --- 当日損益 / 期間切替 / 実現損益 ---------------------------------------
+def test_last_equity_is_never_used_for_today_pnl():
+    """``equity - last_equity`` は基準違いの引き算。二度と書かない (source guard)。
 
-
-def test_baseline_freeze_lag_switches_to_intraday():
-    """凍結ラグ日: daily-close が intraday より ~$4,013 低い → intraday 基準に補正。
-
-    phantom (+$4,211 / +4.14%) が消え、実勢の小さな当日差になること。
+    2026-07-20 の published snapshot はこの式で「今日 +$2,850.35」を出していた。
     """
-    baseline, basis, gap = ex.resolve_today_baseline(
-        _FREEZE["equity"], _FREEZE["last_equity"], _FREEZE["prev_intraday"]
+    import io
+    import tokenize
+
+    with open(ex.__file__, encoding="utf-8") as fh:
+        source = fh.read()
+    # コメント / docstring は「なぜ禁止か」の説明でこの式を含むので除外し、
+    # 実行される code だけを見る。
+    code = "".join(
+        tok.string if tok.type not in (tokenize.COMMENT, tokenize.STRING) else " "
+        for tok in tokenize.generate_tokens(io.StringIO(source).readline)
+        if tok.type
+        not in (tokenize.NL, tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT)
     )
-    assert basis == "freeze_adjusted"
-    assert baseline == pytest.approx(105825.56, abs=0.01)
-    assert gap == pytest.approx(105825.56 - 101812.81, abs=0.01)  # +4012.75
-    # 補正後の当日 P&L は phantom($4,211)でなく実勢(~$199, <0.3%)
-    adj_abs = round(_FREEZE["equity"] - baseline, 2)
-    adj_pct = round((_FREEZE["equity"] - baseline) / baseline * 100.0, 3)
-    assert adj_abs == pytest.approx(199.16, abs=0.01)
-    assert abs(adj_pct) < 0.3
-    # raw(未補正)は依然 phantom を示す (透明性)
-    raw_pct = (
-        (_FREEZE["equity"] - _FREEZE["last_equity"]) / _FREEZE["last_equity"] * 100
+    normalized = code.replace(" ", "")
+    for expr in ("equity-last_equity", "last_equity-equity"):
+        assert expr not in normalized, f"当日損益に基準違いの式 {expr!r} が復活している"
+    # last_equity は「参考値としてそのまま載せる」以外に使わない。
+    assert "resolve_session_pnl" in normalized
+
+
+def test_fold_intraday_by_session_takes_last_point_of_each_session():
+    points = [
+        {"t": "2026-07-17 15:55", "session": "2026-07-17", "equity": 104900.0},
+        {"t": "2026-07-17 16:00", "session": "2026-07-17", "equity": 104931.91},
+        {"t": "2026-07-20 09:35", "session": "2026-07-20", "equity": 103515.47},
+    ]
+    folded = ex.fold_intraday_by_session(points)
+    assert folded == {"2026-07-17": 104931.91, "2026-07-20": 103515.47}
+
+
+def test_fold_intraday_drops_nonpositive_and_missing_equity():
+    points = [
+        {"t": "x", "session": "2026-07-17", "equity": 0},
+        {"t": "y", "session": "2026-07-17", "equity": None},
+        {"t": "z", "session": None, "equity": 100.0},
+    ]
+    assert ex.fold_intraday_by_session(points) == {}
+
+
+def _daily(*pairs):
+    return [{"t": t, "equity": e, "pl": None, "pl_pct": None} for t, e in pairs]
+
+
+def test_build_equity_ranges_marks_basis_and_never_mixes_them():
+    """1D は intraday、長期は broker 日次。会計基準が違うので必ずラベルする。"""
+    daily = _daily(
+        ("2026-04-01", 100.0),
+        ("2026-06-01", 110.0),
+        ("2026-07-17", 100665.12),
+        ("2026-07-20", 99355.81),
     )
-    assert raw_pct == pytest.approx(4.137, abs=0.01)
+    intraday = [
+        {"t": "2026-07-20 09:35", "session": "2026-07-20", "equity": 103515.47},
+        {"t": "2026-07-20 09:40", "session": "2026-07-20", "equity": 103600.0},
+    ]
+    ranges = ex._build_equity_ranges(daily, intraday, "2026-07-20", 103700.0)
+
+    assert set(ranges) == {"1D", "1W", "1M", "3M", "ALL"}
+    assert ranges["1D"]["basis"] == "intraday"
+    for key in ("1W", "1M", "3M", "ALL"):
+        assert ranges[key]["basis"] == "broker_daily"
+    # 日次レンジに live equity 点を足さない (末尾だけ数千ドル跳ねる旧事故の再発防止)
+    for key in ("1W", "1M", "3M", "ALL"):
+        assert all(not p.get("live") for p in ranges[key]["points"])
+        assert ranges[key]["points"][-1]["equity"] == 99355.81
+    # 1D は当日 intraday + live 点
+    assert ranges["1D"]["points"][-1]["equity"] == 103700.0
+    assert ranges["1D"]["points"][-1]["live"] is True
 
 
-def test_baseline_normal_day_unchanged():
-    """平常日 (intraday ≈ daily-close): last_equity 基準のまま挙動不変。"""
-    # 前日 intraday が daily-close とほぼ一致 (乖離 $12 = 閾値未満)
-    baseline, basis, gap = ex.resolve_today_baseline(
-        equity=101200.0, last_equity=101000.0, prev_intraday_equity=101012.0
+def test_build_equity_ranges_slices_by_days_and_recomputes_drawdown_per_range():
+    daily = _daily(
+        ("2026-01-05", 100.0),  # ALL にだけ入る古い山
+        ("2026-07-15", 90.0),
+        ("2026-07-20", 95.0),
     )
-    assert basis == "last_equity"
-    assert baseline == 101000.0
-    assert gap is None
+    ranges = ex._build_equity_ranges(daily, [], "2026-07-20", None)
+    assert [p["t"] for p in ranges["1W"]["points"]] == ["2026-07-15", "2026-07-20"]
+    assert [p["t"] for p in ranges["ALL"]["points"]] == [
+        "2026-01-05",
+        "2026-07-15",
+        "2026-07-20",
+    ]
+    # 区間ごとに peak を取り直す (1W が過去の 100 からの DD を引きずらない)
+    assert ranges["1W"]["peak_equity"] == 95.0
+    assert ranges["ALL"]["peak_equity"] == 100.0
 
 
-def test_baseline_no_intraday_falls_back():
-    """intraday 取得不可 (None) → last_equity 基準に安全 fallback。"""
-    baseline, basis, gap = ex.resolve_today_baseline(
-        equity=106000.0, last_equity=101800.0, prev_intraday_equity=None
+def test_build_equity_ranges_empty_is_empty_not_zero():
+    """データが無いレンジは points 空。0 の点をでっち上げない。"""
+    ranges = ex._build_equity_ranges([], [], None, None)
+    for key in ("1D", "1W", "ALL"):
+        assert ranges[key]["points"] == []
+        assert ranges[key]["n_points"] == 0
+        assert ranges[key]["period_return_pct"] is None
+
+
+def test_compute_equity_basis_explains_the_daily_series_gap():
+    """live equity と broker 日次系列の差を「上場廃止建玉の時価」で説明する。"""
+    positions = [
+        {"symbol": "CDTX", "system": "delisted", "market_value": 2213.80},
+        {"symbol": "FOLD", "system": "delisted", "market_value": 2072.07},
+        {"symbol": "AAPL", "system": "system1", "market_value": 5000.0},
+    ]
+    basis = ex.compute_equity_basis(
+        positions,
+        equity=103804.68,
+        last_daily_equity=99355.81,
+        last_daily_session="2026-07-20",
     )
-    assert basis == "last_equity"
-    assert baseline == 101800.0
-    assert gap is None
+    assert basis["n_frozen"] == 2
+    assert basis["frozen_symbols"] == ["CDTX", "FOLD"]
+    assert basis["frozen_market_value"] == pytest.approx(4285.87, abs=0.01)
+    assert basis["daily_series_gap"] == pytest.approx(4448.87, abs=0.01)
+    assert basis["last_daily_session"] == "2026-07-20"
+    # 説明しきれない残差 (日次最終点以降の値動きを含む) も隠さない
+    assert basis["residual_usd"] == pytest.approx(163.0, abs=0.01)
 
 
-def test_baseline_threshold_pct_gate():
-    """乖離が equity 比 1% 未満なら補正しない (境界)。"""
-    eq = 100000.0
-    # gap = $900 (<$1000 かつ <1%) → 補正なし
-    _, basis_lo, _ = ex.resolve_today_baseline(eq, 100000.0, 100900.0)
-    assert basis_lo == "last_equity"
-    # gap = $1500 (>$1000 かつ >1%) → 補正
-    _, basis_hi, _ = ex.resolve_today_baseline(eq, 100000.0, 101500.0)
-    assert basis_hi == "freeze_adjusted"
+def test_compute_equity_basis_without_daily_series_returns_none_gap():
+    basis = ex.compute_equity_basis([], equity=100.0, last_daily_equity=None)
+    assert basis["daily_series_gap"] is None
+    assert basis["residual_usd"] is None
+    assert basis["frozen_market_value"] == 0.0
 
 
-def test_baseline_missing_equity_is_safe():
-    """equity / last_equity が欠損でも例外を出さず last_equity 基準を返す。"""
-    assert ex.resolve_today_baseline(None, 101000.0, 105000.0)[1] == "last_equity"
-    assert ex.resolve_today_baseline(106000.0, None, 105000.0) == (
-        None,
-        "last_equity",
-        None,
-    )
-    assert ex.resolve_today_baseline(106000.0, 0.0, 105000.0)[1] == "last_equity"
+def _ledger(date="2026-07-20", measured=True, by_day=None):
+    return {
+        "date": date,
+        "run_id": "r1",
+        "generated_at": "2026-07-20T14:00:00Z",
+        "measurement": {"measured": measured, "complete": False, "reasons": ["x"]},
+        "today": {"realized_pl": -2333.06, "measured": True, "n_closed": 3},
+        "realized": {
+            "all_time": {"n_trades": 649},
+            "by_day": (
+                [
+                    {
+                        "t": "2026-07-20",
+                        "realized_pl": -2333.06,
+                        "realized_pl_cum": 3334.08,
+                    }
+                ]
+                if by_day is None
+                else by_day
+            ),
+            "by_system": {},
+        },
+        "closed_trades": [{"symbol": "ZCMD"}],
+        "exit_intent_reconciliation": {"fully_reconciled": True},
+    }
 
 
-# --- baseline session pick (off-by-one regression, pure) -------------------
-# 実データ (2026-07-19 live probe, Sunday premarket run) で回帰を固定する。
-# 1D(daily-close) は 1H(intraday) より恒常的に ~$4,285 低い (Alpaca paper の
-# short 計上差と観測)。real-time equity は 1H と整合するため 1D が異常値。
-_D1 = {  # ET date -> daily-close (1D)
-    "2026-07-15": 102020.82,
-    "2026-07-16": 101130.14,
-    "2026-07-17": 100665.12,  # == account.last_equity (直近完了セッション)
-}
-_H1 = {  # ET date -> last intraday equity (1H/ext)
-    "2026-07-15": 106192.77,
-    "2026-07-16": 105703.75,
-    "2026-07-17": 104922.86,  # 07-17 の intraday 整合 close (正しい基準)
-}
+def test_realized_block_absent_ledger_is_unmeasured_not_zero():
+    block = ex._realized_block(None, "2026-07-20")
+    assert block["available"] is False
+    assert block["measured"] is False
+    assert block["all_time"] is None
+    assert block["closed_trades"] == []
+    assert "build_exit_ledger" in block["reason"]
 
 
-def test_pick_baseline_anchors_to_last_equity_session():
-    """off-by-one 回帰: 寄り前/週末実行でも last_equity の指すセッションを選ぶ。
+def test_realized_block_flags_a_stale_ledger():
+    block = ex._realized_block(_ledger(date="2026-07-17"), "2026-07-20")
+    assert block["available"] is True
+    assert block["stale"] is True
+    assert "2026-07-17" in block["reason"]
 
-    旧 sorted[-2] は 07-16 (105703.75) を誤選択し phantom -$752 を出していた。
-    修正後は last_equity(=07-17 daily-close)にアンカーして 07-17 intraday
-    (104922.86) を返す → 当日 P&L はほぼ flat になる。
+
+def test_realized_for_session_matches_the_pnl_baseline_session():
+    """実現損益は **当日損益と同じ立会日** で引く (台帳の "today" を流用しない)。
+
+    台帳の "today" は pipeline のローカル日 (JST)、当日損益の基準は broker の
+    立会日 (ET)。JST 昼に走らせるとこの 2 つは 1 日ずれるので、混ぜると
+    「07-21 の値動きに 07-22 の実現損益をぶつける」ことになる。
     """
-    picked = ex._pick_baseline_intraday_equity(100665.12, _D1, _H1)
-    assert picked == pytest.approx(104922.86, abs=0.01)  # 07-17, NOT 07-16
-    # このセッション基準なら当日 P&L は実勢 (~$28, flat)。phantom(-$752)ではない。
-    equity_now = 104950.99
-    assert round(equity_now - picked, 2) == pytest.approx(28.13, abs=0.5)
+    ledger = _ledger(
+        date="2026-07-22", by_day=[{"t": "2026-07-20", "realized_pl": -2333.06}]
+    )
+    # 台帳範囲内で該当日に決済が無い = 実現 0 (事実)
+    assert ex._realized_for_session(ledger, "2026-07-21") == 0.0
+    assert ex._realized_for_session(ledger, "2026-07-20") == -2333.06
 
 
-def test_pick_baseline_ignores_partial_today_daily_point():
-    """intraday 実行で 1D に当日 partial 点が混ざっても last_equity で正しく同定。"""
-    d1 = dict(_D1)
-    d1["2026-07-20"] = 105200.0  # 当日 partial (高い) が混ざるケース
-    h1 = dict(_H1)
-    h1["2026-07-20"] = 105100.0
-    # last_equity は依然 07-17 (前営業日 close)。当日 partial に釣られない。
-    picked = ex._pick_baseline_intraday_equity(100665.12, d1, h1)
-    assert picked == pytest.approx(104922.86, abs=0.01)  # 07-17
+def test_realized_for_session_refuses_sessions_beyond_the_ledger():
+    """台帳が届いていないセッションを 0 で埋めない。"""
+    ledger = _ledger(date="2026-07-20")
+    assert ex._realized_for_session(ledger, "2026-07-21") is None
 
 
-def test_pick_baseline_fallback_latest_when_no_daily():
-    """1D 取得不可 (空) → intraday 最新日 (直近完了セッション) に fallback。
-
-    旧 [-2] ではなく [-1]: 寄り前/週末は最新 intraday 日が直近完了セッション。
-    """
-    picked = ex._pick_baseline_intraday_equity(100665.12, {}, _H1)
-    assert picked == pytest.approx(104922.86, abs=0.01)  # 最新 = 07-17
-
-
-def test_pick_baseline_empty_or_missing_is_safe():
-    """intraday 空 / last_equity 欠損なら None (=補正しない)。"""
-    assert ex._pick_baseline_intraday_equity(100665.12, _D1, {}) is None
-    assert ex._pick_baseline_intraday_equity(None, _D1, _H1) is None
+def test_realized_for_session_is_none_when_unmeasured_or_absent():
+    assert ex._realized_for_session(_ledger(measured=False), "2026-07-20") is None
+    assert ex._realized_for_session(None, "2026-07-20") is None
+    assert ex._realized_for_session(_ledger(), None) is None
 
 
 # --- ledger reconciliation (pure) -----------------------------------------

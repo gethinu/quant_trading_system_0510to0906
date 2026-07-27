@@ -1282,19 +1282,26 @@ def generate_candidates_system3(
             use_option_b_utils = False
 
         meta_cols = ["_setup_via", "_predicate_pass", "_fallback_pass"]
-        if "_setup_via" in df_all.columns:
-            via_series = df_all["_setup_via"].fillna("").astype(str)
+        # STUpass (setup_predicate_count) は top_n cap の *前* の setup 通過全銘柄を
+        # 数える。cap 後 (df_all = top_cut = ranked.head(top_n)) で数えると STUpass が
+        # 常に <= top_n となり、通過数が多い日でも top_n(=10) に張り付く (dashboard
+        # funnel bug 2026-07-12: sys3/4/5 の STUpass が真の通過数ではなく cap 値 10 を
+        # 表示していた)。`ranked` は label 日で setup/threshold を通過した全行 (cap 前)。
+        # TRDlist (ranked_top_n_count) は従来どおり df_all=top_cut の cap 後件数のまま。
+        setup_frame = ranked if isinstance(ranked, pd.DataFrame) else df_all
+        if "_setup_via" in setup_frame.columns:
+            via_series = setup_frame["_setup_via"].fillna("").astype(str)
             diagnostics["setup_predicate_count"] = int((via_series != "").sum())
 
             predicate_series = (
-                df_all["_predicate_pass"].fillna(False).astype(bool)
-                if "_predicate_pass" in df_all.columns
-                else pd.Series(False, index=df_all.index)
+                setup_frame["_predicate_pass"].fillna(False).astype(bool)
+                if "_predicate_pass" in setup_frame.columns
+                else pd.Series(False, index=setup_frame.index)
             )
             fallback_series = (
-                df_all["_fallback_pass"].fillna(False).astype(bool)
-                if "_fallback_pass" in df_all.columns
-                else pd.Series(False, index=df_all.index)
+                setup_frame["_fallback_pass"].fillna(False).astype(bool)
+                if "_fallback_pass" in setup_frame.columns
+                else pd.Series(False, index=setup_frame.index)
             )
 
             predicate_only_mask = (via_series != "column") & (
@@ -1304,11 +1311,11 @@ def generate_candidates_system3(
             if diagnostics["predicate_only_pass_count"] > 0:
                 diagnostics["mismatch_flag"] = 1
         else:
-            diagnostics["setup_predicate_count"] = len(df_all)
+            diagnostics["setup_predicate_count"] = len(setup_frame)
             diagnostics["predicate_only_pass_count"] = 0
 
         try:
-            diagnostics["setup_unique_symbols"] = int(df_all["symbol"].nunique())
+            diagnostics["setup_unique_symbols"] = int(setup_frame["symbol"].nunique())
         except Exception:
             pass
 

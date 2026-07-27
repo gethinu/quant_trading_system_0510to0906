@@ -228,6 +228,12 @@ def load_symbol_system_map(path: Path | str | None = None) -> dict[str, str]:
         systems = coerce_system_list(v, ensure_all=False)
         primary = systems[0] if systems else None
         if not primary:
+            # 旧形式 (値が素の文字列) だけ str() 経由で拾う。空の list/dict/None を
+            # str() すると "[]" のような **存在しない system 名** が生まれてしまい、
+            # 集計に架空のバケットが立つので、コンテナ型は諦めて落とす
+            # (resolve_primary_system([]) is None と同じ扱い)。
+            if isinstance(v, (list, tuple, set, Mapping)) or v is None:
+                continue
             try:
                 primary = str(v).strip()
             except Exception:

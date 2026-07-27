@@ -99,6 +99,7 @@ class StageMetricsStore:
         self._events: deque[StageEvent] = deque()
         self._lock = Lock()
         self._universe_target: int | None = None
+        self._portfolio_caps: dict[str, object] | None = None
         self.stage_counts: dict[str, dict[str, int | None]] = {}
         self._display_order: list[str] = []
 
@@ -120,6 +121,7 @@ class StageMetricsStore:
             self._snapshots.clear()
             self._events.clear()
             self._universe_target = None
+            self._portfolio_caps = None
 
     def drain_events(self) -> list[StageEvent]:
         """Return and clear all queued stage events."""
@@ -251,6 +253,36 @@ class StageMetricsStore:
 
         with self._lock:
             return self._universe_target
+
+    def set_portfolio_caps(self, report: object | None) -> None:
+        """Persist the portfolio-cap trim report (``_apply_portfolio_caps``).
+
+        funnel の per-system 段 (Tgt/FIL/STU/cand) は「生成側」しか語らないため、
+        cand が健全なのに signals が 0 の system があっても理由が JSON に残らない。
+        実際 2026-07-21..27 は held_long=51 > max_long=40 で ``allow_long=0`` となり
+        long 4 system (1/3/4/5) が毎日 0 本に落ちていたが、その事実は
+        ``[PORTFOLIO_CAP]`` の INFO ログにしか出ておらず、ダッシュボードからは
+        「system2 だけシグナルが出る」ようにしか見えなかった。
+
+        universe_target と同じ side-channel で cap の held/allow/trimmed を運び、
+        signals JSON の ``portfolio.caps`` に載せて「0 の理由」を可観測にする。
+        """
+
+        if report is None:
+            with self._lock:
+                self._portfolio_caps = None
+            return
+        if not isinstance(report, dict):
+            return
+        snapshot = dict(report)
+        with self._lock:
+            self._portfolio_caps = snapshot
+
+    def get_portfolio_caps(self) -> dict[str, object] | None:
+        """Return the last portfolio-cap trim report if one was recorded."""
+
+        with self._lock:
+            return dict(self._portfolio_caps) if self._portfolio_caps else None
 
     # ------------------------------------------------------------------
     # display helpers for Streamlit UI
