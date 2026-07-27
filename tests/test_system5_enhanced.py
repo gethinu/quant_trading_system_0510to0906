@@ -322,11 +322,14 @@ class TestSystem5MainFunctions:
         assert result > 0  # Should return a positive number
 
     def test_format_atr_pct_threshold_label_default(self):
-        """Test ATR threshold label formatting with default"""
+        """Test ATR threshold label formatting with default.
+
+        audit-remediation 2026-07-03 (D3 Case A): default 2.5% → 4% 是正。
+        """
         label = format_atr_pct_threshold_label()
         assert isinstance(label, str)
         assert ">" in label
-        assert "2.50%" in label or "0.025" in label
+        assert "4.00%" in label or "0.04" in label
 
     def test_format_atr_pct_threshold_label_custom(self):
         """Test ATR threshold label formatting with custom value"""
@@ -336,8 +339,11 @@ class TestSystem5MainFunctions:
         assert "5.00%" in label or "0.05" in label
 
     def test_default_atr_pct_threshold_constant(self):
-        """Test DEFAULT_ATR_PCT_THRESHOLD constant"""
-        assert DEFAULT_ATR_PCT_THRESHOLD == 0.025
+        """Test DEFAULT_ATR_PCT_THRESHOLD constant.
+
+        audit-remediation 2026-07-03 (D3 Case A): spec 準拠に 0.025 → 0.04 是正。
+        """
+        assert DEFAULT_ATR_PCT_THRESHOLD == 0.04
         assert isinstance(DEFAULT_ATR_PCT_THRESHOLD, float)
 
 

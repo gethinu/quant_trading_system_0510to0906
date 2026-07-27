@@ -49,10 +49,14 @@ def _base_frame(**overrides) -> pd.DataFrame:
     row = {
         "Close": 100.0,
         "adx7": 60.0,  # > 55
-        "atr_pct": 0.05,  # > 2.5%
+        "atr_pct": 0.05,  # > 4% (Case A, spec)
         "sma100": 90.0,
         "atr10": 5.0,  # Close(100) > sma100(90)+atr10(5)=95 -> True
         "rsi3": 30.0,  # < 50
+        # audit-remediation 2026-07-03 (D3 Case A): 流動性 filter を通過するデフォルト。
+        # spec: avgvolume50 > 500k 株, dollarvolume50 > 2.5M $ (docs/systems/システム5.txt:7-8)
+        "avgvolume50": 1_000_000,  # > 500k spec
+        "dollarvolume50": 10_000_000,  # > 2.5M spec
     }
     row.update(overrides)
     return pd.DataFrame([row])
@@ -111,8 +115,11 @@ def test_predicate_matches_core_setup():
 def test_system5_setup_is_more_selective_than_old():
     """New spec-compliant setup must be a strict subset of the old (looser) setup.
 
-    Old logic: Close>=5 & adx7>35 & atr_pct>2.5% (setup == filter).
-    New logic adds ADX>55, Close>SMA100+ATR10, RSI3<50 -> strictly fewer.
+    Old logic (pre 2026-07-02): Close>=5 & adx7>35 & atr_pct>2.5% (setup == filter).
+    New logic (2026-07-02 + 2026-07-03 Case A) adds:
+      - ADX>55, Close>SMA100+ATR10, RSI3<50 (2026-07-02 setup 是正)
+      - ATR>4%, AvgVol50>500k, DV50>2.5M    (2026-07-03 Case A 流動性 filter + ATR 4%)
+    -> strictly fewer candidates.
     """
     rng = np.random.default_rng(20260702)
     n = 3000
@@ -124,6 +131,10 @@ def test_system5_setup_is_more_selective_than_old():
             "sma100": rng.uniform(4, 200, n),
             "atr10": rng.uniform(0.5, 8, n),
             "rsi3": rng.uniform(0, 100, n),
+            # Case A: 流動性 filter を random universe に含める。
+            # spec 準拠の閾値 (500k / 2.5M) を跨ぐレンジを設定。
+            "avgvolume50": rng.uniform(100_000, 5_000_000, n),
+            "dollarvolume50": rng.uniform(500_000, 20_000_000, n),
         }
     )
     old_setup = (
@@ -136,12 +147,14 @@ def test_system5_setup_is_more_selective_than_old():
     # And strictly fewer on a broad random universe
     assert int(new_setup.sum()) < int(old_setup.sum())
 
-    # Every surviving row satisfies the full spec
+    # Every surviving row satisfies the full spec (Case A: 流動性 filter も)
     sub = df[new_setup]
     assert (sub["adx7"] > MIN_ADX).all()
     assert (sub["rsi3"] < MAX_RSI3).all()
     assert (sub["Close"] > sub["sma100"] + sub["atr10"]).all()
     assert (sub["atr_pct"] > DEFAULT_ATR_PCT_THRESHOLD).all()
+    assert (sub["avgvolume50"] > 500_000).all()
+    assert (sub["dollarvolume50"] > 2_500_000).all()
 
 
 # --- P1: System3 spec-compliant filter/setup --------------------------------

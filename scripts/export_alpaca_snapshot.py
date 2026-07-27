@@ -18,16 +18,32 @@ daily_pipeline.ps1 への配線は Phase 2 (別セッションと競合回避の
       "provider": "alpaca-paper",
       "account": {equity, last_equity, cash, buying_power, long_market_value,
                   short_market_value, pnl_today_abs, pnl_today_pct,
-                  pnl_today_abs_raw, pnl_today_pct_raw, pnl_today_basis,
-                  pnl_today_baseline, freeze_lag_gap,
-                  unrealized_pl_total, status, trading_blocked, pattern_day_trader},
+                  unrealized_pl_total,
+                  # 当日損益の素性 (dashboard はこれを見て「出す / 出さない」を決める)。
+                  # measured=false なら数字を出さない = 幻の当日損益を出さないため。
+                  pnl_today_basis, pnl_today_measured, pnl_today_baseline,
+                  pnl_today_baseline_session, pnl_today_session,
+                  pnl_today_unavailable_reason,
+                  status, trading_blocked, pattern_day_trader},
       "equity_curve": {timeframe, period, base_value, points:[{t,equity,pl,pl_pct,
                        peak,dd_pct}], peak_equity, max_drawdown_pct,
                        period_return_pct, source},
+      # dashboard の期間切替 (1D は intraday / それ以外は broker 日次)。basis を必ず
+      # 持たせ、会計基準の違う系列を混ぜて差を取らせない。
+      "equity_ranges": {"1D"|"1W"|"1M"|"3M"|"ALL": {label, timeframe, points, peak_equity,
+                        max_drawdown_pct, period_return_pct, start, end, n_points, basis}},
+      # live equity と broker 日次系列の水準差を上場廃止建玉で分解 (残差も隠さない)。
+      "equity_basis": {frozen_market_value, frozen_symbols, n_frozen, daily_series_gap,
+                       residual_usd, last_daily_equity, last_daily_session},
+      # 当日損益を「実現 / 含み」に分解した唯一の定義 (同一基準のみ)。
+      "pnl_today": {...},
+      "realized": {available, measured, stale, all_time, closed_trades, reason, ...},
       "exposure": {long_usd, short_usd, gross_usd, net_usd, gross_pct, net_pct,
                    gross_cap_pct, net_cap_pct, by_system:{...}},
       "summary": {n_positions, n_long, n_short, n_winning, n_losing, win_rate_pct,
                   unrealized_pl_total, exit_soon_count, biggest_winner, biggest_loser},
+      # positions[].system: system1..7 / "delisted" (INACTIVE 非tradable) / "unknown"
+      # ledger_qty / ledger_consistent: fill 台帳ネットとの per-position 突合
       "positions": [ {symbol, system, side, qty, ledger_qty, ledger_consistent,
                       avg_entry_price, current_price,
                       lastday_price, market_value, cost_basis, unrealized_pl,
@@ -73,12 +89,17 @@ from common.alpaca_trading import (  # noqa: E402
     parse_entry_date_from_client_order_id,
     parse_system_from_client_order_id,
 )
+from common.exit_ledger import resolve_session_pnl  # noqa: E402
 from common.position_tracker import load_tracker  # noqa: E402
 from common.trade_management import SYSTEM_TRADE_RULES  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA = "alpaca_snapshot/v1"
 PROVIDER = "alpaca-paper"
+
+# system tag が付かず、かつ Alpaca 上で INACTIVE / 非 tradable な asset を指す明示ラベル。
+# (上場廃止で API から close 不能: 事実を "unknown" ではなく "delisted" として表示する。)
+DELISTED_LABEL = "delisted"
 
 # paper endpoint 固定 (live URL は絶対に書かない: test_alpaca_no_live_url ガード)。
 PAPER_BASE = "https://paper-api.alpaca.markets"
@@ -119,7 +140,13 @@ def _side_of(p: Any, qty: float) -> str:
 
 
 def _today_str() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    """出力日の既定値 = *ローカル* 日付。
+
+    daily_pipeline.ps1 / publish_data_to_vercel.ps1 は ``Get-Date`` (ローカル) で
+    ファイル名を決めるので合わせる。UTC だと JST 早朝実行で前日ファイルを探し、
+    exit 台帳との突合が 1 日ずれる。
+    """
+    return datetime.now().strftime("%Y-%m-%d")
 
 
 # --------------------------------------------------------------------------
@@ -167,6 +194,37 @@ def _fetch_orders_index(client: Any) -> dict[str, dict[str, Any]]:
     return idx
 
 
+def _fetch_inactive_assets(client: Any, symbols: list[str]) -> set[str]:
+    """held symbols のうち Alpaca asset が INACTIVE または非 tradable のものを返す。
+
+    read-only の ``get_asset`` (GET) だけを使う。上場廃止 (delisted) 銘柄は
+    ``status=inactive`` / ``tradable=False`` を返すため、system tag が付かない
+    ポジションを ``unknown`` ではなく ``delisted`` に再分類する判定材料にする。
+
+    - 発注・cancel の類は一切しない (観測のみ)。
+    - API/SDK 失敗時は per-symbol で握り潰し、最終的に空集合へ縮退する
+      (= 誰も delisted 扱いにしない安全側。active 銘柄を誤って delisted にしない)。
+    """
+    out: set[str] = set()
+    if client is None:
+        return out
+    for sym in symbols:
+        s = str(sym or "").upper()
+        if not s:
+            continue
+        try:
+            asset = client.get_asset(s)
+        except Exception:
+            continue  # per-symbol 失敗は無視 (active 側に倒す)
+        status_raw = getattr(asset, "status", None)
+        status = str(getattr(status_raw, "value", status_raw) or "").lower()
+        # tradable 属性が欠落した場合は True 既定 (= active 扱い) で誤判定を避ける。
+        tradable = bool(getattr(asset, "tradable", True))
+        if status == "inactive" or not tradable:
+            out.add(s)
+    return out
+
+
 def _load_symbol_system_map() -> dict[str, str]:
     p = ROOT / "data" / "symbol_system_map.json"
     if not p.exists():
@@ -196,6 +254,31 @@ def _load_entry_dates_file() -> dict[str, str]:
     return {str(k).upper(): str(v)[:10] for k, v in raw.items()}
 
 
+def _load_rename_aliases() -> dict[str, str]:
+    """``config/ticker_renames.json`` の alias -> canonical (無ければ空)。
+
+    ticker rename 後の symbol で保有している建玉は、発注記録が **旧 symbol** に
+    しか無いので system が引けない。旧 symbol に寄せて引き直すために使う。
+    表示する symbol は broker が返す現行のものから変えない。
+    """
+    p = ROOT / "config" / "ticker_renames.json"
+    if not p.exists():
+        return {}
+    try:
+        data = json.loads(p.read_text(encoding="utf-8")) or {}
+    except (OSError, ValueError):
+        return {}
+    out: dict[str, str] = {}
+    for row in data.get("renames") or []:
+        if not isinstance(row, dict):
+            continue
+        alias = str(row.get("alias", "") or "").strip().upper()
+        canonical = str(row.get("canonical", "") or "").strip().upper()
+        if alias and canonical and alias != canonical:
+            out[alias] = canonical
+    return out
+
+
 def _resolve_tags(
     symbol: str,
     *,
@@ -203,23 +286,44 @@ def _resolve_tags(
     tracker: dict[str, Any],
     symbol_map: dict[str, str],
     entry_file: dict[str, str],
-) -> tuple[str | None, str | None]:
-    """(system, entry_date) を優先順位付きで解決。"""
+    rename_aliases: dict[str, str] | None = None,
+) -> tuple[str | None, str | None, str | None]:
+    """(system, entry_date, renamed_from) を優先順位付きで解決。
+
+    現行 symbol で引けなかった時だけ ticker rename の旧 symbol で引き直す。
+    その経路で解決した場合は 3 つ目に旧 symbol を返す (由来を黙って隠さない)。
+    """
     sym = symbol.upper()
     system: str | None = None
     entry_date: str | None = None
 
-    for src in (orders_index.get(sym), tracker.get(sym)):
-        if isinstance(src, dict):
-            if system is None and src.get("system"):
-                system = str(src["system"]).lower()
-            if entry_date is None and src.get("entry_date"):
-                entry_date = str(src["entry_date"])[:10]
-    if system is None:
-        system = symbol_map.get(sym)
-    if entry_date is None:
-        entry_date = entry_file.get(sym)
-    return system, entry_date
+    def _lookup(key: str) -> tuple[str | None, str | None]:
+        sys_tag: str | None = None
+        ed: str | None = None
+        for src in (orders_index.get(key), tracker.get(key)):
+            if isinstance(src, dict):
+                if sys_tag is None and src.get("system"):
+                    sys_tag = str(src["system"]).lower()
+                if ed is None and src.get("entry_date"):
+                    ed = str(src["entry_date"])[:10]
+        if sys_tag is None:
+            sys_tag = symbol_map.get(key)
+        if ed is None:
+            ed = entry_file.get(key)
+        return sys_tag, ed
+
+    system, entry_date = _lookup(sym)
+
+    renamed_from: str | None = None
+    canonical = (rename_aliases or {}).get(sym)
+    if canonical and system is None:
+        alias_system, alias_entry = _lookup(canonical)
+        if alias_system:
+            system = alias_system
+            renamed_from = canonical
+            if entry_date is None:
+                entry_date = alias_entry
+    return system, entry_date, renamed_from
 
 
 # --------------------------------------------------------------------------
@@ -284,6 +388,8 @@ def _estimate_stop_target(
 def _exit_type(system: str | None, rules: Any) -> str:
     if system == "system7":
         return "spy_hedge"
+    if system == DELISTED_LABEL:
+        return "delisted"  # 上場廃止で API から close 不能 (エグジット計画無し)
     if rules is None:
         return "unknown"
     if getattr(rules, "max_holding_days", 0) > 0:
@@ -360,6 +466,86 @@ def _fetch_equity_curve(period: str, timeframe: str) -> dict[str, Any]:
     return out
 
 
+def _fetch_intraday_points(
+    period: str = "7D", timeframe: str = "5Min"
+) -> list[dict[str, Any]]:
+    """intraday equity 系列を ``[{t, session, equity}]`` で返す (時刻昇順)。
+
+    当日損益の基準はこの **intraday 系列だけ** から取る。
+    daily(1D) 系列 / ``last_equity`` は会計基準が違うので混ぜない
+    (詳細は ``common/exit_ledger`` の「当日損益の基準」節)。
+    """
+    import requests
+
+    headers = {
+        "APCA-API-KEY-ID": os.getenv("APCA_API_KEY_ID", ""),
+        "APCA-API-SECRET-KEY": os.getenv("APCA_API_SECRET_KEY", ""),
+    }
+    try:
+        r = requests.get(
+            f"{PAPER_BASE}/v2/account/portfolio/history",
+            headers=headers,
+            params={
+                "period": period,
+                "timeframe": timeframe,
+                "extended_hours": "false",
+            },
+            timeout=20,
+        )
+        j = r.json() if r.content else {}
+    except Exception:  # pragma: no cover - network
+        return []
+
+    out: list[dict[str, Any]] = []
+    ts = j.get("timestamp") or []
+    eq = j.get("equity") or []
+    for i, t in enumerate(ts):
+        e = _f(eq[i]) if i < len(eq) else None
+        if e is None or e <= 0:
+            continue
+        try:
+            stamp = pd.Timestamp(int(t), unit="s", tz="UTC").tz_convert(
+                "America/New_York"
+            )
+        except Exception:
+            continue
+        out.append(
+            {
+                "t": stamp.strftime("%Y-%m-%d %H:%M"),
+                "session": str(stamp.date()),
+                "equity": round(e, 2),
+            }
+        )
+    return out
+
+
+def fold_intraday_by_session(points: list[dict[str, Any]]) -> dict[str, float]:
+    """intraday 点列 -> ``{セッション日: そのセッション最後の equity}`` (pure)。"""
+    out: dict[str, float] = {}
+    for p in points:
+        session = p.get("session")
+        equity = p.get("equity")
+        if session and isinstance(equity, (int, float)) and equity > 0:
+            out[str(session)] = float(equity)  # 後勝ち = セッション最後の値
+    return out
+
+
+def _fetch_session_date(client: Any) -> str | None:
+    """broker clock 基準の「現セッション日」(America/New_York の暦日)。
+
+    ローカル時刻 / UTC 日付ではなく broker の営業日を使う。JST 早朝は
+    ET だと前日なので、ここを間違えると当日損益の基準が 1 セッションずれる。
+    """
+    try:
+        clock = client.get_clock()
+        stamp = getattr(clock, "timestamp", None)
+        if stamp is None:
+            return None
+        return str(pd.Timestamp(stamp).tz_convert("America/New_York").date())
+    except Exception:
+        return None
+
+
 def _augment_curve(
     curve: dict[str, Any], live_equity: float | None, today: str
 ) -> None:
@@ -403,148 +589,161 @@ def _augment_curve(
         curve["period_return_pct"] = None
 
 
-# ---------------------------------------------------------------------------
-# freeze-aware "today" baseline
-# ---------------------------------------------------------------------------
-# Alpaca が報告する ``last_equity`` は前営業日の *日次終値* (regular-session close)。
-# データ凍結期には日次終値系列が実勢 (intraday) equity より大きく低く据え置かれる
-# ことがあり (2026-07 の観測: gap ~$4,285 / 約4%)、``pnl_today = equity - last_equity``
-# が当日の実損益でなく基準ずれ (phantom) を出す。ここでは前営業日の *intraday*
-# equity と last_equity を突合し、乖離が大きい時のみ intraday 整合の基準に置換する。
-# 平常日 (乖離が小さい) は last_equity をそのまま使い挙動不変。
-#
-# 重要: 補正するのは pnl_today の *基準のみ*。equity / cash / positions /
-# unrealized 等 ledger_reconciliation が使う Alpaca 実報告値は一切改変しない。
-# last_equity 自体も raw のまま残す (透明性 + recon を汚さない)。
-FREEZE_GAP_ABS_MIN = 1000.0  # 補正発火の $ 下限
-FREEZE_GAP_PCT_MIN = 0.01  # 補正発火の equity 比下限 (1%)
+# --------------------------------------------------------------------------
+# 期間切替用の equity レンジ (dashboard の 1日/1週/1月/3月/全期間)
+# --------------------------------------------------------------------------
+
+# key -> (表示ラベル, 遡る日数。None = 全期間)
+EQUITY_RANGE_SPECS: tuple[tuple[str, str, int | None], ...] = (
+    ("1W", "1週", 7),
+    ("1M", "1月", 31),
+    ("3M", "3月", 93),
+    ("ALL", "全期間", None),
+)
 
 
-def resolve_today_baseline(
-    equity: float | None,
-    last_equity: float | None,
-    prev_intraday_equity: float | None,
+def compute_equity_basis(
+    positions: list[dict[str, Any]],
     *,
-    gap_abs_min: float = FREEZE_GAP_ABS_MIN,
-    gap_pct_min: float = FREEZE_GAP_PCT_MIN,
-) -> tuple[float | None, str, float | None]:
-    """今日 P&L の基準 equity を決める (pure / offline-testable)。
+    equity: float | None,
+    last_daily_equity: float | None,
+    last_daily_session: str | None = None,
+) -> dict[str, Any]:
+    """live ``equity`` と broker 日次エクイティ系列の *水準差* を事実で説明する。
 
-    Returns ``(baseline, basis, gap)``:
-      - ``baseline`` : pnl_today の差の基準に使う equity
-      - ``basis``    : ``"last_equity"`` (平常) | ``"freeze_adjusted"`` (凍結ラグ補正)
-      - ``gap``      : 補正時のみ ``prev_intraday_equity - last_equity`` (それ以外 None)
+    Alpaca の daily(1D) portfolio-history と ``last_equity`` は、上場廃止
+    (asset status = INACTIVE) で売却不能になった建玉の時価を計上しない。
+    一方 live ``equity`` は最終気配で計上し続ける。2026-07 実測ではこの差が
+    CDTX + FOLD の $4,285.87 で、これを当日損益に混ぜると丸ごと幻の利益になる。
 
-    前営業日の intraday equity が daily-close 基準 (last_equity) より閾値を超えて
-    乖離している時だけ、intraday 値を基準に採用する (=phantom 除去)。
-    intraday 値が無い / 乖離が小さい場合は last_equity をそのまま返す (挙動不変)。
+    ここでは注釈で誤魔化さず、**差額と、その内訳として説明できる金額**を出す。
+    説明しきれない残差 (``unexplained_usd``) も隠さず返す。
     """
-    if equity is None or not last_equity:
-        return (last_equity, "last_equity", None)
-    if prev_intraday_equity is None or prev_intraday_equity <= 0:
-        return (last_equity, "last_equity", None)
-    gap = prev_intraday_equity - last_equity
-    threshold = max(gap_abs_min, abs(equity) * gap_pct_min)
-    if abs(gap) > threshold:
-        return (round(prev_intraday_equity, 2), "freeze_adjusted", round(gap, 2))
-    return (last_equity, "last_equity", None)
-
-
-def _history_by_day(period: str, timeframe: str, *, extended: bool) -> dict[str, float]:
-    """portfolio_history を引き、ET 日付 -> その日の *最終* equity にまとめる。
-
-    GET only / read-only / paper。取得失敗時は空 dict (=呼び出し側で補正しない)。
-    """
-    import requests
-
-    headers = {
-        "APCA-API-KEY-ID": os.getenv("APCA_API_KEY_ID", ""),
-        "APCA-API-SECRET-KEY": os.getenv("APCA_API_SECRET_KEY", ""),
+    frozen = [p for p in positions if p.get("system") == DELISTED_LABEL]
+    frozen_mv = round(sum(float(p.get("market_value") or 0.0) for p in frozen), 2)
+    gap = (
+        round(equity - last_daily_equity, 2)
+        if equity is not None and last_daily_equity is not None
+        else None
+    )
+    return {
+        # 売却不能 (上場廃止) 建玉の時価。equity には載るが日次系列には載らない。
+        "frozen_market_value": frozen_mv,
+        "frozen_symbols": sorted(str(p.get("symbol")) for p in frozen),
+        "n_frozen": len(frozen),
+        # broker 日次系列の最終値と live equity の差。
+        "daily_series_gap": gap,
+        # 差のうち上場廃止建玉で説明できない残り。日次系列の最終点以降の
+        # 値動きもここに含まれるので 0 にはならない (これも隠さず出す)。
+        "residual_usd": round(gap - frozen_mv, 2) if gap is not None else None,
+        "last_daily_equity": last_daily_equity,
+        "last_daily_session": last_daily_session,
     }
-    try:
-        r = requests.get(
-            f"{PAPER_BASE}/v2/account/portfolio/history",
-            headers=headers,
-            params={
-                "period": period,
-                "timeframe": timeframe,
-                "extended_hours": "true" if extended else "false",
-            },
-            timeout=20,
+
+
+def _augment_range(points: list[dict[str, Any]], *, basis: str) -> dict[str, Any]:
+    """レンジ内で peak / drawdown / 期間リターンを **その区間基準で** 計算する。
+
+    全期間の running peak を持ち込むと「1週」表示なのに過去の山からの
+    drawdown が出て読めなくなるため、区間ごとに計算し直す。
+    """
+    pts = [dict(p) for p in points]
+    peak: float | None = None
+    max_dd = 0.0
+    for p in pts:
+        e = p["equity"]
+        peak = e if peak is None else max(peak, e)
+        dd = (e - peak) / peak * 100.0 if peak else 0.0
+        p["peak"] = round(peak, 2)
+        p["dd_pct"] = round(dd, 3)
+        max_dd = min(max_dd, dd)
+    ret = None
+    if len(pts) >= 2 and pts[0]["equity"]:
+        ret = round(
+            (pts[-1]["equity"] - pts[0]["equity"]) / pts[0]["equity"] * 100.0, 3
         )
-        j = r.json() if r.content else {}
-    except Exception:  # pragma: no cover - network
-        return {}
+    return {
+        "points": pts,
+        "peak_equity": round(peak, 2) if peak is not None else None,
+        "max_drawdown_pct": round(max_dd, 3),
+        "period_return_pct": ret,
+        "start": pts[0]["t"] if pts else None,
+        "end": pts[-1]["t"] if pts else None,
+        "n_points": len(pts),
+        # どの会計基準の系列か。intraday と broker_daily は水準が違う
+        # (上場廃止建玉の扱い) ので、混ぜて差を取らせないため明示する。
+        "basis": basis,
+    }
 
-    ts = j.get("timestamp") or []
-    eq = j.get("equity") or []
-    by_day: dict[str, float] = {}  # ET date -> その日の最終 equity
-    for i, t in enumerate(ts):
-        e = _f(eq[i]) if i < len(eq) else None
-        if e is None or e <= 0:
-            continue
-        try:
-            day = str(
-                pd.Timestamp(int(t), unit="s", tz="UTC")
-                .tz_convert("America/New_York")
-                .date()
+
+def _build_equity_ranges(
+    daily_points: list[dict[str, Any]],
+    intraday_points: list[dict[str, Any]],
+    session_date: str | None,
+    live_equity: float | None,
+) -> dict[str, Any]:
+    """dashboard の期間切替に渡すレンジ束を作る。
+
+    ``1D`` だけは intraday 系列 (当日の値動き)、それ以外は日次系列を
+    末尾から日数で切り出す。データが足りないレンジは points 空で返し、
+    dashboard 側で「データ無し」と出せるようにする (0 で埋めない)。
+    """
+    from datetime import date, timedelta
+
+    ranges: dict[str, Any] = {}
+
+    # --- 1D: 現セッションの intraday 5Min (末尾に live equity) ---
+    today_pts: list[dict[str, Any]] = [
+        {"t": p["t"], "equity": p["equity"], "pl": None, "pl_pct": None}
+        for p in intraday_points
+        if session_date and p.get("session") == session_date
+    ]
+    if live_equity is not None and live_equity > 0 and session_date:
+        if not today_pts or today_pts[-1]["equity"] != round(live_equity, 2):
+            today_pts.append(
+                {
+                    "t": f"{session_date} live",
+                    "equity": round(live_equity, 2),
+                    "pl": None,
+                    "pl_pct": None,
+                    "live": True,
+                }
             )
-        except Exception:
-            continue
-        by_day[day] = round(e, 2)  # timestamp 昇順なので後勝ち=その日最後
-    return by_day
+    ranges["1D"] = {
+        "label": "1日",
+        "timeframe": "5Min",
+        **_augment_range(today_pts, basis="intraday"),
+    }
 
+    # --- 1W / 1M / 3M / ALL: broker 日次系列を日数で切る ---
+    # 日次系列は 1D (intraday) と会計基準が違う (上場廃止建玉を含まない) ため
+    # basis="broker_daily" を明示し、live equity 点も足さない。
+    # 足すと最終点だけ +数千ドル跳ねて「当日急騰」に見える (旧実装の事故)。
+    for key, label, days in EQUITY_RANGE_SPECS:
+        if days is None:
+            sliced = list(daily_points)
+        else:
+            anchor = daily_points[-1]["t"] if daily_points else None
+            try:
+                cutoff = (
+                    (
+                        date.fromisoformat(str(anchor)[:10]) - timedelta(days=days)
+                    ).isoformat()
+                    if anchor
+                    else None
+                )
+            except ValueError:
+                cutoff = None
+            sliced = [
+                p for p in daily_points if cutoff is None or str(p["t"])[:10] >= cutoff
+            ]
+        ranges[key] = {
+            "label": label,
+            "timeframe": "1D",
+            **_augment_range(sliced, basis="broker_daily"),
+        }
 
-def _pick_baseline_intraday_equity(
-    last_equity: float | None,
-    daily_by_day: dict[str, float],
-    intraday_by_day: dict[str, float],
-) -> float | None:
-    """last_equity が指す完了セッションの *intraday 整合* equity を返す (pure)。
-
-    ``last_equity`` は Alpaca が報告する前営業日の *日次終値*。同じセッションを
-    daily(1D) 系列から value-match で特定し、その日の intraday(1H) 終値を基準候補
-    として返す。
-
-    off-by-one 回避: 日次パイプラインは **寄り付き前** (06:00 JST ≈ 前日夕方 ET)
-    に走り、週末/休場もあるため「intraday 系列の最新日」は当日ではなく **既に完了
-    した直近セッション** であることが多い。旧実装の ``sorted[-2]`` はこれを当日と
-    誤認し 1 セッション古い日を基準にしていた (phantom の原因)。last_equity に
-    アンカーすることで実行時刻・曜日に依らず正しい基準日を選ぶ。
-    """
-    if last_equity is None or not intraday_by_day:
-        return None
-    # 1) last_equity に一致する daily-close の日付を特定 (完了セッションの同定)。
-    target_day: str | None = None
-    if daily_by_day:
-        best: tuple[float, str] | None = None
-        for day, close in daily_by_day.items():
-            d = abs(close - last_equity)
-            if best is None or d < best[0]:
-                best = (d, day)
-        # last_equity は過去の完了セッション close と一致するはず (許容誤差内)。
-        if best is not None and best[0] <= max(1.0, abs(last_equity) * 0.001):
-            target_day = best[1]
-    # 2) 同定した日の intraday 終値を返す。
-    if target_day is not None and target_day in intraday_by_day:
-        return intraday_by_day[target_day]
-    # フォールバック: value-match 不成立時は intraday 系列の *最新* 完了日を採用。
-    # (旧 [-2] ではなく [-1]: 寄り前/週末では最新 intraday 日が直近完了セッション。)
-    return intraday_by_day[sorted(intraday_by_day)[-1]]
-
-
-def _fetch_prev_session_intraday_equity(last_equity: float | None) -> float | None:
-    """last_equity が指す完了セッションの intraday 整合 equity を取得。
-
-    daily(1D) と intraday(1H, extended) の両系列を引き、last_equity にアンカーして
-    正しい基準セッションを選ぶ。取得失敗・データ不足時は None (=補正しない)。
-    GET only / read-only / paper。
-    """
-    intraday_by_day = _history_by_day("7D", "1H", extended=True)
-    if not intraday_by_day:
-        return None
-    daily_by_day = _history_by_day("10D", "1D", extended=False)
-    return _pick_baseline_intraday_equity(last_equity, daily_by_day, intraday_by_day)
+    return ranges
 
 
 def _accumulate_equity(results_dir: Path, today: str, equity: float | None) -> None:
@@ -570,6 +769,106 @@ def _accumulate_equity(results_dir: Path, today: str, equity: float | None) -> N
         )
     except Exception:
         pass
+
+
+# --------------------------------------------------------------------------
+# exit ledger (実現損益) の取り込み
+# --------------------------------------------------------------------------
+def _load_exit_ledger(results_dir: Path, date_str: str) -> dict[str, Any] | None:
+    """``exit_ledger_YYYYMMDD.json`` を読む。同日が無ければ直近を後方探索する。
+
+    見つからなければ ``None``。呼び出し側は「実現損益は未計測」として扱うこと
+    (0 で埋めない)。
+    """
+    exact = results_dir / f"exit_ledger_{date_str.replace('-', '')}.json"
+    path = exact if exact.exists() else _latest_json(results_dir, "exit_ledger_")
+    if path is None or not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def _realized_for_session(
+    ledger: dict[str, Any] | None, session_date: str | None
+) -> float | None:
+    """**当日損益と同じ立会日** の実現損益。取れなければ ``None`` (不明)。
+
+    台帳の ``today`` ブロックをそのまま使ってはいけない。台帳の "today" は
+    pipeline のローカル日付 (JST) で、当日損益の基準は broker clock の立会日
+    (ET) なので、JST 昼に走らせると 1 セッションずれる。ここでは
+    ``realized.by_day`` から **session_date そのもの** を引く。
+
+    - 台帳が無い / 未計測 → ``None``
+    - 台帳が対象セッションより前にしか及んでいない → ``None`` (0 で埋めない)
+    - 対象セッションが台帳の範囲内で該当日が無い → ``0.0`` (「決済が無かった」事実)
+    """
+    if not ledger or not session_date:
+        return None
+    if not ((ledger.get("measurement") or {}).get("measured")):
+        return None
+    ledger_date = str(ledger.get("date") or "")
+    if not ledger_date or session_date > ledger_date:
+        return None  # 台帳がそのセッションまで届いていない
+    for row in (ledger.get("realized") or {}).get("by_day") or []:
+        if str(row.get("t")) == session_date:
+            val = row.get("realized_pl")
+            return float(val) if isinstance(val, (int, float)) else None
+    return 0.0
+
+
+def _realized_block(ledger: dict[str, Any] | None, date_str: str) -> dict[str, Any]:
+    """snapshot に載せる realized セクション。台帳が無ければ未計測として返す。"""
+    if not ledger:
+        return {
+            "available": False,
+            "measured": False,
+            "stale": False,
+            "reason": "exit_ledger_*.json が無い (scripts/build_exit_ledger.py 未実行)",
+            "ledger_date": None,
+            "ledger_run_id": None,
+            "all_time": None,
+            "by_day": [],
+            "by_system": {},
+            "closed_trades": [],
+            "measurement": None,
+            "attribution": None,
+            "renames": None,
+        }
+    measurement = ledger.get("measurement") or {}
+    realized = ledger.get("realized") or {}
+    stale = str(ledger.get("date") or "") != date_str
+    return {
+        "available": True,
+        "measured": bool(measurement.get("measured")),
+        "complete": bool(measurement.get("complete")),
+        # 台帳の日付が snapshot の日付と違う = 当日分は再計測されていない。
+        "stale": stale,
+        "reason": (
+            f"台帳が {ledger.get('date')} 時点のもの (当日 {date_str} は未計測)"
+            if stale
+            else None
+        ),
+        "ledger_date": ledger.get("date"),
+        "ledger_run_id": ledger.get("run_id"),
+        "ledger_generated_at": ledger.get("generated_at"),
+        "all_time": realized.get("all_time"),
+        "by_day": realized.get("by_day") or [],
+        "by_system": realized.get("by_system") or {},
+        # 全件が母数の exit 理由内訳 (履歴表は直近分しか載せないので母数が違う)。
+        "by_exit_reason": realized.get("by_exit_reason") or [],
+        # dashboard の履歴表は直近分だけあれば十分。全件は台帳側に残る。
+        "closed_trades": list(ledger.get("closed_trades") or [])[-400:],
+        "n_closed_trades_total": len(ledger.get("closed_trades") or []),
+        "measurement": measurement,
+        # system 帰属の根拠内訳 (unknown を「なぜ不明か」まで出すため)。
+        "attribution": ledger.get("attribution"),
+        # ticker rename の統合結果。手動マップである旨を画面から隠さない。
+        "renames": ledger.get("renames"),
+        "exit_intent_reconciliation": ledger.get("exit_intent_reconciliation"),
+        "today": ledger.get("today"),
+    }
 
 
 # --------------------------------------------------------------------------
@@ -802,10 +1101,29 @@ def build_snapshot(
     orders_index = _fetch_orders_index(client)
     tracker = load_tracker() or {}
     symbol_map = _load_symbol_system_map()
+    rename_aliases = _load_rename_aliases()
     entry_file = _load_entry_dates_file()
 
     symbols = [str(getattr(p, "symbol", "") or "").upper() for p in raw_positions]
     atr_by_symbol = _load_atr([s for s in symbols if s])
+
+    # system tag が解決できなかった held symbol だけ Alpaca asset status を引き、
+    # INACTIVE / 非 tradable (= 上場廃止で close 不能) なら "delisted" に分類する。
+    # tag 付きは照会不要なので API 呼び出しを最小化する (read-only GET のみ)。
+    untagged_symbols = [
+        s
+        for s in dict.fromkeys(s for s in symbols if s)  # 重複排除・順序保持
+        if _resolve_tags(
+            s,
+            orders_index=orders_index,
+            tracker=tracker,
+            symbol_map=symbol_map,
+            entry_file=entry_file,
+            rename_aliases=rename_aliases,
+        )[0]
+        is None
+    ]
+    inactive_symbols = _fetch_inactive_assets(client, untagged_symbols)
 
     positions: list[dict[str, Any]] = []
     long_usd = short_usd = 0.0
@@ -834,12 +1152,18 @@ def build_snapshot(
         intr = _f(getattr(p, "unrealized_intraday_pl", None))
         intrpc = _f(getattr(p, "unrealized_intraday_plpc", None))
 
-        system, entry_date = _resolve_tags(
+        system, entry_date, renamed_from = _resolve_tags(
             sym,
             orders_index=orders_index,
             tracker=tracker,
             symbol_map=symbol_map,
             entry_file=entry_file,
+            rename_aliases=rename_aliases,
+        )
+        # tag 無し + Alpaca 上 INACTIVE/非tradable → "delisted" (事実ラベル)。
+        # rules は本物の system で引く (delisted は取引ルール無し)。
+        sys_label = (
+            system if system else (DELISTED_LABEL if sym in inactive_symbols else None)
         )
         rules = SYSTEM_TRADE_RULES.get(system) if system else None
         max_hold = int(getattr(rules, "max_holding_days", 0)) if rules else 0
@@ -875,7 +1199,7 @@ def build_snapshot(
 
         row = {
             "symbol": sym,
-            "system": system or "unknown",
+            "system": sys_label or "unknown",
             "side": side,
             "qty": round(qty, 6),
             "ledger_qty": round(led_net, 6) if fill_ledger else None,
@@ -892,11 +1216,14 @@ def build_snapshot(
             "intraday_pl": round(intr, 2) if intr is not None else None,
             "intraday_pl_pct": round(intrpc * 100.0, 3) if intrpc is not None else None,
             "entry_date": entry_date,
+            # ticker rename の旧 symbol 経由で system を引いた場合のみ入る。
+            # 「なぜ MF が system3 なのか」を画面から辿れるようにするため。
+            "renamed_from": renamed_from,
             "holding_days": holding_days,
             "max_holding_days": max_hold,
             "days_remaining": days_remaining,
             "exit_date": exit_date,
-            "exit_type": _exit_type(system, rules),
+            "exit_type": _exit_type(sys_label, rules),
             "exit_expected": exit_expected,
             "stop_price_est": stop_est,
             "target_price_est": target_est,
@@ -931,7 +1258,7 @@ def build_snapshot(
                 "pl_pct": row["unrealized_pl_pct"],
             }
 
-        sysk = system or "unknown"
+        sysk = sys_label or "unknown"
         b = by_system.setdefault(
             sysk, {"long_usd": 0.0, "short_usd": 0.0, "count": 0, "unrealized_pl": 0.0}
         )
@@ -954,27 +1281,27 @@ def build_snapshot(
     acct_long_mv = _f(getattr(account, "long_market_value", None))
     acct_short_mv = _f(getattr(account, "short_market_value", None))
 
-    # pnl_today: 既定は Alpaca 報告の daily-close 基準 (equity - last_equity)。
-    # 凍結ラグ検出時のみ intraday 整合基準に置換 (下記)。raw は透明性のため常に保持。
-    pnl_today_abs = pnl_today_pct = None
-    pnl_today_abs_raw = pnl_today_pct_raw = None
-    pnl_today_basis = "last_equity"
-    pnl_today_baseline = last_equity
-    freeze_lag_gap = None
-    if equity is not None and last_equity:
-        pnl_today_abs_raw = round(equity - last_equity, 2)
-        pnl_today_pct_raw = round((equity - last_equity) / last_equity * 100.0, 3)
-        prev_intraday = _fetch_prev_session_intraday_equity(last_equity)
-        pnl_today_baseline, pnl_today_basis, freeze_lag_gap = resolve_today_baseline(
-            equity, last_equity, prev_intraday
-        )
-        if pnl_today_baseline:
-            pnl_today_abs = round(equity - pnl_today_baseline, 2)
-            pnl_today_pct = round(
-                (equity - pnl_today_baseline) / pnl_today_baseline * 100.0, 3
-            )
-        else:
-            pnl_today_abs, pnl_today_pct = pnl_today_abs_raw, pnl_today_pct_raw
+    # --- 当日損益: 同一基準でしか出さない (出せなければ数字を出さない) --------
+    #
+    # 旧実装は ``equity - last_equity`` だった。この 2 つは **会計基準が違う**:
+    # 上場廃止 (INACTIVE) 銘柄の時価が daily-close 側にだけ載っておらず、
+    # 2026-07-20 の published snapshot では「今日 +$2,850.35 (+2.83%)」という
+    # 幻の数字になっていた (同一基準で計算すると当日は -$1,506 の *損*)。
+    # 注釈で誤魔化さず、intraday 系列同士の差だけを当日損益とする。
+    intraday_points = _fetch_intraday_points()
+    intraday_by_session = fold_intraday_by_session(intraday_points)
+    session_date = _fetch_session_date(client)
+    ledger = _load_exit_ledger(results_dir, date_str)
+    session_realized = _realized_for_session(ledger, session_date)
+
+    session_pnl = resolve_session_pnl(
+        equity_now=equity,
+        session_date=session_date,
+        intraday_by_session=intraday_by_session,
+        realized_pl=session_realized,
+    )
+    pnl_today_abs = session_pnl.total_pl
+    pnl_today_pct = session_pnl.total_pl_pct
 
     net_cap_pct, gross_cap_pct = _load_net_cap()
     gross_usd = long_usd + short_usd
@@ -983,10 +1310,22 @@ def build_snapshot(
         base = b["long_usd"] + b["short_usd"]
         b["pct_of_gross"] = round(base / gross_usd * 100.0, 2) if gross_usd else 0.0
 
-    # equity curve
+    # equity curve (既存 3M/1D は後方互換のため据え置き) + 期間切替用レンジ
     curve = _fetch_equity_curve(period, "1D")
     _augment_curve(curve, equity, date_str)
     _accumulate_equity(results_dir, date_str, equity)
+
+    full_curve = _fetch_equity_curve("1A", "1D")
+    daily_points = full_curve.get("points") or curve.get("points") or []
+    equity_ranges = _build_equity_ranges(
+        daily_points, intraday_points, session_date, equity
+    )
+    equity_basis = compute_equity_basis(
+        positions,
+        equity=equity,
+        last_daily_equity=daily_points[-1]["equity"] if daily_points else None,
+        last_daily_session=str(daily_points[-1]["t"])[:10] if daily_points else None,
+    )
 
     n_pos = len(positions)
     snapshot = {
@@ -1011,15 +1350,14 @@ def build_snapshot(
             ),
             "pnl_today_abs": pnl_today_abs,
             "pnl_today_pct": pnl_today_pct,
-            # provenance: 凍結ラグ補正の透明化 (display 専用。recon 非使用)。
-            "pnl_today_abs_raw": pnl_today_abs_raw,
-            "pnl_today_pct_raw": pnl_today_pct_raw,
-            "pnl_today_basis": pnl_today_basis,
-            "pnl_today_baseline": (
-                round(pnl_today_baseline, 2) if pnl_today_baseline is not None else None
-            ),
-            "freeze_lag_gap": freeze_lag_gap,
             "unrealized_pl_total": round(unrealized_total, 2),
+            # 当日損益の素性。dashboard はこれを見て「出す / 出さない」を決める。
+            "pnl_today_basis": session_pnl.basis,
+            "pnl_today_measured": session_pnl.measured,
+            "pnl_today_baseline": session_pnl.baseline_equity,
+            "pnl_today_baseline_session": session_pnl.baseline_session,
+            "pnl_today_session": session_pnl.session_date,
+            "pnl_today_unavailable_reason": session_pnl.reason,
             "status": str(
                 getattr(
                     getattr(account, "status", None),
@@ -1032,6 +1370,13 @@ def build_snapshot(
             "pattern_day_trader": bool(getattr(account, "pattern_day_trader", False)),
         },
         "equity_curve": curve,
+        "equity_ranges": equity_ranges,
+        # live equity と broker 日次系列の水準差を事実で分解したもの。
+        "equity_basis": equity_basis,
+        # 当日損益を「実現 / 含み」に分解した唯一の定義。混ぜない。
+        "pnl_today": session_pnl.to_row(),
+        # 決済済みトレードと実現損益 (scripts/build_exit_ledger.py の出力を取り込む)。
+        "realized": _realized_block(ledger, date_str),
         "exposure": {
             "long_usd": round(long_usd, 2),
             "short_usd": round(short_usd, 2),
@@ -1119,9 +1464,20 @@ def main(argv: list[str] | None = None) -> int:
 
     acct = snapshot["account"]
     summ = snapshot["summary"]
+    pnl = snapshot["pnl_today"]
+    realized = snapshot["realized"]
+    if pnl["measured"]:
+        pnl_desc = (
+            f"pnl_today={pnl['total_pl']} ({pnl['total_pl_pct']}%) "
+            f"[basis={pnl['basis']} baseline={pnl['baseline_equity']}@{pnl['baseline_session']} "
+            f"realized={pnl['realized_pl']} unrealized_delta={pnl['unrealized_delta']}] "
+        )
+    else:
+        pnl_desc = f"pnl_today=UNMEASURED ({pnl['reason']}) "
     print(
         f"[alpaca_snapshot] equity=${acct['equity']:,.0f} "
-        f"pnl_today={acct['pnl_today_abs']} ({acct['pnl_today_pct']}%) "
+        + pnl_desc
+        + f"realized_all_time={(realized.get('all_time') or {}).get('total_realized_pl')} "
         f"positions={summ['n_positions']} (L{summ['n_long']}/S{summ['n_short']}) "
         f"win_rate={summ['win_rate_pct']}% exit_soon={summ['exit_soon_count']} "
         f"curve_points={len(snapshot['equity_curve'].get('points', []))} "
