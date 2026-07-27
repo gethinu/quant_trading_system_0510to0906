@@ -53,6 +53,47 @@ user memory では「3 GB+」との記述だが sandbox mount では 873 MB。
 NTFS の allocation-unit や cluster slack で膨らんでいる可能性が高い (47k 小ファイル)。
 §1.1 で確定させる。
 
+### 1.2 実測結果 — **確定 (Claude, 2026-07-03 §1.1 実行済)**
+
+§1.1 の PowerShell を Windows 実 FS 上で実行した確定値。**§9 checklist はこの結果で埋め済み**。
+
+| 項目 | 実測値 | 判断 |
+|---|---|---|
+| C: 空き | **79.34 GB** free (872 used) | 逼迫はしていないが 47k→62k 小ファイルの inode 圧は残る |
+| D: 空き | **940.58 GB** free (13 used) | 移設先容量 **余裕**。data_cache 3.69GB × 2 を遥かに超過 ✅ |
+| 物理ディスク | C:=Samsung MZVL2 **NVMe** / D:=Kingston OM8PGP **NVMe**、**別スピンドル** | D: へ移すと I/O が別ディスクに分散。理想的 |
+| `data_cache/base/` | **979 MB / 15,692 files** | feather |
+| `data_cache/full_backup/` | **1,083 MB / 15,691 files** | csv |
+| `data_cache/rolling/` | **1,629 MB / 31,382 files** | feather+csv pair |
+| `data_cache/signals/` | 0 / 0 | 実行時生成 |
+| **data_cache 合計** | **3.69 GB / 62,765 files** | ← user memory「3GB+」が正。doc §1.0 の mount実測 873MB は過小だった |
+| `D:\MT5_R2_Gaitame` | 5.89 GB | D: 運用実績あり (既述通り) |
+| `D:\quant_data_cache` | **AVAILABLE** (未存在) | path 衝突なし ✅ |
+
+**feather 維持判断 (§4)**: D: が NVMe 確定 → §4.2 表より「feather 維持」。csv化は不要。
+
+**移設中の競合 (§5)**: daily pipeline 系 Task Scheduler は **既に全て Disabled**（下表）。
+06:00 tick 競合リスクは実質ゼロ。§7.2(a) の disable 手順は不要（既に無効）。
+実行中に停止が要るのは Streamlit 2本 (`QuantTrading_StreamlitToday`,
+`QuantTrading_StreamlitAlpaca`, Ready) — cache を read 中なので move 中のみ停止。
+
+**Task Scheduler 該当タスク名 (§9 の「該当 task 名確認」を確定)**:
+
+| TaskName | State | 移設との関係 |
+|---|---|---|
+| `QuantTradingDailyUpdate` | **Disabled** | daily pipeline 本体。既に無効 |
+| `QuantTradingDailySignals` | **Disabled** | signal 生成。既に無効 |
+| `QuantTradingCacheUpdate` | **Disabled** | cache 更新。既に無効 |
+| `QuantTradingRecomputeRolling` | **Disabled** | rolling 再構築。既に無効 |
+| `QuantTradingScheduler` | **Disabled** | logon trigger。既に無効 |
+| `QuantTrading_PolygonDailyMonitor` | Ready | base cache read。move 中は一時停止推奨 |
+| `QuantTrading_StreamlitToday` | Ready | cache read 中。**move 中停止必須** |
+| `QuantTrading_StreamlitAlpaca` | Ready | cache read 中。**move 中停止必須** |
+
+→ robocopy 3.69GB / 62,765 files を NVMe→NVMe(別ディスク) は **5-15 分** 見込み。
+
+---
+
 ### 1.1 実行前に走らせて数字を確定させる PowerShell
 
 ```powershell
@@ -475,17 +516,18 @@ python -m streamlit run apps/dashboards/app_alpaca_dashboard.py --server.headles
 
 ## 9. user が **明日実行前に決める** 判断項目 checklist
 
-- [ ] **実行 timing**: 明日夕方 (2026-07-03) or 週末 (07-04 土) → **推奨: 週末**
-- [ ] **方式**: 案 A (symlink) / 案 B (env+yaml) / 案 C (両方) → **推奨: 案 A**
-  - 決め手: `core/system7.py:58` の hard-coded 相対 path を触らないため
-- [ ] **feather 維持**: yes / csv 化 → **推奨: 維持**
-  - 決め手: rolling read は CPU decode bound、D: が SATA/NVMe いずれでも feather 優位
-- [ ] **D: 空き容量**: `data_cache` 実サイズ × 2 以上を §1.1 で確認済み
-- [ ] **`.gitignore`**: `data_cache/` エントリありを §8.1 で確認済み
-- [ ] **backup 保持期間**: 24h 後 削除 / 1 週間保持 / 永続 → **推奨: 24h**
-- [ ] **Task Scheduler**: 該当 task 名を §7.2 で確認済み
-- [ ] **rollback 判断基準**: どこまで smoke test fail したら rollback するか事前合意
-  - 提案: §7.6 (a)(b) いずれかが fail → 即 rollback
+- [ ] **実行 timing** (user 判断): 今夜 (2026-07-03) or 週末 (07-04 土) → **推奨: どちらでも可**。
+  daily pipeline 系タスクは既に全て Disabled なので 06:00 競合が無く、平日夜でも安全。
+- [x] **方式**: **案 A (symlink) 確定** — `core/system7.py:58` の hard-coded 相対 path を触らないため
+- [x] **feather 維持**: **維持 確定** — §1.2 で D: が NVMe 確定 (§4.2 表より feather 維持)
+- [x] **D: 空き容量**: **確認済** — D: 940.58 GB free ≫ data_cache 3.69 GB × 2 (§1.2)
+- [x] **`.gitignore`**: **確認済** — `.gitignore:2` `data_cache/`, `:3` `data_cache_recent/` (§8.1)
+- [ ] **backup 保持期間** (user 判断): 24h 後削除 / 1 週間保持 → **推奨: 24h**
+- [x] **Task Scheduler 該当 task 名**: **確定済** — §1.2 表参照。daily系は既に Disabled、
+  move 中停止必須は Streamlit 2本 (`QuantTrading_StreamlitToday` / `_StreamlitAlpaca`)
+- [ ] **rollback 判断基準** (user 合意): §7.6 (a)(b) いずれか fail → 即 rollback を提案
+
+**→ Claude 側で確定できる項目は全て埋め済み。残るは user 判断の 3 点 (timing / backup 保持 / rollback 基準合意) のみ。この 3 点を決めれば §7 runbook をそのまま実行できる状態。**
 
 ---
 
@@ -515,5 +557,85 @@ python -m streamlit run apps/dashboards/app_alpaca_dashboard.py --server.headles
 
 ---
 
+## 12. 実行直前 — **確定事項 + 推奨デフォルト + ワンショット実行順** (Claude, 2026-07-03)
+
+§1.1 計測済み・§9 の Claude 確定分は全て埋め済み。**Claude は実 move を実行していない**。
+残る user 判断 3 点に、状況を踏まえた**推奨デフォルトの具体案**を以下に提示する。
+このまま採用するなら §12.4 のブロックを user が管理者 PowerShell で上から順に流すだけ。
+
+### 12.1 判断① 実行タイミング → **推奨: 今夜 (2026-07-03) 実行**
+
+- 理由: daily pipeline 系タスク (`QuantTradingDailyUpdate/DailySignals/CacheUpdate/
+  RecomputeRolling`) は**現在すべて Disabled** → 「平日 06:00 tick と競合するから週末まで待つ」
+  という当初の週末推奨理由が**既に無効**。待つ必然性が消えた。
+- 現在 Streamlit プロセスも未起動 (2026-07-03 時点確認済) → cache を掴んでいる物が無い。
+- 所要は robocopy 3.69GB/62,765 files を NVMe→NVMe 別ディスクで **5-15 分** + smoke 5-10 分。
+- **代替**: 時間に余裕を持ちたい / 落ち着いてやりたいなら **週末 (07-04 土)** でも可。競合面はどちらも同等に安全。
+
+### 12.2 判断② backup 保持期間 → **推奨: junction 経由フル run を 1 回成功させるまで (最短でも当夜 smoke 後 +48h ≒ 07-05 まで)**
+
+- move 方式は「元 `data_cache` を `data_cache_backup_20260703` に rename → D: へ robocopy →
+  junction」。元データは backup として物理的に残る。
+- daily タスクは Disabled なので**自動 tick では検証されない**。→ backup 削除の前に
+  **user が手動でフル run を 1 回**通すのが確実な検証（§12.4 step 6 に同梱、~16 分）。
+- 提示: 24h(最速回収) / **フル run 成功を確認するまで＝実質 +48h 目安 (推奨)** / 1 週間(保守的)。
+- 削除は §7.8 の `Remove-Item data_cache_backup_20260703 -Recurse -Force`。
+
+### 12.3 判断③ rollback 基準 → **推奨: smoke (a)base or (b)rolling が例外 → 即 rollback**
+
+- **即 rollback 条件**: §7.6 (a) `read_base('SPY')` または (b) rolling `load_price('SPY')` が
+  `FileNotFoundError`／例外を投げた場合 → junction が cache を解決できていない = 致命。
+  → §6.2 手順 (junction 削除 → backup rename 戻し → smoke 再実行) を即実行。
+- **rollback せず調査**: §7.6 (c) system7 の `indicators_system7_cache` 生成失敗のみ →
+  実行時再生成される非致命項目。WARN 扱いで junction は維持し原因調査。
+- robocopy exit code 2+ (§7.4) が出た時点で copy をやり直し、junction は貼らない。
+
+### 12.4 ワンショット実行順 (**user が管理者 PowerShell で手動実行**。Claude は実行しない)
+
+```powershell
+$repo = 'C:\Repos\quant_trading_system_0510to0906'
+$src  = "$repo\data_cache"
+$bak  = "$repo\data_cache_backup_20260703"
+$dst  = 'D:\quant_data_cache'
+
+# 1. 競合停止: Streamlit タスク + プロセスを止める (daily 系は既に Disabled)
+Get-ScheduledTask -TaskName 'QuantTrading_StreamlitToday','QuantTrading_StreamlitAlpaca','QuantTrading_PolygonDailyMonitor' -EA SilentlyContinue | Disable-ScheduledTask
+Get-Process | Where-Object { $_.ProcessName -match 'streamlit' } | Stop-Process -Force -EA SilentlyContinue
+Get-Process | Where-Object { $_.ProcessName -match 'python' -and $_.Path -like "$repo*" } | Select ProcessName,Id  # 走ってたら手動で確認
+
+# 2. 退避 rename (同一ボリューム→瞬時、物理コピー無し)
+Rename-Item $src $bak
+
+# 3. 移動先作成 + dry-run (list only)
+New-Item -ItemType Directory -Path $dst -Force | Out-Null
+robocopy $bak $dst /E /L /NFL /NDL /NP /R:0 /W:0   # Files 数が §1.2 の 62,765 と一致するか確認
+
+# 4. 実 copy
+robocopy $bak $dst /E /R:1 /W:1 /MT:16 /NP /LOG:"$repo\logs\migration_20260703.log"
+Write-Host "robocopy exit: $LASTEXITCODE"   # 0 or 1 = OK, 2+ = 中止して調査 (§12.3)
+
+# 5. junction 作成
+New-Item -ItemType Junction -Path $src -Target $dst
+Get-Item $src | Select LinkType, Target   # 期待: Junction / D:\quant_data_cache
+
+# 6. smoke (この 3 つが通れば成功。a/b が落ちたら §12.3 で即 rollback)
+cd $repo
+python -c "from common.cache_manager import CacheManager; from config.settings import get_settings; cm=CacheManager(get_settings(create_dirs=True)); print('base SPY rows:', len(cm.read_base('SPY')))"
+python -c "from common.data_loader import load_price; print('rolling SPY tail:'); print(load_price('SPY', cache_profile='rolling').tail(2))"
+python scripts/run_all_systems_today.py --skip-external --skip-latest-check --save-csv   # フル run ~16 分。48 件前後出れば junction 経由で健全
+
+# 7. Streamlit タスク再開
+Get-ScheduledTask -TaskName 'QuantTrading_StreamlitToday','QuantTrading_StreamlitAlpaca','QuantTrading_PolygonDailyMonitor' -EA SilentlyContinue | Enable-ScheduledTask
+
+# 8. (+48h / フル run 成功確認後) backup 削除
+# Remove-Item $bak -Recurse -Force
+```
+
+> **注意**: `New-Item -ItemType Junction` は Developer Mode 有効なら非管理者でも可。
+> 不可なら管理者 PowerShell か `cmd /c mklink /D` を使う (§7.5)。
+
+---
+
 **作成**: 2026-07-02 (Claude, plan doc のみ)
-**次アクション**: user が §1.1 の PowerShell 出力を確認 → §9 の checklist を埋める → 実行
+**更新**: 2026-07-03 (Claude — §1.2 実測確定 / §9 埋め / §12 実行直前化。**実 move は未実行**)
+**次アクション**: user が §12.1-12.3 の 3 点を決定 → §12.4 を手動実行 → smoke 確認 → +48h で backup 削除

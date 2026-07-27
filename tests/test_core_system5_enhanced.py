@@ -31,13 +31,16 @@ class TestSystem5Utilities:
     """Test suite for System5 utility functions and constants."""
 
     def test_format_atr_pct_threshold_label_default(self):
-        """Test format_atr_pct_threshold_label with default threshold."""
+        """Test format_atr_pct_threshold_label with default threshold.
+
+        audit-remediation 2026-07-03 (D3 Case A): spec 準拠に 2.5% → 4% 是正。
+        """
         result = format_atr_pct_threshold_label()
 
         # Should return formatted string
         assert isinstance(result, str)
         assert ">" in result
-        assert "2.50%" in result  # Default 2.5%
+        assert "4.00%" in result  # Case A: Default 4% (spec)
 
     def test_format_atr_pct_threshold_label_custom(self):
         """Test format_atr_pct_threshold_label with custom threshold."""
@@ -526,18 +529,25 @@ class TestSystem5Constants:
     """Test System5 constants and configuration."""
 
     def test_system5_required_indicators(self):
-        """Test that SYSTEM5_REQUIRED_INDICATORS is properly defined."""
+        """Test that SYSTEM5_REQUIRED_INDICATORS is properly defined.
+
+        audit-remediation 2026-07-03 (D3 Case A): 流動性 filter (avgvolume50 /
+        dollarvolume50) を追加。"filter"/"setup" は runtime 生成列で precompute
+        必須ではないため expected から除外。
+        """
         # Should be a list or tuple
         assert isinstance(SYSTEM5_REQUIRED_INDICATORS, (list, tuple))
 
-        # Should contain expected indicators for System5
+        # Should contain expected indicators for System5 (Case A: 流動性 filter 追加後)
         expected_indicators = {
             "adx7",
             "atr10",
             "dollarvolume20",
             "atr_pct",
-            "filter",
-            "setup",
+            "sma100",
+            "rsi3",
+            "avgvolume50",  # Case A: spec の AvgVol50 filter
+            "dollarvolume50",  # Case A: spec の DV50 filter
         }
         actual_indicators = set(SYSTEM5_REQUIRED_INDICATORS)
 
@@ -545,11 +555,14 @@ class TestSystem5Constants:
         assert expected_indicators.issubset(actual_indicators)
 
     def test_default_atr_pct_threshold(self):
-        """Test DEFAULT_ATR_PCT_THRESHOLD constant."""
-        # Should be a reasonable percentage (2.5% = 0.025)
+        """Test DEFAULT_ATR_PCT_THRESHOLD constant.
+
+        audit-remediation 2026-07-03 (D3 Case A): spec 準拠に 0.025 → 0.04 是正。
+        """
+        # Should be a reasonable percentage (4% = 0.04, spec 準拠)
         assert isinstance(DEFAULT_ATR_PCT_THRESHOLD, (int, float))
         assert 0 < DEFAULT_ATR_PCT_THRESHOLD < 1  # Should be a percentage
-        assert DEFAULT_ATR_PCT_THRESHOLD == 0.025  # Expected System5 threshold
+        assert DEFAULT_ATR_PCT_THRESHOLD == 0.04  # Case A: spec 4% (旧 2.5%)
 
 
 if __name__ == "__main__":

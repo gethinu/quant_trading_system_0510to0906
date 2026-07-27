@@ -110,8 +110,19 @@ export interface AlpacaAccount {
   buying_power: number | null;
   long_market_value: number | null;
   short_market_value: number | null;
+  /** 当日損益。**計測できない時は null** (架空の 0 や基準ずれの数字を出さない)。 */
   pnl_today_abs: number | null;
   pnl_today_pct: number | null;
+  /** "prev_session_intraday" (唯一の正) | "unavailable" (出せない)。 */
+  pnl_today_basis?: string | null;
+  /** false の時は pnl_today_abs/pct を **表示してはいけない**。 */
+  pnl_today_measured?: boolean | null;
+  /** 差の基準に使った equity と、その所属セッション。 */
+  pnl_today_baseline?: number | null;
+  pnl_today_baseline_session?: string | null;
+  pnl_today_session?: string | null;
+  /** measured=false の時だけ入る、出せない理由。 */
+  pnl_today_unavailable_reason?: string | null;
   unrealized_pl_total: number | null;
   status: string;
   trading_blocked: boolean;
@@ -198,6 +209,8 @@ export interface AlpacaPosition {
   intraday_pl: number | null;
   intraday_pl_pct: number | null;
   entry_date: string | null;
+  /** ticker rename の旧 symbol 経由で system を引いた場合の旧 symbol。 */
+  renamed_from?: string | null;
   holding_days: number | null;
   max_holding_days: number;
   days_remaining: number | null;
@@ -210,6 +223,225 @@ export interface AlpacaPosition {
   target_price_est: number | null;
   distance_to_stop_pct: number | null;
   distance_to_target_pct: number | null;
+}
+
+/** 期間切替 1 レンジ分。points が空 = その期間はデータ無し (0 で埋めない)。 */
+export interface EquityRange {
+  label: string;
+  timeframe: string;
+  points: EquityPoint[];
+  peak_equity: number | null;
+  max_drawdown_pct: number | null;
+  period_return_pct: number | null;
+  start: string | null;
+  end: string | null;
+  n_points: number;
+  /** "intraday" (5Min, live equity と同一基準) | "broker_daily" (日次系列)。
+   *  この 2 つは上場廃止建玉の扱いが違うので水準が一致しない。混ぜて差を取らない。 */
+  basis?: 'intraday' | 'broker_daily' | string;
+}
+
+/** live equity と broker 日次系列の水準差を事実で分解したもの。 */
+export interface EquityBasis {
+  /** 上場廃止 (INACTIVE) で売却不能な建玉の時価。equity には載るが日次系列には載らない。 */
+  frozen_market_value: number;
+  frozen_symbols: string[];
+  n_frozen: number;
+  /** equity − 日次系列の最終値。 */
+  daily_series_gap: number | null;
+  /** 差のうち上場廃止建玉で説明できない残り (最終日次点以降の値動きを含む)。 */
+  residual_usd: number | null;
+  last_daily_equity: number | null;
+  last_daily_session?: string | null;
+}
+
+export type EquityRangeKey = '1D' | '1W' | '1M' | '3M' | 'ALL';
+
+/** 当日損益を 1 つの定義に統一したブロック。
+ *  total_pl = 現在 equity − 前セッション終値 equity (**同一 intraday 基準**)。
+ *  measured=false の時 total_pl は必ず null = 「出せない」。 */
+export interface PnlToday {
+  session_date: string | null;
+  equity_now: number | null;
+  baseline_equity: number | null;
+  baseline_session: string | null;
+  total_pl: number | null;
+  total_pl_pct: number | null;
+  /** 確定分。exit 台帳が未計測なら null。 */
+  realized_pl: number | null;
+  /** total − realized = 保有ポジションの当日値洗い。 */
+  unrealized_delta: number | null;
+  basis: string;
+  measured: boolean;
+  reason: string | null;
+}
+
+/** 決済済みトレード 1 本 (exit_ledger_YYYYMMDD.json 由来)。 */
+export interface ClosedTrade {
+  symbol: string;
+  side: 'long' | 'short';
+  qty: number;
+  system: string | null;
+  entry_time: string;
+  /** 立会日 (ET)。日次集計はこれで束ねる。 */
+  entry_session?: string;
+  entry_price: number;
+  exit_time: string;
+  exit_session?: string;
+  exit_price: number;
+  holding_days: number;
+  realized_pl: number;
+  realized_pl_pct: number | null;
+  exit_reason: string | null;
+  exit_order_id: string | null;
+  entry_order_id?: string | null;
+  /** ticker rename で統合した場合の元の symbol 群 (canonical 以外)。 */
+  symbol_aliases?: string[];
+  /** system を何を根拠に付けたか ("entry_order" が trade 単位の確定根拠)。 */
+  system_source?: string | null;
+  /** system が付かなかった理由 (system が null の時だけ入る)。 */
+  system_unknown_reason?: string | null;
+}
+
+export interface RealizedSummary {
+  n_trades: number;
+  total_realized_pl: number | null;
+  win_rate_pct: number | null;
+  n_wins: number;
+  n_losses: number;
+  avg_win: number | null;
+  avg_loss: number | null;
+  best: { symbol: string; realized_pl: number } | null;
+  worst: { symbol: string; realized_pl: number } | null;
+}
+
+export interface RealizedDay {
+  t: string;
+  realized_pl: number;
+  realized_pl_cum: number;
+}
+
+/** exit 計測の素性。complete=false なら取りこぼしを正直に出すこと。 */
+export interface ExitMeasurement {
+  measured: boolean;
+  complete: boolean;
+  reasons: string[];
+  fills_seen: number;
+  coverage_start: string | null;
+  coverage_end: string | null;
+  unmeasured_symbols: string[];
+  discrepancies: {
+    symbol: string;
+    reconstructed_qty: number;
+    broker_qty: number;
+    reason: string;
+  }[];
+  /** 建玉の食い違いを ticker rename の「対」に組んだ仮説 (断定ではない)。 */
+  rename_candidates?: {
+    from_symbol: string;
+    to_symbol: string;
+    qty: number;
+    evidence: string;
+    confirmed: boolean;
+  }[];
+}
+
+/** system 帰属の内訳。unknown を「なぜ不明か」まで割る。 */
+export interface ExitAttribution {
+  n_trades: number;
+  n_attributed: number;
+  n_unknown: number;
+  n_ground_truth: number;
+  ground_truth_pct: number | null;
+  by_source: { source: string; label: string; n_trades: number }[];
+  unknown_by_reason: {
+    reason: string;
+    label: string;
+    n_trades: number;
+    realized_pl: number;
+    symbols: string[];
+    entry_sessions: string[];
+  }[];
+}
+
+/** exit 理由別の件数。母数は **全決済** (履歴表の直近 N 件ではない)。 */
+export interface ExitReasonTotal {
+  reason: string | null;
+  n_trades: number;
+  realized_pl: number;
+}
+
+/** ticker rename の統合結果。手動マップであることを画面から隠さない。 */
+export interface ExitRenames {
+  source: string;
+  /** 常に false = broker 側に corporate action の裏づけが無い。 */
+  confirmed_by_broker: boolean;
+  applied: {
+    alias: string;
+    canonical: string;
+    qty?: number;
+    observed_qty?: number;
+    evidence?: string;
+    corroboration?: string;
+  }[];
+  rejected: { alias?: string; canonical?: string; rejected_reason: string }[];
+  /** 統合によって復元された決済の本数。 */
+  n_synthesized_trades: number;
+}
+
+export interface ExitIntentRecon {
+  session_date: string;
+  /** "before_open" | "open" | "closed" | "unknown"。 */
+  session_state?: string;
+  n_intended: number;
+  n_filled: number;
+  /** 立会が終わった上で約定していない = 取りこぼし。 */
+  intended_not_filled: { symbol: string; reason: string | null }[];
+  /** まだ執行機会が来ていない分 (取りこぼしではない)。 */
+  intended_pending?: { symbol: string; reason: string | null }[];
+  filled_not_intended: string[];
+  fully_reconciled: boolean;
+  /** 立会が終わっていて判定できたか。 */
+  evaluated?: boolean;
+}
+
+/** 台帳側の「当日」ブロック。session_state が closed 以外なら途中経過。 */
+export interface LedgerToday {
+  date: string;
+  realized_pl: number | null;
+  n_closed: number;
+  measured: boolean;
+  reasons: string[];
+  session_state?: string;
+  final?: boolean;
+  pending_exit_intents?: number;
+}
+
+/** 実現損益ブロック。available=false = 台帳未生成 = 「未計測」と表示する。 */
+export interface RealizedBlock {
+  available: boolean;
+  measured: boolean;
+  complete?: boolean;
+  /** 台帳の日付が snapshot の日付と違う = 当日分は再計測されていない。 */
+  stale?: boolean;
+  reason: string | null;
+  ledger_date: string | null;
+  ledger_run_id: string | null;
+  ledger_generated_at?: string | null;
+  all_time: RealizedSummary | null;
+  by_day: RealizedDay[];
+  by_system: Record<string, RealizedSummary>;
+  closed_trades: ClosedTrade[];
+  n_closed_trades_total?: number;
+  measurement: ExitMeasurement | null;
+  /** 旧 snapshot には無い → 内訳を出さない (0 と混同しないため)。 */
+  attribution?: ExitAttribution | null;
+  /** 全決済が母数の exit 理由内訳。旧 snapshot には無い。 */
+  by_exit_reason?: ExitReasonTotal[];
+  /** ticker rename の統合結果。旧 snapshot には無い。 */
+  renames?: ExitRenames | null;
+  exit_intent_reconciliation?: ExitIntentRecon | null;
+  today?: LedgerToday | null;
 }
 
 export interface AlpacaReconciliation {
@@ -231,6 +463,14 @@ export interface AlpacaSnapshot {
   provider: string;
   account: AlpacaAccount;
   equity_curve: EquityCurve;
+  /** 期間切替用 (1日/1週/1月/3月/全期間)。旧 snapshot には無い。 */
+  equity_ranges?: Partial<Record<EquityRangeKey, EquityRange>> | null;
+  /** equity の水準差 (上場廃止建玉) の分解。旧 snapshot には無い。 */
+  equity_basis?: EquityBasis | null;
+  /** 当日損益の唯一の定義。旧 snapshot には無い → 「計測不可」表示。 */
+  pnl_today?: PnlToday | null;
+  /** 実現損益 + 決済済みトレード履歴。旧 snapshot には無い。 */
+  realized?: RealizedBlock | null;
   exposure: AlpacaExposure;
   summary: AlpacaSummary;
   positions: AlpacaPosition[];

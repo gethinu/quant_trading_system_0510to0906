@@ -7,6 +7,7 @@ import { PipelineSection } from '@/components/PipelineSection';
 import { SignalsSection } from '@/components/SignalsSection';
 import { AlpacaSection } from '@/components/AlpacaSection';
 import { Tabs } from '@/components/Tabs';
+import { StatusSummary } from '@/components/StatusSummary';
 import type {
   PipelinePayload,
   SignalsPayload,
@@ -125,7 +126,11 @@ export default function Home() {
   const alpaca: AlpacaSnapshot | null = loadAlpaca();
 
   const total = signals?.portfolio.total_signals ?? 0;
-  const pnlPct = alpaca?.account.pnl_today_pct ?? null;
+  // 当日損益は「同一基準で計測できた時だけ」出す。measured=false の snapshot で
+  // バッジにだけ数字が残ると、本文が「未計測」と言っているのに見出しは断言する、
+  // という一番たちの悪い矛盾になるので、ここで明示的に落とす。
+  const pnlMeasured = alpaca?.pnl_today?.measured ?? true;
+  const pnlPct = pnlMeasured ? (alpaca?.account.pnl_today_pct ?? null) : null;
   const alpacaBadge =
     alpaca != null
       ? `${alpaca.summary.n_positions}${
@@ -137,6 +142,14 @@ export default function Home() {
 
   return (
     <main className="mx-auto max-w-5xl p-4 sm:p-6 pb-16">
+      {/* 最上部の「状態」サマリー。今日の損益 / 保有と期限超過 / 鮮度と run_id /
+          赤アラート件数だけを出す。ここから下 (両タブ) は詳細で、既定で畳んである。 */}
+      <StatusSummary
+        snapshot={alpaca}
+        signalsDate={signals?.date ?? null}
+        runId={signals?.meta.run_id ?? null}
+        generatedAt={signals?.generated_at ?? null}
+      />
       <Tabs
         signalsView={
           <SignalsView signals={signals} pipeline={pipeline} narrative={narrative} />

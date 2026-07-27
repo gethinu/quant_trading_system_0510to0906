@@ -27,6 +27,17 @@
     results_csv/ 側の source file (今日以外) を KeepDays 世代残して削除する。
     default $true。false 指定で無効化 (Sprint 期間中に history 保持したい時など)。
 
+.PARAMETER RefreshAccount
+    copy の前に Alpaca 口座の計測を read-only で作り直す (既定 $true)。
+    build_exit_ledger.py (約定台帳 = 実現損益) -> export_alpaca_snapshot.py の順。
+    発注は一切しない。-RefreshAccount:$false で無効化 (offline 検証用)。
+
+.PARAMETER AutoLatest
+    -Date を無視し、results_csv/today_signals_*.json の最新生成日を自動検出して
+    publish する self-heal モード。冪等 (data/ が既に最新なら差分ゼロで exit 0)。
+    06:00 の wrapper (daily_main_follow.ps1) が途中で死んで dashboard publish を
+    取りこぼしても、独立した catch-up task から呼べば取り戻せる。
+
 .NOTES
     daily_pipeline.ps1 の最終 step から呼ばれる想定。単体実行も可。
     push 先: origin claude/monitor-webapp
@@ -36,18 +47,47 @@ param(
     [string]$Date = "",
     [int]$KeepDays = 7,
     [switch]$NoPush = $false,
-    [bool]$PurgeSource = $true
+    [bool]$PurgeSource = $true,
+    [switch]$AutoLatest = $false,
+    [bool]$RefreshAccount = $true
 )
 
 $ErrorActionPreference = "Continue"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent $ScriptDir
-if (-not $Date) { $Date = Get-Date -Format "yyyy-MM-dd" }
-$DateCompact = $Date -replace "-", ""
 
 $SrcDir = Join-Path $ProjectRoot "results_csv"
 $DataDir = Join-Path $ProjectRoot "apps\dashboards\alpaca-next\data"
 $Branch = "claude/monitor-webapp"
+
+# -AutoLatest: self-heal path (2026-07-22 root-cause fix). The daily dashboard
+# publish normally runs as the LAST step of daily_main_follow.ps1, AFTER the child
+# daily_pipeline.ps1 (-SkipVercel) has finished. The ntfy notification lives INSIDE
+# that child (step 5), but the dashboard publish lives in the wrapper's step 4.
+# If the wrapper dies mid-run (e.g. host sleep / task timeout) the child is orphaned
+# yet keeps running to completion -> ntfy fires with fresh data while the wrapper's
+# publish is silently lost -> the dashboard freezes on yesterday's build.
+# This mode ignores -Date and publishes the NEWEST generated
+# results_csv/today_signals_*.json instead. It is idempotent: the downstream
+# `git diff --cached --quiet` gate makes a re-run a no-op (exit 0) once data/ is
+# already current, so it is safe to fire from an independent catch-up task
+# (see scripts/morning_brief.ps1) regardless of whether the 06:00 publish succeeded.
+if ($AutoLatest) {
+    $latest = Get-ChildItem -Path $SrcDir -Filter "today_signals_*.json" -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match 'today_signals_(\d{8})\.json$' } |
+        Sort-Object Name -Descending | Select-Object -First 1
+    if (-not $latest) {
+        Write-Host "[publish_data] AutoLatest: results_csv に today_signals_*.json が無い。何もせず終了 (exit 0)。"
+        exit 0
+    }
+    if ($latest.Name -match 'today_signals_(\d{8})\.json$') {
+        $dc = $matches[1]
+        $Date = "{0}-{1}-{2}" -f $dc.Substring(0, 4), $dc.Substring(4, 2), $dc.Substring(6, 2)
+        Write-Host "[publish_data] AutoLatest: newest generated date = $Date ($($latest.Name))"
+    }
+}
+if (-not $Date) { $Date = Get-Date -Format "yyyy-MM-dd" }
+$DateCompact = $Date -replace "-", ""
 
 function Write-Log {
     param([string]$Message)
@@ -56,6 +96,36 @@ function Write-Log {
 
 if (-not (Test-Path $DataDir)) {
     New-Item -ItemType Directory -Path $DataDir -Force | Out-Null
+}
+
+# --- 口座計測の再生成 (read-only) ----------------------------------------
+# 2026-07-22 root-cause fix: export_alpaca_snapshot.py / build_exit_ledger.py は
+# これまで **どの pipeline からも呼ばれておらず**、alpaca_snapshot_*.json は
+# 誰かが手で叩いた日 (最後は 07-20) しか生成されていなかった。結果として
+#   - Alpaca タブが数日前の口座で凍結
+#   - exit (決済) の実績と実現損益がどこにも durable に残らない
+# という状態だった。publish は毎日必ず走る唯一の step なので、ここで
+# 「約定台帳 -> snapshot」の順に read-only で作り直してから copy する。
+#
+# 失敗しても publish 本体は止めない (signals 側の配信を巻き添えにしない)。
+# 生成できなければ当日ファイルが無いだけで、copy loop が skip し、
+# dashboard 側は「未計測」と正直に表示する (0 で埋めない)。
+if ($RefreshAccount) {
+    $py = if ($env:QTS_PYTHON) { $env:QTS_PYTHON } else { "python" }
+    $ledgerScript = Join-Path $ProjectRoot "scripts\build_exit_ledger.py"
+    $snapScript = Join-Path $ProjectRoot "scripts\export_alpaca_snapshot.py"
+
+    if (Test-Path $ledgerScript) {
+        Write-Log "[account] exit 台帳を再構成 (build_exit_ledger.py --date $Date)"
+        & $py $ledgerScript --date $Date 2>&1 | ForEach-Object { Write-Log $_ }
+        # exit 3 = 未計測を検知 (--fail-on-unmeasured 指定時のみ)。ここでは通知に留める。
+        if ($LASTEXITCODE -ne 0) { Write-Log "[account] WARN: build_exit_ledger exit=$LASTEXITCODE" }
+    }
+    if (Test-Path $snapScript) {
+        Write-Log "[account] Alpaca snapshot を再生成 (export_alpaca_snapshot.py --date $Date)"
+        & $py $snapScript --date $Date 2>&1 | ForEach-Object { Write-Log $_ }
+        if ($LASTEXITCODE -ne 0) { Write-Log "[account] WARN: export_alpaca_snapshot exit=$LASTEXITCODE" }
+    }
 }
 
 # 当日生成される JSON を data/ に日付付きのままコピー。
@@ -93,7 +163,7 @@ if ($copied -eq 0) {
 # 2026-07-02 fix: filename は today_signals_YYYYMMDD.json 形式のため
 # `Sort-Object Name -Descending` は lexical でも date 降順と等価 (8桁 zero-padded)。
 # 削除は Remove-Item ではなく `git rm` で explicit に (commit の diff に載せる)。
-$prefixes = @("today_signals_", "pipeline_", "polygon_daily_coverage_", "narrative_", "alpaca_snapshot_")
+$prefixes = @("today_signals_", "pipeline_", "polygon_daily_coverage_", "narrative_", "alpaca_snapshot_", "exit_ledger_")
 Set-Location $ProjectRoot
 $RelData = "apps/dashboards/alpaca-next/data"
 foreach ($prefix in $prefixes) {

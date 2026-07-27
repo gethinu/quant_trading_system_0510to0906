@@ -332,20 +332,36 @@ class TestSystem5Constants:
     """Test System5 constants and configuration."""
 
     def test_system5_required_indicators(self):
-        """Test SYSTEM5_REQUIRED_INDICATORS constant."""
+        """Test SYSTEM5_REQUIRED_INDICATORS constant.
+
+        audit-remediation 2026-07-03 (D3 Case A): avgvolume50 / dollarvolume50 を追加。
+        "filter" / "setup" は runtime 生成列で precompute の必須指標ではないため除外。
+        """
         assert isinstance(SYSTEM5_REQUIRED_INDICATORS, (list, tuple))
         assert len(SYSTEM5_REQUIRED_INDICATORS) > 0
 
-        # Key indicators should be present
-        expected = {"adx7", "atr10", "dollarvolume20", "atr_pct", "filter", "setup"}
+        # Key indicators should be present (Case A: 流動性 filter 追加後)
+        expected = {
+            "adx7",
+            "atr10",
+            "dollarvolume20",
+            "atr_pct",
+            "sma100",
+            "rsi3",
+            "avgvolume50",  # Case A: spec の AvgVol50 filter
+            "dollarvolume50",  # Case A: spec の DV50 filter
+        }
         actual = set(SYSTEM5_REQUIRED_INDICATORS)
         assert expected.issubset(actual)
 
     def test_default_atr_pct_threshold(self):
-        """Test DEFAULT_ATR_PCT_THRESHOLD constant."""
+        """Test DEFAULT_ATR_PCT_THRESHOLD constant.
+
+        audit-remediation 2026-07-03 (D3 Case A): spec 準拠に 0.025 → 0.04 是正。
+        """
         assert isinstance(DEFAULT_ATR_PCT_THRESHOLD, (int, float))
         assert 0 < DEFAULT_ATR_PCT_THRESHOLD < 1
-        assert DEFAULT_ATR_PCT_THRESHOLD == 0.025  # 2.5%
+        assert DEFAULT_ATR_PCT_THRESHOLD == 0.04  # 4% (spec, Case A)
 
     def test_system5_constants_immutability(self):
         """Test that System5 constants are properly defined."""
@@ -353,8 +369,8 @@ class TestSystem5Constants:
         assert DEFAULT_ATR_PCT_THRESHOLD is not None
         assert SYSTEM5_REQUIRED_INDICATORS is not None
 
-        # Should be meaningful values
-        assert len(SYSTEM5_REQUIRED_INDICATORS) >= 6  # At least 6 indicators
+        # Should be meaningful values (Case A で avgvolume50 / dollarvolume50 追加後は 8+)
+        assert len(SYSTEM5_REQUIRED_INDICATORS) >= 8
 
 
 if __name__ == "__main__":
