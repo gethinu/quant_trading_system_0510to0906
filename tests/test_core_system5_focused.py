@@ -20,18 +20,28 @@ class TestSystem5Constants:
     """Test System5 constants and thresholds."""
 
     def test_default_atr_pct_threshold(self):
-        """Test DEFAULT_ATR_PCT_THRESHOLD value."""
-        assert DEFAULT_ATR_PCT_THRESHOLD == 0.025
+        """Test DEFAULT_ATR_PCT_THRESHOLD value.
+
+        audit-remediation 2026-07-03 (D3 Case A): spec 準拠に 2.5% → 4% 是正。
+        """
+        assert DEFAULT_ATR_PCT_THRESHOLD == 0.04
 
     def test_required_indicators_list(self):
-        """Test SYSTEM5_REQUIRED_INDICATORS contains expected indicators."""
+        """Test SYSTEM5_REQUIRED_INDICATORS contains expected precompute indicators.
+
+        audit-remediation 2026-07-03 (D3 Case A): 流動性 filter 追加に伴い
+        avgvolume50 / dollarvolume50 を必須指標に追加。"filter"/"setup" は
+        runtime で生成される列で precompute 必須ではないため expected から除外。
+        """
         expected_indicators = [
             "adx7",
             "atr10",
             "dollarvolume20",
             "atr_pct",
-            "filter",
-            "setup",
+            "sma100",
+            "rsi3",
+            "avgvolume50",  # Case A で追加 (spec: AvgVol50 filter)
+            "dollarvolume50",  # Case A で追加 (spec: DV50 filter)
         ]
         assert all(
             indicator in SYSTEM5_REQUIRED_INDICATORS
@@ -39,10 +49,13 @@ class TestSystem5Constants:
         )
 
     def test_format_atr_pct_threshold_label(self):
-        """Test format_atr_pct_threshold_label formatting."""
+        """Test format_atr_pct_threshold_label formatting.
+
+        audit-remediation 2026-07-03 (D3 Case A): 4% ラベルを assertion。
+        """
         result = format_atr_pct_threshold_label()
         assert isinstance(result, str)
-        assert "2.50%" in result  # Function returns "> 2.50%"
+        assert "4.00%" in result  # Case A: spec 4% (旧: "2.50%")
 
 
 class TestSystem5Utilities:
