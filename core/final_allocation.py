@@ -1826,6 +1826,17 @@ def _apply_portfolio_caps(
         logger.info(
             "[PORTFOLIO_CAP] trimmed %s (held L%d/S%d)", trims, held_long, held_short
         )
+    # signals JSON へ「なぜその system が 0 本なのか」を運ぶ (観測性のみ。挙動は不変)。
+    # per-system funnel は生成側しか語らないため、cand が健全でも cap で 0 に落ちた
+    # 事実は [PORTFOLIO_CAP] の INFO ログにしか残らない。実際 2026-07-21..27 は
+    # held_long=51 > max_long=40 で allow_long=0 となり long 4 system が毎日 0 本
+    # だったが、ダッシュボード上は「system2 だけ出る」としか見えなかった。
+    try:  # best-effort: 観測性のために allocation を壊さない
+        from common.stage_metrics import GLOBAL_STAGE_METRICS
+
+        GLOBAL_STAGE_METRICS.set_portfolio_caps(report)
+    except Exception:  # noqa: BLE001
+        pass
     return trimmed_df, report
 
 
