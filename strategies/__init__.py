@@ -34,6 +34,7 @@ _CLASS_MAP = {
     "system5": ("strategies.system5_strategy", "System5Strategy"),
     "system6": ("strategies.system6_strategy", "System6Strategy"),
     "system7": ("strategies.system7_strategy", "System7Strategy"),
+    "system8": ("strategies.system8_strategy", "System8Strategy"),
 }
 
 

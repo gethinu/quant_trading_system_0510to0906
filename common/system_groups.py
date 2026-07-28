@@ -5,8 +5,13 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+# System8 は SPY オーバーナイト FOMC ドリフト（ロング方向）。System1/3/5 のような
+# 「普通株プールから top-N を選ぶ」ロング・ストックピッキングではなく、単一銘柄の
+# イベント駆動スリーブ。ここでの分類は *建玉方向（side）* の表示グルーピングに過ぎず、
+# 資金配分プール（long_allocations / short_allocations）への参加を意味しない
+# （System8 は配分ウェイト未登録＝資金は割り当てられない。config/settings.py 参照）。
 SYSTEM_SIDE_GROUPS: dict[str, tuple[str, ...]] = {
-    "long": ("system1", "system3", "system5"),
+    "long": ("system1", "system3", "system5", "system8"),
     "short": ("system2", "system4", "system6", "system7"),
 }
 
@@ -14,7 +19,7 @@ SYSTEM_SIDE_GROUPS: dict[str, tuple[str, ...]] = {
 GROUP_ORDER: tuple[str, ...] = tuple(SYSTEM_SIDE_GROUPS.keys())
 
 GROUP_DISPLAY_NAMES: dict[str, str] = {
-    "long": "Long (System1,3,5)",
+    "long": "Long (System1,3,5,8)",
     "short": "Short (System2,4,6,7)",
 }
 
@@ -27,6 +32,7 @@ SYSTEM_LABELS: dict[str, str] = {
     "system5": "System5",
     "system6": "System6",
     "system7": "System7",
+    "system8": "System8",
 }
 
 
