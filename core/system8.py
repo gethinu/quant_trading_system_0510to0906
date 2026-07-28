@@ -1,5 +1,10 @@
 # ============================================================================
 # 🧠 Context Note
+# 🧬 Lineage: original (in-house) — **Bensdorp 準拠ではない**。当リポジトリ独自開発の
+#   イベントドリブン戦略 (FOMC 声明日のオーバーナイト・ドリフト)。System1-7 (bensdorp 系)
+#   とは設計思想が根本的に異なり、指標クロスでも top-N ストックピッキングでもない。
+#   出所は別リポジトリの研究成果 n0150_fomc_macro_event_drift_spy (凍結ルール v03)。
+#   正準定義: common/system_constants.py の SYSTEM_LINEAGE / docs/SYSTEM_LINEAGE.md
 # このファイルは System8（SPY オーバーナイト FOMC ドリフト）のロジック専門
 #
 # ⚠️ CRITICAL: System8 は SPY 固定・ロング専用・イベントカレンダー駆動。

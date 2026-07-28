@@ -180,16 +180,52 @@ SYSTEM7_REQUIRED_INDICATORS = [
 # setup は prepare_data が data/events/fomc.csv から付与する（OHLC のみ使用）。
 SYSTEM8_REQUIRED_INDICATORS: list[str] = []
 
+# === システムの血統 (lineage) ===
+# System1-7 と System8 は **出自も設計思想も別物** であり、後任が「同じ枠組みの 8 番目」と
+# 誤解しないよう、ここを血統の正準定義とする（表示・doc・ダッシュはすべてここを参照）。
+#
+#   - ``bensdorp``: Laurens Bensdorp の自動売買システム本に準拠した定型システム群。
+#     広いユニバースに指標フィルター + セットアップを当て、ランキング上位 N を取る
+#     モメンタム / 平均回帰 × ロング / ショートの組み合わせ（System7 の SPY ヘッジを含む）。
+#   - ``original``: 当リポジトリ独自開発。Bensdorp 準拠ではない。
+#     現状 System8 のみ（FOMC 声明日のオーバーナイト・ドリフト＝イベントドリブン）。
+#     指標クロスでも top-N ストックピッキングでもなく、イベントカレンダーが setup を決める。
+#
+# 詳細と背景は docs/SYSTEM_LINEAGE.md を参照。
+LINEAGE_BENSDORP = "bensdorp"
+LINEAGE_ORIGINAL = "original"
+
+SYSTEM_LINEAGE: dict[str, str] = {
+    "system1": LINEAGE_BENSDORP,
+    "system2": LINEAGE_BENSDORP,
+    "system3": LINEAGE_BENSDORP,
+    "system4": LINEAGE_BENSDORP,
+    "system5": LINEAGE_BENSDORP,
+    "system6": LINEAGE_BENSDORP,
+    "system7": LINEAGE_BENSDORP,
+    # System8 のみ独自開発。ここを bensdorp に書き換えてはいけない。
+    "system8": LINEAGE_ORIGINAL,
+}
+
+# 表示用の短いラベル（UI / 通知 / ダッシュのバッジ文言はここに揃える）。
+LINEAGE_LABELS: dict[str, str] = {
+    LINEAGE_BENSDORP: "Bensdorp 準拠",
+    LINEAGE_ORIGINAL: "独自開発 (event-driven)",
+}
+
+
 # === システム別設定マッピング ===
 SYSTEM_CONFIGS = {
     "system1": {
         "min_rows": MIN_ROWS_SYSTEM1,
+        "lineage": LINEAGE_BENSDORP,
         "required_indicators": SYSTEM1_REQUIRED_INDICATORS,
         "min_price": SYSTEM1_MIN_PRICE,
         "min_dollar_volume": SYSTEM1_MIN_DOLLAR_VOLUME,
     },
     "system2": {
         "min_rows": MIN_ROWS_SYSTEM2,
+        "lineage": LINEAGE_BENSDORP,
         "required_indicators": SYSTEM2_REQUIRED_INDICATORS,
         "min_price": SYSTEM2_MIN_PRICE,
         "min_dollar_volume": SYSTEM2_MIN_DOLLAR_VOLUME,
@@ -198,6 +234,7 @@ SYSTEM_CONFIGS = {
     },
     "system3": {
         "min_rows": MIN_ROWS_SYSTEM3,
+        "lineage": LINEAGE_BENSDORP,
         "required_indicators": SYSTEM3_REQUIRED_INDICATORS,
         "min_price": SYSTEM3_MIN_PRICE,
         "min_avg_volume_50": SYSTEM3_MIN_AVG_VOLUME_50,
@@ -206,6 +243,7 @@ SYSTEM_CONFIGS = {
     },
     "system4": {
         "min_rows": MIN_ROWS_SYSTEM4,
+        "lineage": LINEAGE_BENSDORP,
         "required_indicators": SYSTEM4_REQUIRED_INDICATORS,
         "min_price": SYSTEM4_MIN_PRICE,
         "min_dollar_volume": SYSTEM4_MIN_DOLLAR_VOLUME,
@@ -213,6 +251,7 @@ SYSTEM_CONFIGS = {
     },
     "system5": {
         "min_rows": MIN_ROWS_SYSTEM5,
+        "lineage": LINEAGE_BENSDORP,
         "required_indicators": SYSTEM5_REQUIRED_INDICATORS,
         "min_price": SYSTEM5_MIN_PRICE,
         # audit-remediation 2026-07-03 (D3 Case A): 流動性 filter を新設。
@@ -224,6 +263,7 @@ SYSTEM_CONFIGS = {
     },
     "system6": {
         "min_rows": MIN_ROWS_SYSTEM6,
+        "lineage": LINEAGE_BENSDORP,
         "required_indicators": SYSTEM6_REQUIRED_INDICATORS,
         "min_price": SYSTEM6_MIN_PRICE,
         "min_dollar_volume": SYSTEM6_MIN_DOLLAR_VOLUME,
@@ -231,11 +271,13 @@ SYSTEM_CONFIGS = {
     },
     "system7": {
         "min_rows": MIN_ROWS_SYSTEM7,
+        "lineage": LINEAGE_BENSDORP,
         "required_indicators": SYSTEM7_REQUIRED_INDICATORS,
         "symbol": SYSTEM7_SYMBOL,
     },
     "system8": {
         "min_rows": MIN_ROWS_SYSTEM8,
+        "lineage": LINEAGE_ORIGINAL,
         "required_indicators": SYSTEM8_REQUIRED_INDICATORS,
         "symbol": SYSTEM8_SYMBOL,
         # 往復コスト（bp）。EA/約定側で参照可能なメタ。
@@ -359,6 +401,26 @@ def get_system_config(system_name: str) -> dict:
     return SYSTEM_CONFIGS[system_name.lower()]
 
 
+def get_system_lineage(system_name: str) -> str:
+    """指定されたシステムの血統 (lineage) を返す。
+
+    System1-7 は ``"bensdorp"``（Laurens Bensdorp の本に準拠した定型システム群）、
+    System8 は ``"original"``（当リポジトリ独自開発の event-driven）。
+    表示・レポート・ダッシュはこの関数（または :data:`SYSTEM_LINEAGE`）を単一の
+    出所として使い、system 番号から血統を推測しないこと。
+
+    Args:
+        system_name: システム名（例: "system1", "System8"）
+
+    Returns:
+        ``"bensdorp"`` または ``"original"``
+
+    Raises:
+        KeyError: 未知のシステム名の場合
+    """
+    return SYSTEM_LINEAGE[system_name.lower()]
+
+
 __all__ = [
     # 基本定数
     "REQUIRED_COLUMNS",
@@ -388,6 +450,12 @@ __all__ = [
     "SYSTEM8_SYMBOL",
     "SYSTEM8_COST_BPS_ROUNDTRIP",
     "HEDGE_INDEX_SYMBOLS",
+    # 血統 (bensdorp 準拠 / 独自開発) — docs/SYSTEM_LINEAGE.md
+    "LINEAGE_BENSDORP",
+    "LINEAGE_ORIGINAL",
+    "SYSTEM_LINEAGE",
+    "LINEAGE_LABELS",
+    "get_system_lineage",
     # 設定管理
     "SYSTEM_CONFIGS",
     "get_system_config",

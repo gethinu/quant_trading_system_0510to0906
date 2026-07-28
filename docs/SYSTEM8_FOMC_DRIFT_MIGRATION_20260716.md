@@ -1,5 +1,16 @@
 # System8 — SPY オーバーナイト FOMC プレドリフト移植記録 (2026-07-16)
 
+> **🧬 lineage: original (in-house) — Bensdorp 準拠ではない**
+>
+> System1-7 は Laurens Bensdorp の自動売買システム本に準拠した定型システム群
+> （広いユニバース → 指標フィルター → セットアップ → 上位 N ランキングの
+> モメンタム / 平均回帰 × ロング / ショート）だが、**System8 だけは当リポジトリ
+> 独自開発**のイベントドリブン戦略で、設計思想が根本的に異なる。
+> 番号が連番だからといって「同じ枠組みの 8 番目」と扱わないこと。
+>
+> 血統の正準定義は `common/system_constants.py` の `SYSTEM_LINEAGE`、
+> 背景と記録場所の一覧は `docs/SYSTEM_LINEAGE.md`。
+
 ## 1. 出所 (source of truth)
 
 本戦略は **別リポジトリ** で研究・凍結・独立レビュー・封印(sealed)テスト済みの
