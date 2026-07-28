@@ -1,10 +1,26 @@
+import { LINEAGE_LABEL, LINEAGE_LEGEND, sysLineage } from '@/lib/format';
 import type {
   PipelinePayload,
   SystemPipeline,
   SystemPipelinePhase,
 } from '@/lib/types';
 
-const SYSTEMS = ['sys1', 'sys2', 'sys3', 'sys4', 'sys5', 'sys6', 'sys7'];
+// sys8 は payload に無ければ描画されない (下の filter)。System8 は現状ライブの
+// 日次ループに未配線なので通常は出てこないが、配線された日に落ちないよう並べておく。
+const SYSTEMS = [
+  'sys1',
+  'sys2',
+  'sys3',
+  'sys4',
+  'sys5',
+  'sys6',
+  'sys7',
+  'sys8',
+];
+
+// pipeline payload の key は `sysN`、血統レジストリの key は `systemN`。
+const lineageOfSysKey = (key: string) =>
+  key.startsWith('sys') ? sysLineage('system' + key.slice(3)) : null;
 
 function fmtCount(v: number | null): string {
   return v == null ? '—' : v.toLocaleString();
@@ -73,11 +89,21 @@ function PhaseRow({ phase }: { phase: SystemPipelinePhase }) {
 function SystemPipelineAccordion({ sys }: { sys: SystemPipeline }) {
   const universe = universeOf(sys);
   const final = finalOf(sys);
+  const lineage = lineageOfSysKey(sys.system_id);
   return (
     <details className="rounded-lg bg-white/[0.03] border border-white/5">
       <summary className="cursor-pointer select-none list-none px-3 py-2 flex items-center justify-between gap-2">
         <span className="flex items-center gap-2 min-w-0">
           <span className="font-medium">{sys.system_id}</span>
+          {/* 血統が Bensdorp 系でないものだけ明示する (控えめだが混同させない)。 */}
+          {lineage === 'original' ? (
+            <span
+              className="text-[9px] px-1.5 py-0.5 rounded-full bg-lime-400/15 text-lime-300 shrink-0"
+              title={LINEAGE_LABEL.original}
+            >
+              独自
+            </span>
+          ) : null}
           <span className="text-[10px] text-muted tabular-nums truncate">
             {fmtCount(universe)} → {fmtCount(final)}
           </span>
@@ -118,6 +144,8 @@ export function PipelineSection({
           数値は<span className="text-cardfg"> 絞込透明性のための参考値</span>で、
           通過率は評価軸ではありません (厳しい gate ほど TRDlist/Entry は少数になる設計)。
         </p>
+        {/* 血統の凡例。System8 だけ設計思想が別系統なので、印の意味を必ず添える。 */}
+        <p className="text-[10px] text-muted mb-3 leading-snug">{LINEAGE_LEGEND}</p>
         {!payload ? (
           <div className="text-sm text-muted">
             No pipeline data yet. Run{' '}
