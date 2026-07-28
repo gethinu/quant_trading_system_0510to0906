@@ -5,8 +5,20 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from common.system_constants import LINEAGE_LABELS, LINEAGE_ORIGINAL, SYSTEM_LINEAGE
+
+# 血統マーカー: 独自開発（Bensdorp 準拠でない）system に付ける控えめな印。
+# 表示は控えめでよいが、Bensdorp 系（System1-7）と混同されないことを優先する。
+# ダッシュ側の同等定義は apps/dashboards/alpaca-next/lib/format.ts。
+LINEAGE_MARKER = "◆"
+
+# System8 は SPY オーバーナイト FOMC ドリフト（ロング方向）。System1/3/5 のような
+# 「普通株プールから top-N を選ぶ」ロング・ストックピッキングではなく、単一銘柄の
+# イベント駆動スリーブ。ここでの分類は *建玉方向（side）* の表示グルーピングに過ぎず、
+# 資金配分プール（long_allocations / short_allocations）への参加を意味しない
+# （System8 は配分ウェイト未登録＝資金は割り当てられない。config/settings.py 参照）。
 SYSTEM_SIDE_GROUPS: dict[str, tuple[str, ...]] = {
-    "long": ("system1", "system3", "system5"),
+    "long": ("system1", "system3", "system5", "system8"),
     "short": ("system2", "system4", "system6", "system7"),
 }
 
@@ -14,11 +26,13 @@ SYSTEM_SIDE_GROUPS: dict[str, tuple[str, ...]] = {
 GROUP_ORDER: tuple[str, ...] = tuple(SYSTEM_SIDE_GROUPS.keys())
 
 GROUP_DISPLAY_NAMES: dict[str, str] = {
-    "long": "Long (System1,3,5)",
+    # System8 は建玉方向こそ long だが Bensdorp 系の long プール（1/3/5）とは別系統
+    # なので、同列に並べずマーカー付きで区別する。
+    "long": f"Long (System1,3,5 / System8{LINEAGE_MARKER})",
     "short": "Short (System2,4,6,7)",
 }
 
-# システムラベルの正規化対応表
+# システムラベルの正規化対応表（純粋な ID。血統マーカーは付けない）
 SYSTEM_LABELS: dict[str, str] = {
     "system1": "System1",
     "system2": "System2",
@@ -27,6 +41,7 @@ SYSTEM_LABELS: dict[str, str] = {
     "system5": "System5",
     "system6": "System6",
     "system7": "System7",
+    "system8": "System8",
 }
 
 
@@ -34,6 +49,27 @@ def _normalize_system_name(name: str) -> str:
     if not isinstance(name, str):
         return ""
     return name.strip().lower()
+
+
+def lineage_marker(system_name: str) -> str:
+    """独自開発 system なら血統マーカーを、Bensdorp 系/未知なら空文字を返す。"""
+    norm = _normalize_system_name(system_name)
+    return LINEAGE_MARKER if SYSTEM_LINEAGE.get(norm) == LINEAGE_ORIGINAL else ""
+
+
+def format_system_label(system_name: str) -> str:
+    """血統マーカー付きの表示ラベルを返す（例: ``"System8◆"`` / ``"System1"``）。
+
+    表示専用。JSON key や突合には :data:`SYSTEM_LABELS` / 生の system 名を使うこと。
+    """
+    norm = _normalize_system_name(system_name)
+    base = SYSTEM_LABELS.get(norm, _format_label(norm))
+    return f"{base}{lineage_marker(norm)}"
+
+
+def lineage_legend() -> str:
+    """マーカーの意味を 1 行で説明する凡例文字列。"""
+    return f"{LINEAGE_MARKER} = {LINEAGE_LABELS[LINEAGE_ORIGINAL]}"
 
 
 def _format_label(name: str) -> str:

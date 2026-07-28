@@ -22,8 +22,10 @@ import {
   fmtQty,
   fmtSignedUsd,
   fmtUsd,
+  LINEAGE_LEGEND,
   pnlText,
   sysColor,
+  sysLineageTitle,
   sysShort,
 } from '@/lib/format';
 
@@ -391,6 +393,8 @@ function ExposureBlock({ snap }: { snap: AlpacaSnapshot }) {
       <div>
         <div className="text-[10px] text-muted mb-1">
           system 別配分（% of active gross・delisted 除外）
+          {/* 血統マーカーの意味をここで一度だけ示す。チップ本体は sysShort() が付ける。 */}
+          <span className="ml-1 text-muted/60">· {LINEAGE_LEGEND}</span>
         </div>
         <div className="space-y-1">
           {systems.map(([sys, s, pct]) => (
@@ -398,6 +402,7 @@ function ExposureBlock({ snap }: { snap: AlpacaSnapshot }) {
               <span
                 className="text-[10px] tabular-nums min-w-9 shrink-0 font-medium whitespace-nowrap pr-1"
                 style={{ color: sysColor(sys) }}
+                title={sysLineageTitle(sys)}
               >
                 {sysShort(sys)}
               </span>
@@ -753,6 +758,7 @@ function PositionsTable({ positions }: { positions: AlpacaPosition[] }) {
                         color: sysColor(p.system),
                         backgroundColor: `${sysColor(p.system)}22`,
                       }}
+                      title={sysLineageTitle(p.system)}
                     >
                       {sysShort(p.system)}
                     </span>

@@ -68,6 +68,7 @@ SYSTEM_POSITION: dict[str, str] = {
     "system5": "long",
     "system6": "short",
     "system7": "short",
+    "system8": "long",
 }
 
 COLOR_LONG = 0x2ECC71

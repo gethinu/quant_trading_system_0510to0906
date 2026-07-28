@@ -1,5 +1,9 @@
 # ============================================================================
 # 🧠 Context Note
+# 🧬 Lineage: bensdorp — Laurens Bensdorp の自動売買システム本に準拠した定型システム群
+#   (System1-7)。モメンタム / 平均回帰 × ロング / ショートの組み合わせという共通骨格を持つ。
+#   System8 だけは血統が異なる (独自開発の event-driven)。混同しないこと。
+#   正準定義: common/system_constants.py の SYSTEM_LINEAGE / docs/SYSTEM_LINEAGE.md
 # このファイルは System5（ロング ミーン・リバージョン 高 ADX）のロジック専門
 #
 # 前提条件（audit-remediation 2026-07-03 D3 Case A で docs 完全準拠に是正）：

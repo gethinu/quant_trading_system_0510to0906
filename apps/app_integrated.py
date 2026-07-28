@@ -201,7 +201,7 @@ def main() -> None:
             "📊 Real-time",
             "🤖 AI分析",
         ]
-        + [f"System{i}" for i in range(1, 8)]
+        + [f"System{i}" for i in range(1, 9)]
     )
 
     with tabs[0]:

@@ -1,5 +1,9 @@
 # ============================================================================
 # 🧠 Context Note
+# 🧬 Lineage: bensdorp — Laurens Bensdorp の自動売買システム本に準拠した定型システム群
+#   (System1-7)。モメンタム / 平均回帰 × ロング / ショートの組み合わせという共通骨格を持つ。
+#   System8 だけは血統が異なる (独自開発の event-driven)。混同しないこと。
+#   正準定義: common/system_constants.py の SYSTEM_LINEAGE / docs/SYSTEM_LINEAGE.md
 # このファイルは System7（SPY ショート カタストロフィー・ヘッジ）のロジック専門
 #
 # ⚠️ CRITICAL: System7 は SPY 固定のヘッジ専用。ロジック変更・他銘柄割当は禁止
