@@ -1,0 +1,253 @@
+{
+  "version": "1.0",
+  "date": "2026-07-29",
+  "generated_at": "2026-07-29T06:46:18+09:00",
+  "provider": "polygon",
+  "systems": {
+    "sys1": {
+      "signals": [
+        {
+          "symbol": "ADVB",
+          "side": "BUY",
+          "entry_price": 14.36,
+          "weight": 0.0214,
+          "rank": 1,
+          "reason": "ROC200が1位（全1358銘柄中）のため"
+        },
+        {
+          "symbol": "JEM",
+          "side": "BUY",
+          "entry_price": 5.85,
+          "weight": 0.0301,
+          "rank": 2,
+          "reason": "ROC200が2位（全1358銘柄中）のため"
+        }
+      ],
+      "n_candidates_input": 10,
+      "n_signals_output": 2,
+      "gate_survival_ratio": 0.2,
+      "funnel": {
+        "target": 5202,
+        "filter_pass": 1400,
+        "setup_pass": 617,
+        "candidate_count": 10,
+        "entry_count": 2,
+        "exit_count": null
+      }
+    },
+    "sys2": {
+      "signals": [
+        {
+          "symbol": "WKC",
+          "side": "SELL",
+          "entry_price": 39.79,
+          "weight": 0.1485,
+          "rank": 28,
+          "reason": "モメンタムが強く過熱のため"
+        },
+        {
+          "symbol": "AMTM",
+          "side": "SELL",
+          "entry_price": 22.87,
+          "weight": 0.1331,
+          "rank": 29,
+          "reason": "モメンタムが強く過熱のため"
+        },
+        {
+          "symbol": "MLI",
+          "side": "SELL",
+          "entry_price": 64.17,
+          "weight": 0.1197,
+          "rank": 30,
+          "reason": "モメンタムが強く過熱のため"
+        },
+        {
+          "symbol": "CLF",
+          "side": "SELL",
+          "entry_price": 12.25,
+          "weight": 0.1088,
+          "rank": 31,
+          "reason": "モメンタムが強く過熱のため"
+        },
+        {
+          "symbol": "SIG",
+          "side": "SELL",
+          "entry_price": 95.74,
+          "weight": 0.0929,
+          "rank": 32,
+          "reason": "モメンタムが強く過熱のため"
+        },
+        {
+          "symbol": "CERT",
+          "side": "SELL",
+          "entry_price": 7.75,
+          "weight": 0.0885,
+          "rank": 33,
+          "reason": "モメンタムが強く過熱のため"
+        },
+        {
+          "symbol": "BRBR",
+          "side": "SELL",
+          "entry_price": 13.07,
+          "weight": 0.08,
+          "rank": 34,
+          "reason": "モメンタムが強く過熱のため"
+        },
+        {
+          "symbol": "THC",
+          "side": "SELL",
+          "entry_price": 243.36,
+          "weight": 0.0545,
+          "rank": 35,
+          "reason": "モメンタムが強く過熱のため"
+        },
+        {
+          "symbol": "IP",
+          "side": "SELL",
+          "entry_price": 42.41,
+          "weight": 0.0665,
+          "rank": 36,
+          "reason": "モメンタムが強く過熱のため"
+        },
+        {
+          "symbol": "RNG",
+          "side": "SELL",
+          "entry_price": 53.7,
+          "weight": 0.0561,
+          "rank": 37,
+          "reason": "モメンタムが強く過熱のため"
+        }
+      ],
+      "n_candidates_input": 10,
+      "n_signals_output": 10,
+      "gate_survival_ratio": 1.0,
+      "funnel": {
+        "target": 5202,
+        "filter_pass": 1457,
+        "setup_pass": 15,
+        "candidate_count": 10,
+        "entry_count": 10,
+        "exit_count": null
+      }
+    },
+    "sys3": {
+      "signals": [],
+      "n_candidates_input": 10,
+      "n_signals_output": 0,
+      "gate_survival_ratio": 0.0,
+      "funnel": {
+        "target": 5202,
+        "filter_pass": 1005,
+        "setup_pass": 41,
+        "candidate_count": 10,
+        "entry_count": 0,
+        "exit_count": null
+      }
+    },
+    "sys4": {
+      "signals": [],
+      "n_candidates_input": 10,
+      "n_signals_output": 0,
+      "gate_survival_ratio": 0.0,
+      "funnel": {
+        "target": 5202,
+        "filter_pass": 504,
+        "setup_pass": 366,
+        "candidate_count": 10,
+        "entry_count": 0,
+        "exit_count": null
+      }
+    },
+    "sys5": {
+      "signals": [],
+      "n_candidates_input": 3,
+      "n_signals_output": 0,
+      "gate_survival_ratio": 0.0,
+      "funnel": {
+        "target": 5202,
+        "filter_pass": 1298,
+        "setup_pass": 3,
+        "candidate_count": 3,
+        "entry_count": 0,
+        "exit_count": null
+      }
+    },
+    "sys6": {
+      "signals": [],
+      "n_candidates_input": 0,
+      "n_signals_output": 0,
+      "gate_survival_ratio": 0.0,
+      "funnel": {
+        "target": 5202,
+        "filter_pass": 1099,
+        "setup_pass": 0,
+        "candidate_count": 0,
+        "entry_count": 0,
+        "exit_count": null
+      }
+    },
+    "sys7": {
+      "signals": [],
+      "n_candidates_input": 0,
+      "n_signals_output": 0,
+      "gate_survival_ratio": 0.0,
+      "funnel": {
+        "target": 1,
+        "filter_pass": 1,
+        "setup_pass": 0,
+        "candidate_count": 0,
+        "entry_count": 0,
+        "exit_count": null
+      }
+    }
+  },
+  "portfolio": {
+    "total_signals": 12,
+    "total_notional_usd": 13400.81,
+    "hedge": null,
+    "universe_target": 5202,
+    "caps": {
+      "applied": true,
+      "held": {
+        "long": 38,
+        "short": 10,
+        "total": 48
+      },
+      "held_unmapped": {
+        "long": 36,
+        "short": 10,
+        "total": 46
+      },
+      "caps": {
+        "max_total": 70,
+        "max_long": 40,
+        "max_short": 30,
+        "gross_cap_usd": 100000.0,
+        "net_cap_usd": 50000.0
+      },
+      "allow": {
+        "long": 2,
+        "short": 20,
+        "total": 22
+      },
+      "kept": {
+        "long": 2,
+        "short": 10,
+        "total": 12
+      },
+      "trimmed": {
+        "long_count": 25
+      },
+      "new_long_usd": 690.85,
+      "new_short_usd": 12709.96
+    }
+  },
+  "meta": {
+    "cli_version": "0.1.0",
+    "run_id": "20260729_063103_a9a026",
+    "elapsed_seconds": 914.7,
+    "status": "ok",
+    "abort_reason": null,
+    "publish_status": "ok"
+  }
+}
