@@ -54,11 +54,13 @@
         {
           "name": "Exit",
           "label": "Exit",
-          "condition": "本日手仕舞い発火",
-          "count": null,
-          "measured": false,
-          "ratio_of_prev": null,
-          "ratio_of_universe": null
+          "condition": "本日手仕舞い発火 (close 0 / protect 4)",
+          "count": 0,
+          "measured": true,
+          "ratio_of_prev": 0.0,
+          "ratio_of_universe": 0.0,
+          "exit_close": 0,
+          "exit_protect": 4
         }
       ],
       "final_signals": 2
@@ -114,11 +116,13 @@
         {
           "name": "Exit",
           "label": "Exit",
-          "condition": "本日手仕舞い発火",
-          "count": null,
-          "measured": false,
-          "ratio_of_prev": null,
-          "ratio_of_universe": null
+          "condition": "本日手仕舞い発火 (close 0 / protect 20)",
+          "count": 0,
+          "measured": true,
+          "ratio_of_prev": 0.0,
+          "ratio_of_universe": 0.0,
+          "exit_close": 0,
+          "exit_protect": 20
         }
       ],
       "final_signals": 10
@@ -174,11 +178,13 @@
         {
           "name": "Exit",
           "label": "Exit",
-          "condition": "本日手仕舞い発火",
-          "count": null,
-          "measured": false,
+          "condition": "本日手仕舞い発火 (close 0 / protect 0)",
+          "count": 0,
+          "measured": true,
           "ratio_of_prev": null,
-          "ratio_of_universe": null
+          "ratio_of_universe": 0.0,
+          "exit_close": 0,
+          "exit_protect": 0
         }
       ],
       "final_signals": 0
@@ -234,11 +240,13 @@
         {
           "name": "Exit",
           "label": "Exit",
-          "condition": "本日手仕舞い発火",
-          "count": null,
-          "measured": false,
+          "condition": "本日手仕舞い発火 (close 0 / protect 1)",
+          "count": 0,
+          "measured": true,
           "ratio_of_prev": null,
-          "ratio_of_universe": null
+          "ratio_of_universe": 0.0,
+          "exit_close": 0,
+          "exit_protect": 1
         }
       ],
       "final_signals": 0
@@ -294,11 +302,13 @@
         {
           "name": "Exit",
           "label": "Exit",
-          "condition": "本日手仕舞い発火",
-          "count": null,
-          "measured": false,
+          "condition": "本日手仕舞い発火 (close 0 / protect 0)",
+          "count": 0,
+          "measured": true,
           "ratio_of_prev": null,
-          "ratio_of_universe": null
+          "ratio_of_universe": 0.0,
+          "exit_close": 0,
+          "exit_protect": 0
         }
       ],
       "final_signals": 0
@@ -354,11 +364,13 @@
         {
           "name": "Exit",
           "label": "Exit",
-          "condition": "本日手仕舞い発火",
-          "count": null,
-          "measured": false,
+          "condition": "本日手仕舞い発火 (close 0 / protect 0)",
+          "count": 0,
+          "measured": true,
           "ratio_of_prev": null,
-          "ratio_of_universe": null
+          "ratio_of_universe": 0.0,
+          "exit_close": 0,
+          "exit_protect": 0
         }
       ],
       "final_signals": 0
@@ -414,11 +426,13 @@
         {
           "name": "Exit",
           "label": "Exit",
-          "condition": "本日手仕舞い発火",
-          "count": null,
-          "measured": false,
+          "condition": "本日手仕舞い発火 (close 0 / protect 0)",
+          "count": 0,
+          "measured": true,
           "ratio_of_prev": null,
-          "ratio_of_universe": null
+          "ratio_of_universe": 0.0,
+          "exit_close": 0,
+          "exit_protect": 0
         }
       ],
       "final_signals": 0
@@ -427,6 +441,7 @@
   "notes": [
     "phases are reference counts, not evaluation criteria.",
     "Tgt/FILpass prefer grouped-daily measurement; STUpass/TRDlist/Entry/Exit come from the signal engine funnel (today_signals funnel block).",
-    "ratio_of_prev = count / previous phase; ratio_of_universe = count / Tgt."
+    "ratio_of_prev = count / previous phase; ratio_of_universe = count / Tgt.",
+    "Exit = execution recon (recon_YYYYMMDD.json, ntfy と同一 source): count=exit_submitted, condition に close/protect 内訳。"
   ]
 }

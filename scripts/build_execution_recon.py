@@ -252,6 +252,130 @@ def build_recon(
     }
 
 
+# ---------------------------------------------------------------------------
+# pipeline funnel (signal_pipeline/v1) の Exit phase を recon から埋める配線
+# ---------------------------------------------------------------------------
+#
+# なぜここに置くか:
+#   ダッシュボードの絞込漏斗 (pipeline_YYYYMMDD.json) の最終段 Exit は
+#   「本日手仕舞い発火数」だが、漏斗は daily_polygon_monitor が exit 執行 *前*
+#   (Step3) に生成するため count=null → UI が「未計測」を出していた。
+#   一方 exit 実績は Step5c/5d で recon 化され ntfy (publish_execution_summary)
+#   が `exit N (close C / protect P)` として既に配信している。
+#   両者を **同一 recon** から書けば ntfy と漏斗が必ず一致する。ここは recon を
+#   単一ソースとして Exit phase を埋める pure 関数 (I/O 無し)。
+#
+# 正直さの担保:
+#   - recon に exit_orders 入力が無い (部分 recon) 場合は **埋めない**。
+#     count=null のまま = 「未計測」を維持する (0 で誤魔化さない)。
+#   - recon はあるが該当 system に exit が無い → 0 (「発火しなかった」事実)。
+
+EXIT_CONDITION_BASE = "本日手仕舞い発火"
+
+
+def exit_counts_from_recon(recon: dict[str, Any] | None) -> dict[str, dict[str, int]]:
+    """recon -> ``{"sys1": {"submitted", "close", "protect"}, ...}`` (pipeline schema の sysN key)。
+
+    recon の system key は "systemN"。pipeline (signal_pipeline/v1) は "sysN" なので
+    ここで正規化する。recon.systems に居ない system は呼び出し側で 0 扱い。
+    """
+    out: dict[str, dict[str, int]] = {}
+    if not isinstance(recon, dict):
+        return out
+    for name, data in (recon.get("systems") or {}).items():
+        norm = _norm_system(name)  # "system1"
+        if not norm:
+            continue
+        sysk = norm.replace("system", "sys")  # "sys1"
+        ex = (data or {}).get("exit") or {}
+
+        def _i(v: Any) -> int:
+            try:
+                return int(v or 0)
+            except (TypeError, ValueError):
+                return 0
+
+        out[sysk] = {
+            "submitted": _i(ex.get("submitted")),
+            "close": _i(ex.get("close")),
+            "protect": _i(ex.get("protect")),
+        }
+    return out
+
+
+def patch_pipeline_exit(
+    pipeline: dict[str, Any], recon: dict[str, Any] | None
+) -> tuple[dict[str, Any], int, str]:
+    """pipeline_*.json の各 system の Exit phase を recon の実測で埋める (in-place)。
+
+    ntfy (``exit {submitted} (close C / protect P)``) と同じ recon を single source に
+    するための配線。Exit の ``count`` は per-system ``exit.submitted`` (= ntfy 見出しの
+    exit 数と同じ定義)、close/protect 内訳は condition 末尾に併記する。
+
+    戻り値 ``(pipeline, n_filled, status)``:
+      - ``status="ok"``            : recon から Exit を埋めた
+      - ``status="no_recon"``      : recon が無い/不正 → 未計測を維持 (何もしない)
+      - ``status="exit_orders_input_missing"`` : 部分 recon (exit 未計測) → 未計測を維持
+
+    idempotent: 既に埋めた pipeline を再度渡しても同じ結果 (condition 重複しない)。
+    """
+    if not isinstance(recon, dict):
+        return pipeline, 0, "no_recon"
+    # 部分 recon (exit_orders 入力欠損) は「発火 0」ではなく「未計測」。埋めない。
+    if not (recon.get("inputs") or {}).get("exit_orders"):
+        return pipeline, 0, "exit_orders_input_missing"
+
+    exits = exit_counts_from_recon(recon)
+    n_filled = 0
+    for sysk, sysobj in (pipeline.get("systems") or {}).items():
+        if not isinstance(sysobj, dict):
+            continue
+        phases = sysobj.get("phases") or []
+        universe: int | None = next(
+            (p.get("count") for p in phases if p.get("name") == "Tgt"), None
+        )
+        prev_count: int | None = None
+        for p in phases:
+            if p.get("name") == "Exit":
+                ec = exits.get(sysk) or {"submitted": 0, "close": 0, "protect": 0}
+                cnt = int(ec["submitted"])
+                base = str(p.get("condition") or EXIT_CONDITION_BASE).split(
+                    " (close"
+                )[0]
+                p["count"] = cnt
+                p["measured"] = True
+                p["exit_close"] = int(ec["close"])
+                p["exit_protect"] = int(ec["protect"])
+                p["condition"] = (
+                    f"{base} (close {int(ec['close'])} / protect {int(ec['protect'])})"
+                )
+                p["ratio_of_prev"] = (
+                    round(cnt / prev_count, 6)
+                    if isinstance(prev_count, (int, float)) and prev_count
+                    else None
+                )
+                p["ratio_of_universe"] = (
+                    round(cnt / universe, 6)
+                    if isinstance(universe, (int, float)) and universe
+                    else None
+                )
+                n_filled += 1
+                break
+            if p.get("count") is not None:
+                prev_count = p.get("count")
+
+    if n_filled:
+        notes = pipeline.get("notes")
+        if isinstance(notes, list):
+            marker = (
+                "Exit = execution recon (recon_YYYYMMDD.json, ntfy と同一 source): "
+                "count=exit_submitted, condition に close/protect 内訳。"
+            )
+            if marker not in notes:
+                notes.append(marker)
+    return pipeline, n_filled, "ok"
+
+
 def _default_path(results_dir: Path, stem: str, date_str: str) -> Path:
     return results_dir / f"{stem}_{date_str.replace('-', '')}.json"
 
