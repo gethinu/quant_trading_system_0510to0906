@@ -72,7 +72,10 @@ def test_exit_counts_normalizes_system_to_sys_key() -> None:
         date_str="2026-07-29",
     )
     ec = exit_counts_from_recon(recon)
-    assert ec["sys2"] == {"submitted": 2, "close": 1, "protect": 1}
+    assert ec["sys2"] == {
+        "submitted": 2, "close": 1, "protect": 1,
+        "armed": 0, "armed_close": 0, "armed_protect": 0,
+    }
 
 
 def test_patch_fills_exit_and_matches_ntfy_headline() -> None:
@@ -84,9 +87,10 @@ def test_patch_fills_exit_and_matches_ntfy_headline() -> None:
         ]),
         date_str="2026-07-29",
     )
-    # ntfy 本文の見出し exit 行
+    # ntfy 本文の見出し exit 行 (新表示: fired を明示、armed 0 なので suffix 無し)
     body = build_body(recon)
-    assert "exit 1 (close 0 / protect 1)" in body
+    assert "exit 1 fired (close 0 / protect 1)" in body
+    assert "armed" not in body
 
     pipeline = _pipeline()
     _, n_filled, status = patch_pipeline_exit(pipeline, recon)
@@ -130,6 +134,105 @@ def test_partial_recon_without_exit_orders_keeps_unmeasured() -> None:
     _, n_filled, status = patch_pipeline_exit(pipeline, recon)
     assert status == "exit_orders_input_missing" and n_filled == 0
     assert _exit_phase(pipeline, "sys1")["count"] is None  # 0 で埋めない
+
+
+# ---------------------------------------------------------------------------
+# 実データ回帰 (裏取りで使った 07-27 / 07-28 / 07-29 の分布を再現)。
+# 新表示ロジック `exit N fired (close Cs / protect Ps) · M armed` と
+# fired/armed の分離が期待通り出ることを固定する。
+# 数値は results_csv/exit_orders_*.json の実測 (新セマンティクス) に一致:
+#   07-27: fired 23 (close 20 / protect 3) · armed 1
+#   07-28: fired 1  (close 0  / protect 1) · armed 0
+#   07-29: fired 0  (close 0  / protect 0) · armed 25
+# ---------------------------------------------------------------------------
+
+
+def _rows(system: str, reason: str, n: int, *, submitted: bool) -> list[dict]:
+    out = []
+    for i in range(n):
+        r = {"system": system, "reason": reason}
+        if submitted:
+            r["order_id"] = f"{reason}-{i}"
+        out.append(r)  # submitted=False は order_id 無し → armed
+    return out
+
+
+def test_regression_20260727_real_fire_day() -> None:
+    """07-27: 実発火日。fired 23 = close 20 + protect 3、armed 1 は別枠。"""
+    rows = (
+        _rows("system2", "time_based", 20, submitted=True)     # fired close
+        + _rows("system2", "protect_stop", 3, submitted=True)  # fired protect
+        + _rows("system2", "protect_target", 1, submitted=False)  # armed protect
+    )
+    recon = build_recon(None, None, _exit_orders(rows), date_str="2026-07-27")
+    p = recon["portfolio"]
+    assert p["exit_submitted"] == 23
+    assert p["exit_close"] == 20 and p["exit_protect"] == 3
+    assert p["exit_submitted"] == p["exit_close"] + p["exit_protect"]  # N=Cs+Ps
+    assert p["exit_armed"] == 1 and p["exit_armed_protect"] == 1
+
+    body = build_body(recon)
+    assert "exit 23 fired (close 20 / protect 3) · 1 armed" in body
+
+    pipeline = _pipeline()
+    _, n_filled, status = patch_pipeline_exit(pipeline, recon)
+    assert status == "ok" and n_filled == 3
+    ex = _exit_phase(pipeline, "sys2")
+    assert ex["count"] == 23 and ex["fired"] == 23 and ex["measured"] is True
+    assert ex["exit_close"] == 20 and ex["exit_protect"] == 3
+    assert ex["armed"] == 1 and ex["armed_protect"] == 1
+    assert ex["condition"].endswith("(close 20 / protect 3) · 1 armed")
+
+
+def test_regression_20260728_coincidental_n_equals_c_plus_p() -> None:
+    """07-28: fired 1 が偶然 close+protect と一致した日。armed 0 で suffix 無し。"""
+    rows = _rows("system1", "protect_stop", 1, submitted=True)
+    recon = build_recon(None, None, _exit_orders(rows), date_str="2026-07-28")
+    p = recon["portfolio"]
+    assert p["exit_submitted"] == 1 and p["exit_close"] == 0 and p["exit_protect"] == 1
+    assert p["exit_armed"] == 0
+    body = build_body(recon)
+    assert "exit 1 fired (close 0 / protect 1)" in body
+    assert "armed" not in body
+
+
+def test_regression_20260729_all_armed_no_fire() -> None:
+    """07-29: pre-open。fired 0 だが 25 の保護注文が armed。0 張り付きではなく honest。"""
+    rows = (
+        _rows("system1", "protect_trailing", 2, submitted=False)
+        + _rows("system1", "protect_stop", 13, submitted=False)
+        + _rows("system1", "protect_target", 10, submitted=False)
+    )
+    recon = build_recon(None, None, _exit_orders(rows), date_str="2026-07-29")
+    p = recon["portfolio"]
+    assert p["exit_submitted"] == 0
+    assert p["exit_close"] == 0 and p["exit_protect"] == 0  # fired 分は 0
+    assert p["exit_armed"] == 25 and p["exit_armed_protect"] == 25
+    body = build_body(recon)
+    assert "exit 0 fired (close 0 / protect 0) · 25 armed" in body
+
+    pipeline = _pipeline()
+    _, _, status = patch_pipeline_exit(pipeline, recon)
+    assert status == "ok"
+    ex = _exit_phase(pipeline, "sys1")
+    # funnel の発火バーは 0 (honest)、armed は別枠フィールドで 25
+    assert ex["count"] == 0 and ex["fired"] == 0 and ex["measured"] is True
+    assert ex["armed"] == 25 and ex["armed_protect"] == 25
+    assert "· 25 armed" in ex["condition"]
+
+
+def test_flatten_all_system_null_not_dropped() -> None:
+    """system=null の exit (flatten_all 等) を drop せず __unassigned__ に集計する。"""
+    rows = [
+        {"system": None, "reason": "flatten_all", "order_id": "f1"},  # fired close
+        {"system": None, "reason": "flatten_all"},                    # armed close
+    ]
+    recon = build_recon(None, None, _exit_orders(rows), date_str="2026-07-10")
+    p = recon["portfolio"]
+    # 旧実装は system=None を drop し close=0 に取りこぼしていた。now 計上される。
+    assert p["exit_submitted"] == 1 and p["exit_close"] == 1
+    assert p["exit_armed"] == 1 and p["exit_armed_close"] == 1
+    assert "__unassigned__" in recon["systems"]
 
 
 def test_patch_is_idempotent() -> None:

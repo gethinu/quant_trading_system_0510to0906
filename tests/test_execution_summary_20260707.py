@@ -67,7 +67,7 @@ def test_title_is_ascii_plus_emoji_and_has_counts():
 def test_body_has_funnel_and_per_system_and_drops():
     body = build_body(_recon())
     assert "Tgt 4123 → sig 49 → gen 34 → entry 27 → fill 25" in body
-    assert "exit 14 (close 5 / protect 9)" in body
+    assert "exit 14 fired (close 5 / protect 9)" in body
     assert "LONG entry 18 / SHORT entry 9" in body
     assert "資産 $10,120" in body
     # per-system: s1 long, s2 short
