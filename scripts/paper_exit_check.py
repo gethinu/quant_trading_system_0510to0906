@@ -54,6 +54,7 @@ from common.alpaca_trading import (  # noqa: E402
     submit_paper_exit_order,
 )
 from common.position_tracker import load_tracker  # noqa: E402
+from common.symbol_map import load_symbol_system_map  # noqa: E402
 from common.trade_management import SYSTEM_TRADE_RULES  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -104,13 +105,39 @@ def _hydrate_from_alpaca_coids(snapshots: list[PositionSnapshot], client: Any) -
         return
     # broker_alpaca の get_open_orders は open だけなので、全 order は client 直呼び。
     try:
-        # QueryOrderStatus.ALL で最近の orders 取得
+        # QueryOrderStatus.ALL を **全件ページング**で取得する。limit=500 固定だと
+        # 古い entry order (例: 17日保有の system3) が窓から溢れて coid 解決できず、
+        # そのポジが exit builder に無管理として落とされる (MF の実害根因)。
         from alpaca.trading.enums import QueryOrderStatus
         from alpaca.trading.requests import GetOrdersRequest
 
-        raw = client.get_orders(
-            GetOrdersRequest(status=QueryOrderStatus.ALL, limit=500)
-        )
+        raw = []
+        until = None
+        for _page in range(40):  # 上限 40*500=20000 件で安全弁
+            req = GetOrdersRequest(
+                status=QueryOrderStatus.ALL,
+                limit=500,
+                until=until,
+                direction="desc",
+            )
+            batch = list(client.get_orders(req) or [])
+            if not batch:
+                break
+            raw.extend(batch)
+            if len(batch) < 500:
+                break
+            # 次ページ = これより古い注文。submitted_at/created_at を境界にする。
+            oldest = None
+            for o in reversed(batch):
+                oldest = (
+                    getattr(o, "submitted_at", None)
+                    or getattr(o, "created_at", None)
+                )
+                if oldest is not None:
+                    break
+            if oldest is None or oldest == until:
+                break
+            until = oldest
     except Exception:
         return
     coid_by_symbol: dict[str, str] = {}
@@ -373,6 +400,11 @@ def main(argv: list[str] | None = None) -> int:
     # --- 2) tracker / entry_orders_index --------------------------------
     tracker = load_tracker()
     entry_orders_index = _collect_entry_orders_index(results_dir)
+    # durable な symbol->system マップ (tracker/entry_index が空でも system を拾う保険)。
+    try:
+        symbol_map = load_symbol_system_map()
+    except Exception:
+        symbol_map = {}
 
     # --- 3) context (SPY, ATR, 現値) ------------------------------------
     spy_high, spy_max70 = _load_spy_context()
@@ -382,10 +414,13 @@ def main(argv: list[str] | None = None) -> int:
     price_by_symbol = _load_price_by_symbol(symbols) if symbols else {}
 
     # --- 4) build exit proposals ----------------------------------------
+    unassigned: list[dict[str, Any]] = []
     exits = build_exit_orders_from_positions(
         snapshots,
         today=date_str,
+        unassigned_out=unassigned,
         tracker=tracker,
+        symbol_map=symbol_map,
         entry_orders_index=entry_orders_index,
         existing_protect_coids=existing_protect_coids,
         existing_exit_coids=existing_exit_coids,
@@ -450,6 +485,8 @@ def main(argv: list[str] | None = None) -> int:
             "broker_unreachable": broker_unreachable,
             "spy_high": spy_high,
             "spy_max70": spy_max70,
+            "unassigned_count": len(unassigned),
+            "unassigned_positions": unassigned,
             "systems": {
                 sys: {
                     "max_holding_days": rule.max_holding_days,
@@ -473,6 +510,13 @@ def main(argv: list[str] | None = None) -> int:
         f"mode={mode} submitted={submitted_ok} failed={submit_failed}"
     )
     print(f"[write] {output_path}")
+    if unassigned:
+        syms = ", ".join(str(u.get("symbol")) for u in unassigned)
+        print(
+            f"[WARN] ORPHAN/UNMANAGED positions (system 由来なし = exit 未生成): "
+            f"{len(unassigned)} 件 [{syms}]. position_tracker/symbol_system_map/"
+            f"entry-coid のいずれにも無く、time/protection が一切張られていません。"
+        )
     # broker 到達不能で positions を確認できなかった場合、exit が 0 件でも「成功
     # (flat book)」と誤認させない。distinct code 3 で daily_pipeline に surface
     # する (entry 側の no_orders_generated=3 と同じ観測性方針)。市場が閉じた後の

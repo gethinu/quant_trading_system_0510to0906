@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from datetime import datetime
 from pathlib import Path
 import sys
 
@@ -36,9 +37,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from common.alpaca_trading import (  # noqa: E402
     LiveAccountGuardError,
     assert_paper_env,
+    parse_entry_date_from_client_order_id,
+    parse_system_from_client_order_id,
     signals_json_to_orders,
     signals_to_orders,
     submit_paper_order,
+)
+# durable なタグ台帳 (position_tracker / symbol_system_map / position_entry_dates) を
+# entry 成功後に更新するための正準ライター群。**記録追加のみ・発注挙動は変えない**。
+from common.position_age import load_entry_dates, save_entry_dates  # noqa: E402
+from common.position_tracker import update_positions_from_signals  # noqa: E402
+from common.symbol_map import (  # noqa: E402
+    dump_symbol_system_map,
+    load_symbol_system_map,
+    update_primary_system,
 )
 from scripts.paper_trading_dryrun import (  # noqa: E402
     _write_orders_json,
@@ -218,6 +230,69 @@ def _submit_from_json(args: argparse.Namespace) -> int:
     return 0 if fail == 0 else 1
 
 
+def _persist_entry_tags(successful: list, date_str: str) -> None:
+    """entry 成功注文の system / entry_date を durable 台帳へ**記録のみ**する。
+
+    発注は一切しない (submit 済みの結果を台帳へ書くだけ)。書式・パスは読み側
+    (``hydrate_system_tags`` / ``export_alpaca_snapshot._resolve_tags``) と厳密一致させる
+    ため、既存の正準ライターをそのまま再利用する:
+      - ``update_positions_from_signals`` -> data/position_tracker.json
+        ({symbol.upper(): {"system","entry_date",...}})
+      - ``dump_symbol_system_map`` + ``update_primary_system`` -> data/symbol_system_map.json
+      - ``save_entry_dates`` -> data/position_entry_dates.json ({symbol: "YYYY-MM-DD"})
+    これにより prod entry でも tracker/map が最新化され、exit 経路のタグ揮発 (MF 事象) を防ぐ。
+    """
+    if not successful:
+        return
+    # 成功注文から (symbol, system, entry_date, entry_price) を確度順に導出。
+    rows: list[dict] = []
+    for po in successful:
+        sym = str(getattr(po, "symbol", "") or "").upper()
+        if not sym:
+            continue
+        coid = getattr(po, "client_order_id", None)
+        system = getattr(po, "system", None) or parse_system_from_client_order_id(coid)
+        entry_date = (
+            getattr(po, "entry_date", None)
+            or parse_entry_date_from_client_order_id(coid)
+            or date_str
+        )
+        if not system:
+            continue  # system 不明は台帳に捏造しない (coid にも無ければ skip)
+        rows.append(
+            {
+                "symbol": sym,
+                "system": str(system).lower(),
+                "entry_date": str(entry_date)[:10],
+                "entry_price": getattr(po, "limit_price", None),
+            }
+        )
+    if not rows:
+        return
+
+    # (a) symbol_system_map + position_entry_dates (price 不要 = 全成功注文を確実に記録)
+    try:
+        entry_map = load_entry_dates()
+        sys_map_store = load_symbol_system_map()
+        for r in rows:
+            entry_map[r["symbol"]] = r["entry_date"]
+            sys_map_store[r["symbol"]] = update_primary_system(
+                sys_map_store.get(r["symbol"]), r["system"]
+            )
+        save_entry_dates(entry_map)
+        dump_symbol_system_map(sys_map_store)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[persist] symbol_system_map/entry_dates 更新失敗 (記録のみ・継続): {exc}")
+
+    # (b) position_tracker.json (trailing/profit 用。既存 writer の契約に従う)
+    try:
+        import pandas as pd
+
+        update_positions_from_signals(pd.DataFrame(rows))
+    except Exception as exc:  # noqa: BLE001
+        print(f"[persist] position_tracker 更新失敗 (記録のみ・継続): {exc}")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--date", help="対象日 (YYYY-MM-DD)。")
@@ -333,6 +408,7 @@ def main(argv: list[str] | None = None) -> int:
         return 3
 
     submitted, skipped, failed = 0, 0, 0
+    successful_orders: list = []
     for po in planned:
         summary = (
             f"{po.side.upper()} {po.symbol} x{po.qty} "
@@ -357,9 +433,16 @@ def main(argv: list[str] | None = None) -> int:
             )
             print(f"  OK: {summary} -> id={result.order_id} status={result.status}")
             submitted += 1
+            successful_orders.append(po)
         except Exception as exc:  # noqa: BLE001
             print(f"  FAIL: {summary} -> {exc}")
             failed += 1
+
+    # durable タグ永続化 (記録のみ・発注挙動は不変)。--confirm 実発注時のみ台帳更新。
+    if args.confirm and successful_orders:
+        _date = getattr(args, "date", None) or datetime.now().strftime("%Y-%m-%d")
+        _persist_entry_tags(successful_orders, str(_date))
+        print(f"[persist] durable タグ台帳を更新: {len(successful_orders)} 件 (tracker/map/entry_dates)")
 
     print(f"\n完了: 送信={submitted} スキップ={skipped} 失敗={failed}")
     print("結果は Alpaca Paper dashboard と logs/alpaca_orders_*.log で確認できます。")
