@@ -1676,6 +1676,7 @@ def hydrate_system_tags(
     *,
     tracker: dict[str, Any] | None = None,
     entry_orders_index: dict[str, dict[str, Any]] | None = None,
+    symbol_map: Mapping[str, str] | None = None,
 ) -> list[PositionSnapshot]:
     """system / entry_date を tracker or entry order index から埋める。
 
@@ -1689,17 +1690,27 @@ def hydrate_system_tags(
     """
     idx = entry_orders_index or {}
     tr = tracker or {}
+    smap = symbol_map or {}
     for snap in snapshots:
         info = idx.get(snap.symbol) or tr.get(snap.symbol)
-        if not isinstance(info, dict):
-            continue
-        sys_tag = info.get("system")
-        if sys_tag and not snap.system:
-            snap.system = str(sys_tag).lower()
-        ed = info.get("entry_date")
-        if ed and not snap.entry_date:
-            # accept both ISO 'YYYY-MM-DD' or 'YYYY-MM-DDT...'
-            snap.entry_date = str(ed)[:10]
+        if isinstance(info, dict):
+            sys_tag = info.get("system")
+            if sys_tag and not snap.system:
+                snap.system = str(sys_tag).lower()
+            ed = info.get("entry_date")
+            if ed and not snap.entry_date:
+                # accept both ISO 'YYYY-MM-DD' or 'YYYY-MM-DDT...'
+                snap.entry_date = str(ed)[:10]
+        # 3rd source: symbol_system_map (system のみ / entry_date は持たない)。
+        # tracker/entry_index が空でも durable マップから system を拾えるようにする。
+        if not snap.system:
+            m = (
+                smap.get(snap.symbol)
+                or smap.get(str(snap.symbol).lower())
+                or smap.get(str(snap.symbol).upper())
+            )
+            if m:
+                snap.system = str(m).lower()
     return snapshots
 
 
@@ -2046,7 +2057,9 @@ def build_exit_orders_from_positions(
     snapshots: list[PositionSnapshot],
     *,
     today: str,
+    unassigned_out: list[dict[str, Any]] | None = None,
     tracker: dict[str, Any] | None = None,
+    symbol_map: Mapping[str, str] | None = None,
     entry_orders_index: dict[str, dict[str, Any]] | None = None,
     existing_protect_coids: set[str] | None = None,
     existing_exit_coids: set[str] | None = None,
@@ -2075,6 +2088,7 @@ def build_exit_orders_from_positions(
         snapshots,
         tracker=tracker,
         entry_orders_index=entry_orders_index,
+        symbol_map=symbol_map,
     )
     existing_coids = existing_protect_coids or set()
     existing_exit = existing_exit_coids or set()
@@ -2086,10 +2100,31 @@ def build_exit_orders_from_positions(
         if snap.abs_qty <= 0:
             continue
         if not snap.system:
-            logger.debug(
-                "exit skip: %s system tag 不明 (tracker/entry_orders_index 未登録)",
+            # system タグ未解決 = time/protection を作れない = このポジは無管理。
+            # 黙って落とす (旧 debug) と滞留が不可視になるため warning に格上げし、
+            # 呼び出し側が surface できるよう unassigned_out に記録する。
+            # ※ ここで擬似 exit や既定 max_hold を当てるのは数字の捏造なので行わない。
+            logger.warning(
+                "exit skip (UNMANAGED): %s system タグ未解決 → time/protection 未生成。"
+                " position_tracker/entry-coid/symbol_system_map のいずれにも無い。",
                 snap.symbol,
             )
+            if unassigned_out is not None:
+                unassigned_out.append(
+                    {
+                        "symbol": snap.symbol,
+                        "qty": snap.qty,
+                        "side": snap.side,
+                        "abs_qty": snap.abs_qty,
+                        "current_price": snap.current_price,
+                        "market_value": snap.market_value,
+                        "entry_date": snap.entry_date,
+                        "holding_days": compute_holding_days(snap.entry_date, today),
+                        # system 由来がどのソースにも無い = orphan。今後の orphan が
+                        # 黙って溜まらないよう分類を明示する。
+                        "classification": "orphan_no_system_origin",
+                    }
+                )
             continue
         rules = SYSTEM_TRADE_RULES.get(snap.system)
 

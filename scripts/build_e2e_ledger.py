@@ -62,6 +62,22 @@ def _overdue_exits(snap: dict[str, Any] | None) -> int | None:
     return n
 
 
+def _unassigned_positions(snap: dict[str, Any] | None) -> int | None:
+    """system タグ未解決 (system in {None,"","unknown"}) のポジ数を surface する。
+
+    これらは exit builder が丸ごと skip する = 完全無管理。overdue とは別枠で数える
+    (未解決ポジに既定 max_hold を当てて overdue に混ぜるのは捏造なので行わない)。
+    """
+    if not snap:
+        return None
+    n = 0
+    for p in snap.get("positions", []) or []:
+        sysv = p.get("system")
+        if sysv is None or str(sysv).strip().lower() in ("", "unknown", "none"):
+            n += 1
+    return n
+
+
 def build_row(results_dir: Path, d8: str) -> dict[str, Any]:
     iso = f"{d8[:4]}-{d8[4:6]}-{d8[6:]}"
     recon = _load(results_dir / f"recon_{d8}.json")
@@ -92,6 +108,7 @@ def build_row(results_dir: Path, d8: str) -> dict[str, Any]:
     lr = (snap or {}).get("ledger_reconciliation", {}) if snap else {}
     n_desync = lr.get("n_desync")
     overdue = _overdue_exits(snap)
+    overdue_unassigned = _unassigned_positions(snap)
     acct = (snap or {}).get("account", {}) if snap else {}
 
     # clean は「有害な失敗」だけを見る: time/breakout close 失敗が 0、desync 0、
@@ -118,6 +135,7 @@ def build_row(results_dir: Path, d8: str) -> dict[str, Any]:
         "protect_dup_failed": protect_dup_failed,
         "n_desync": n_desync,
         "overdue_exits": overdue,
+        "overdue_unassigned": overdue_unassigned,
         "equity": acct.get("equity"),
         "n_positions": (
             (snap or {}).get("summary", {}).get("n_positions") if snap else None
