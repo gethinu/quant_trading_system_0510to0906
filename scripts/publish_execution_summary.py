@@ -37,9 +37,45 @@ from scripts.build_execution_recon import (  # noqa: E402
     _default_path,
     _load_json,
     build_recon,
+    patch_pipeline_exit,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _wire_pipeline_exit(results_dir: Path, date_str: str, recon: dict) -> None:
+    """漏斗 (pipeline_YYYYMMDD.json) の Exit phase を *この recon* から埋めて書き戻す。
+
+    ntfy 本文と漏斗を同一 recon から書くことで両者を必ず一致させる。漏斗は
+    daily_polygon_monitor が exit 執行 *前* (Step3) に生成し Exit=null (未計測) の
+    ままなので、exit 実績が確定した本 step (Step5d) で上書きする。Step6 の
+    publish_data_to_vercel が results_csv/ の pipeline を data/ へ copy するため、
+    ここで書き戻せばダッシュボードに反映される。
+
+    pipeline が無い / 部分 recon (exit 未計測) の時は **何もしない** = 未計測を維持。
+    """
+    pipeline_path = _default_path(results_dir, "pipeline", date_str)
+    pipeline = _load_json(pipeline_path)
+    if pipeline is None:
+        logger.info("pipeline funnel が無いため Exit 配線をスキップ: %s", pipeline_path)
+        return
+    _, n_filled, status = patch_pipeline_exit(pipeline, recon)
+    if status != "ok":
+        logger.info("pipeline Exit 配線せず (%s): %s", status, pipeline_path)
+        return
+    try:
+        tmp = pipeline_path.with_suffix(pipeline_path.suffix + ".tmp")
+        tmp.write_text(
+            json.dumps(pipeline, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        tmp.replace(pipeline_path)
+        logger.info(
+            "pipeline Exit 配線: %s (%d system, ntfy と同一 recon)",
+            pipeline_path,
+            n_filled,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("pipeline Exit 書き戻し失敗 (無視): %s", exc)
 
 
 def _resolve_recon(args: argparse.Namespace) -> dict | None:
@@ -118,10 +154,8 @@ def main(argv: list[str] | None = None) -> int:
 
     # 副産物として recon を書き戻す (build した場合、dashboard が execution funnel を
     # 参照できるよう)。dry-run でも書く = dry-run 実行でもダッシュにサマリが出る。
+    date_str = args.date or (recon.get("date") or datetime.now().strftime("%Y-%m-%d"))
     if not args.recon_json:
-        date_str = args.date or (
-            recon.get("date") or datetime.now().strftime("%Y-%m-%d")
-        )
         out = _default_path(Path(args.results_dir), "recon", str(date_str))
         try:
             out.parent.mkdir(parents=True, exist_ok=True)
@@ -131,6 +165,11 @@ def main(argv: list[str] | None = None) -> int:
             logger.info("recon 書き出し: %s", out)
         except Exception as exc:  # noqa: BLE001
             logger.warning("recon 書き戻し失敗 (無視): %s", exc)
+
+    # 漏斗 (pipeline funnel) の Exit を *この recon* から埋めて未計測を消す。
+    # ntfy 本文と同一 recon を single source にするので両者が必ず一致する。
+    # dry-run でも書く (ダッシュへ反映させるため。実送信の有無とは独立)。
+    _wire_pipeline_exit(Path(args.results_dir), str(date_str), recon)
 
     if args.dry_run:
         print(f"X-Title: {title}\n---\n{body}")
