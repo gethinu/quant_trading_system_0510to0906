@@ -138,33 +138,23 @@ def fetch_grouped_daily(target_date: str) -> Any:
 
 
 def apply_common_stock_filter(grouped_df: Any) -> Any:
-    """grouped_df の index (symbol) を US 普通株 (Polygon type=CS) に絞り込む.
+    """grouped_df の index (symbol) を common stock pattern で絞り込む.
 
-    2026-07-13: 従来の pattern filter (is_common_stock_symbol) は dotted-suffix
-    (FOO.W) しか弾けず、concatenated-suffix の実データ (FOOW) をほぼ素通しに
-    していたため ETF (~42%)/ADR/優先株/warrant がユニバースに残っていた。
-    Polygon reference API (type=CS) を正とし、SPY (System7 ヘッジ) は温存する。
-    CS セット取得不能時は従来の pattern filter にフォールバック。
+    2026-07-02 hygiene: Polygon Grouped Daily は preferred/warrant/unit/rights
+    まで全部返す (~12,445 銘柄). trading universe (~6,981) と揃えるため
+    ここで pattern filter を適用する.
     """
     if grouped_df is None or getattr(grouped_df, "empty", True):
         return grouped_df
-    from common.symbol_universe import get_common_stock_set, is_common_stock_symbol
+    from common.symbol_universe import is_common_stock_symbol
 
     try:
         raw_n = int(getattr(grouped_df, "shape", [0])[0])
-        cs_set = get_common_stock_set()
-        if cs_set:
-            keep = cs_set | {"SPY"}
-            mask = [str(sym).upper() in keep for sym in grouped_df.index]
-            mode = "Polygon type=CS"
-        else:
-            mask = [is_common_stock_symbol(sym) for sym in grouped_df.index]
-            mode = "pattern fallback"
+        mask = [is_common_stock_symbol(sym) for sym in grouped_df.index]
         filtered = grouped_df[mask]
         kept = int(getattr(filtered, "shape", [0])[0])
         logger.info(
-            "universe filter (%s): %d -> %d (%d dropped)",
-            mode,
+            "universe filter: %d -> %d (common stock only, %d dropped)",
             raw_n,
             kept,
             raw_n - kept,
@@ -417,47 +407,20 @@ def build_pipeline_report(
 
     empty = grouped_df is None or getattr(grouped_df, "empty", True)
 
-    # --- 2026-07-12 fix: signal engine の per-system `funnel` を読み込む ---------
-    # today_signals_*.json は run_all_systems_today が実測した完全な funnel
-    # (target/filter_pass/setup_pass/candidate_count/entry_count/exit_count) を
-    # system 毎に持つ。これは STUpass(setup_pass) を含み、かつ最新取引日にアンカー
-    # 済みなので週末でも欠測しない。grouped-daily は STUpass を測れず週末は空に
-    # なるため、funnel を phase 数値の主ソースにする (grouped は Tgt/FILpass の
-    # 平日連続性のために優先利用)。
-    # phase 名 -> funnel key の対応。
-    FUNNEL_KEY = {
-        "Tgt": "target",
-        "FILpass": "filter_pass",
-        "STUpass": "setup_pass",
-        "TRDlist": "candidate_count",
-        "Entry": "entry_count",
-        "Exit": "exit_count",
-    }
-    funnel_by_sys: dict[str, dict[str, Any]] = {}
+    trdlist_counts: dict[str, int] = {}
+    entry_counts: dict[str, int] = {}
     if signals_dir is not None:
         sig_path = signals_dir / f"today_signals_{target_date.replace('-', '')}.json"
         if sig_path.exists():
             try:
                 sig = json.loads(sig_path.read_text(encoding="utf-8"))
-                for raw_name, entry in (sig.get("systems") or {}).items():
-                    # today_signals は "sys1" / "system1" どちらの key もあり得るため
-                    # SYSTEM_PIPELINE_PHASES の "sysN" に正規化する。
-                    key = str(raw_name).replace("system", "sys")
-                    fnl = entry.get("funnel")
-                    if isinstance(fnl, dict):
-                        funnel_by_sys[key] = fnl
-                    else:
-                        # funnel 欠如時は legacy count field から最小限を再構成。
-                        ci = entry.get("n_candidates_input")
-                        so = entry.get("n_signals_output")
-                        funnel_by_sys[key] = {
-                            "candidate_count": (
-                                int(ci) if isinstance(ci, (int, float)) else None
-                            ),
-                            "entry_count": (
-                                int(so) if isinstance(so, (int, float)) else None
-                            ),
-                        }
+                for sysname, entry in (sig.get("systems") or {}).items():
+                    ci = entry.get("n_candidates_input")
+                    so = entry.get("n_signals_output")
+                    if isinstance(ci, (int, float)):
+                        trdlist_counts[sysname] = int(ci)
+                    if isinstance(so, (int, float)):
+                        entry_counts[sysname] = int(so)
             except Exception as exc:  # pragma: no cover
                 logger.warning("today_signals 読込失敗 (%s): %s", sig_path, exc)
 
@@ -466,40 +429,30 @@ def build_pipeline_report(
             return None
         return round(numer / denom, 6)
 
-    def _fnl(sysname: str, name: str) -> int | None:
-        v = (funnel_by_sys.get(sysname) or {}).get(FUNNEL_KEY[name])
-        return int(v) if isinstance(v, (int, float)) else None
+    def _signal_fill(sysname: str, name: str) -> int | None:
+        if name == "TRDlist":
+            return trdlist_counts.get(sysname)
+        if name == "Entry":
+            return entry_counts.get(sysname)
+        return None
 
     systems_out: dict[str, Any] = {}
     for sysname, phase_defs in SYSTEM_PIPELINE_PHASES.items():
-        # sys7 = SPY hedge 専用 → 母数は定義上 SPY 1 銘柄。grouped/funnel が共通株
-        # ユニバース (~6,600) を拾うため、spy_only は Tgt を 1 に矯正する
-        # (2026-07-12 dashboard bug: sys7 Tgt=6652)。sys1-6 は無影響。
-        is_spy_only = bool(SYSTEM_GATES.get(sysname, {}).get("spy_only"))
         measured = (
             {}
             if empty
             else _measurable_counts_for_system(sysname, grouped_df, dv_cache)
         )
-        # Tgt: grouped 実測 (平日 ~12,330) を優先し、無ければ funnel target。
-        universe_count = measured.get("Tgt")
-        if universe_count is None:
-            universe_count = _fnl(sysname, "Tgt")
-        if is_spy_only and (universe_count is None or universe_count > 1):
-            universe_count = 1
+        universe_count = measured.get("Tgt", 0)
 
         phases_out: list[dict[str, Any]] = []
         prev_count: int | None = None
         for pdef in phase_defs:
             name = str(pdef["name"])
-            grouped_count = measured.get(name)  # grouped が測れるのは Tgt/FILpass のみ
-            # grouped 実測を優先、無ければ signal engine funnel。
-            count = grouped_count if grouped_count is not None else _fnl(sysname, name)
-            measured_flag = grouped_count is not None
-            # spy_only の Tgt は funnel/grouped 由来だと共通株ユニバースになり得るので矯正。
-            if is_spy_only and name == "Tgt" and (count is None or count > 1):
-                count = 1
-                measured_flag = False
+            count: int | None = measured.get(name)
+            measured_flag = count is not None
+            if count is None:
+                count = _signal_fill(sysname, name)
 
             phases_out.append(
                 {
@@ -518,21 +471,45 @@ def build_pipeline_report(
         systems_out[sysname] = {
             "system_id": sysname,
             "phases": phases_out,
-            "final_signals": _fnl(sysname, "Entry"),
+            "final_signals": entry_counts.get(sysname),
         }
 
-    return {
+    report = {
         "date": target_date,
         "provider": "polygon_grouped_daily",
         "schema": "signal_pipeline/v1",
         "systems": systems_out,
         "notes": [
             "phases are reference counts, not evaluation criteria.",
-            "Tgt/FILpass prefer grouped-daily measurement; STUpass/TRDlist/Entry/Exit "
-            "come from the signal engine funnel (today_signals funnel block).",
-            "ratio_of_prev = count / previous phase; ratio_of_universe = count / Tgt.",
+            "monitor measures Tgt / FILpass only; STUpass/Exit are unmeasured (null).",
+            "ratio_of_prev = count / previous measured phase; ratio_of_universe = count / Tgt.",
         ],
     }
+
+    # --- Exit phase の配線 (未計測を消す) ------------------------------------
+    # Exit (本日手仕舞い発火) は exit 執行 *後* にしか確定しないため、この
+    # build 時点 (Step3) では通常まだ recon が無く count=null (未計測) になる。
+    # 同日の recon_YYYYMMDD.json が既にあれば (再実行時など) ここで opportunistic に
+    # 埋める。first-run では Step5d の publish_execution_summary が同じ recon から
+    # 上書きするので、いずれの経路でも ntfy と同一 source に揃う。
+    if signals_dir is not None:
+        try:
+            from scripts.build_execution_recon import patch_pipeline_exit
+
+            recon_path = signals_dir / f"recon_{target_date.replace('-', '')}.json"
+            if recon_path.exists():
+                recon = json.loads(recon_path.read_text(encoding="utf-8"))
+                _, n_filled, status = patch_pipeline_exit(report, recon)
+                logger.info(
+                    "pipeline Exit 配線 (build-time, recon=%s): filled=%d status=%s",
+                    recon_path.name,
+                    n_filled,
+                    status,
+                )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("pipeline Exit 配線 (build-time) 失敗 (無視): %s", exc)
+
+    return report
 
 
 def compute_delta(current: CoverageReport, previous_path: Path | None) -> None:
@@ -703,27 +680,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     try:
-        # 2026-07-12 fix: 週末/祝日は target_date の grouped-daily が空になり
-        # Tgt/FILpass が欠測する。直近の取引日まで最大5営業日遡ってアンカーする。
         grouped = fetch_grouped_daily(target_date)
-        grouped_asof = target_date
-        if grouped is None or getattr(grouped, "empty", True):
-            probe = datetime.strptime(target_date, "%Y-%m-%d").date()
-            for _ in range(5):
-                probe = previous_business_day(probe)
-                cand = fetch_grouped_daily(probe.isoformat())
-                if cand is not None and not getattr(cand, "empty", True):
-                    grouped = cand
-                    grouped_asof = probe.isoformat()
-                    logger.info(
-                        "grouped-daily anchored: %s は非取引日 → %s を使用",
-                        target_date,
-                        grouped_asof,
-                    )
-                    report.notes.append(
-                        f"grouped_asof={grouped_asof} (target {target_date} was non-trading)"
-                    )
-                    break
         # 2026-07-02 hygiene: 普通株のみに絞る (default True)。
         if getattr(args, "common_only", True):
             grouped = apply_common_stock_filter(grouped)
