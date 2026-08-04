@@ -3,11 +3,13 @@ from __future__ import annotations
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
 import os
+from pathlib import Path
+import sys
 import time
 from typing import Any
 import uuid
 
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 
 
 # F2 P0#8 audit fix (2026-07-03):
@@ -107,9 +109,65 @@ def _require_sdk() -> None:
         )
 
 
+_ENV_LOADED = False
+
+
 def _load_env_once() -> None:
-    # 設定側で読み込み済みでも harm はない
-    load_dotenv(dotenv_path=os.path.join(os.getcwd(), ".env"), override=False)
+    """`.env` から Alpaca キーを読み込む (read-only・発注には一切触れない)。
+
+    2026-08-04 fix (human #9): 旧実装は ``load_dotenv(os.getcwd()/.env)`` と
+    **CWD 相対**で .env を探していた。.env は .gitignore 済で各 worktree には
+    存在しないため、publish の RefreshAccount / daily_pipeline が「.env を持たない
+    CWD」からこの関数を呼ぶと ``APCA_*`` が未ロードのまま ``get_client`` が例外を
+    投げ、生成器 (export_alpaca_snapshot / build_exit_ledger) が exit!=0 →
+    publish が WARN に握り潰し → snapshot/exit_ledger/account が **無言で欠落**
+    していた (silent 失敗)。対策:
+      1. CWD ではなく「確実に .env が在る場所」を優先順で探索する。
+      2. どこから読んだか / キーが在るかを **必ず 1 行 stderr に出す** (silent 禁止)。
+    優先順: ``QTS_DOTENV`` (明示) > このファイルの repo root > CWD 直下 >
+    CWD からの上方探索。
+    """
+    global _ENV_LOADED
+    if _ENV_LOADED:
+        return
+
+    candidates: list[Path] = []
+    override = os.getenv("QTS_DOTENV")
+    if override:
+        candidates.append(Path(override))
+    # このファイルが属する repo root (= どの CWD/worktree から呼ばれても不変)。
+    candidates.append(Path(__file__).resolve().parents[1] / ".env")
+    # 従来挙動 (CWD 直下) を後方互換で維持。
+    candidates.append(Path.cwd() / ".env")
+    # CWD からの上方探索 (サブディレクトリ実行の保険)。
+    found = find_dotenv(usecwd=True)
+    if found:
+        candidates.append(Path(found))
+
+    loaded: Path | None = None
+    seen: set[str] = set()
+    for cand in candidates:
+        key = str(cand)
+        if key in seen:
+            continue
+        seen.add(key)
+        if cand.is_file():
+            # override=False: 先に見つかった .env / 既存 env var を優先。
+            load_dotenv(dotenv_path=str(cand), override=False)
+            if loaded is None:
+                loaded = cand
+
+    have_keys = bool(
+        os.getenv("APCA_API_KEY_ID") and os.getenv("APCA_API_SECRET_KEY")
+    )
+    # 非 silent 診断: 次の host run が「なぜ生成できた/できない」を即判別できる。
+    # 秘密値は出さない (パスとキー有無のみ)。
+    print(
+        f"[broker_alpaca] dotenv={loaded if loaded else 'NONE'} "
+        f"apca_keys={'present' if have_keys else 'MISSING'}",
+        file=sys.stderr,
+    )
+    _ENV_LOADED = True
 
 
 def get_client(
