@@ -348,10 +348,16 @@ function ExposureBlock({ snap }: { snap: AlpacaSnapshot }) {
   // 「配分」の対象として不適切なのでこのチャートからは除外し、
   // active(非delisted) gross を基準に % を再計算してスケールを是正する。
   // 数値の実態（gross に delisted を含む）は上のエクスポージャ側で保持する。
+  //
+  // "unknown" バケット = system 由来が無い orphan（exporter が probe 揮発などで
+  // delisted を付け損ねた確定 delisted も含む）。どの system にも帰属できず配分の
+  // 分母に入れると偽ノイズになるので delisted と同様に除外し、別枠で件数だけ surface する。
   const bucketGross = (s: SystemExposure) => s.long_usd + s.short_usd;
+  const EXCLUDED_ALLOC = new Set(['delisted', 'unknown']);
   const delistedBucket = ex.by_system.delisted;
+  const unknownBucket = ex.by_system.unknown;
   const activeEntries = Object.entries(ex.by_system).filter(
-    ([sys]) => sys !== 'delisted',
+    ([sys]) => !EXCLUDED_ALLOC.has(sys),
   );
   const activeGross =
     activeEntries.reduce((sum, [, s]) => sum + bucketGross(s), 0) || 1;
@@ -390,7 +396,7 @@ function ExposureBlock({ snap }: { snap: AlpacaSnapshot }) {
 
       <div>
         <div className="text-[10px] text-muted mb-1">
-          system 別配分（% of active gross・delisted 除外）
+          system 別配分（% of active gross・delisted / 未解決 除外）
         </div>
         <div className="space-y-1">
           {systems.map(([sys, s, pct]) => (
@@ -431,6 +437,22 @@ function ExposureBlock({ snap }: { snap: AlpacaSnapshot }) {
               {fmtUsd(bucketGross(delistedBucket), 2)} · gross の{' '}
               {delistedBucket.pct_of_gross.toFixed(1)}%
               <span className="text-muted/50"> — 配分対象外（死荷重）</span>
+            </span>
+          </div>
+        ) : null}
+        {unknownBucket ? (
+          <div className="mt-1 flex items-start gap-1.5 text-[9px] leading-snug text-muted/70">
+            <span
+              className="mt-[3px] inline-block w-2 h-2 rounded-sm shrink-0 bg-warn/50"
+            />
+            <span>
+              system 未解決（要手動確認）: {unknownBucket.count} pos ·{' '}
+              {fmtUsd(bucketGross(unknownBucket), 2)} · gross の{' '}
+              {unknownBucket.pct_of_gross.toFixed(1)}%
+              <span className="text-muted/50">
+                {' '}
+                — orphan（帰属根拠なし）。配分対象外・期限超過にも数えない
+              </span>
             </span>
           </div>
         ) : null}
