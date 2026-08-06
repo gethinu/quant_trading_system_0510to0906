@@ -54,11 +54,17 @@
         {
           "name": "Exit",
           "label": "Exit",
-          "condition": "本日手仕舞い発火",
-          "count": null,
-          "measured": false,
-          "ratio_of_prev": null,
-          "ratio_of_universe": null
+          "condition": "本日手仕舞い発火 (close 0 / protect 0) · 2 armed",
+          "count": 0,
+          "measured": true,
+          "ratio_of_prev": 0.0,
+          "ratio_of_universe": 0.0,
+          "fired": 0,
+          "exit_close": 0,
+          "exit_protect": 0,
+          "armed": 2,
+          "armed_close": 0,
+          "armed_protect": 2
         }
       ],
       "final_signals": 8
@@ -114,11 +120,17 @@
         {
           "name": "Exit",
           "label": "Exit",
-          "condition": "本日手仕舞い発火",
-          "count": null,
-          "measured": false,
-          "ratio_of_prev": null,
-          "ratio_of_universe": null
+          "condition": "本日手仕舞い発火 (close 0 / protect 0) · 10 armed",
+          "count": 0,
+          "measured": true,
+          "ratio_of_prev": 0.0,
+          "ratio_of_universe": 0.0,
+          "fired": 0,
+          "exit_close": 0,
+          "exit_protect": 0,
+          "armed": 10,
+          "armed_close": 10,
+          "armed_protect": 0
         }
       ],
       "final_signals": 10
@@ -174,11 +186,17 @@
         {
           "name": "Exit",
           "label": "Exit",
-          "condition": "本日手仕舞い発火",
-          "count": null,
-          "measured": false,
+          "condition": "本日手仕舞い発火 (close 0 / protect 0)",
+          "count": 0,
+          "measured": true,
           "ratio_of_prev": null,
-          "ratio_of_universe": null
+          "ratio_of_universe": 0.0,
+          "fired": 0,
+          "exit_close": 0,
+          "exit_protect": 0,
+          "armed": 0,
+          "armed_close": 0,
+          "armed_protect": 0
         }
       ],
       "final_signals": 0
@@ -234,11 +252,17 @@
         {
           "name": "Exit",
           "label": "Exit",
-          "condition": "本日手仕舞い発火",
-          "count": null,
-          "measured": false,
+          "condition": "本日手仕舞い発火 (close 0 / protect 0)",
+          "count": 0,
+          "measured": true,
           "ratio_of_prev": null,
-          "ratio_of_universe": null
+          "ratio_of_universe": 0.0,
+          "fired": 0,
+          "exit_close": 0,
+          "exit_protect": 0,
+          "armed": 0,
+          "armed_close": 0,
+          "armed_protect": 0
         }
       ],
       "final_signals": 0
@@ -294,11 +318,17 @@
         {
           "name": "Exit",
           "label": "Exit",
-          "condition": "本日手仕舞い発火",
-          "count": null,
-          "measured": false,
+          "condition": "本日手仕舞い発火 (close 0 / protect 0)",
+          "count": 0,
+          "measured": true,
           "ratio_of_prev": null,
-          "ratio_of_universe": null
+          "ratio_of_universe": 0.0,
+          "fired": 0,
+          "exit_close": 0,
+          "exit_protect": 0,
+          "armed": 0,
+          "armed_close": 0,
+          "armed_protect": 0
         }
       ],
       "final_signals": 0
@@ -354,11 +384,17 @@
         {
           "name": "Exit",
           "label": "Exit",
-          "condition": "本日手仕舞い発火",
-          "count": null,
-          "measured": false,
+          "condition": "本日手仕舞い発火 (close 0 / protect 0)",
+          "count": 0,
+          "measured": true,
           "ratio_of_prev": null,
-          "ratio_of_universe": null
+          "ratio_of_universe": 0.0,
+          "fired": 0,
+          "exit_close": 0,
+          "exit_protect": 0,
+          "armed": 0,
+          "armed_close": 0,
+          "armed_protect": 0
         }
       ],
       "final_signals": 1
@@ -414,11 +450,17 @@
         {
           "name": "Exit",
           "label": "Exit",
-          "condition": "本日手仕舞い発火",
-          "count": null,
-          "measured": false,
+          "condition": "本日手仕舞い発火 (close 0 / protect 0)",
+          "count": 0,
+          "measured": true,
           "ratio_of_prev": null,
-          "ratio_of_universe": null
+          "ratio_of_universe": 0.0,
+          "fired": 0,
+          "exit_close": 0,
+          "exit_protect": 0,
+          "armed": 0,
+          "armed_close": 0,
+          "armed_protect": 0
         }
       ],
       "final_signals": 0
@@ -427,6 +469,7 @@
   "notes": [
     "phases are reference counts, not evaluation criteria.",
     "Tgt/FILpass prefer grouped-daily measurement; STUpass/TRDlist/Entry/Exit come from the signal engine funnel (today_signals funnel block).",
-    "ratio_of_prev = count / previous phase; ratio_of_universe = count / Tgt."
+    "ratio_of_prev = count / previous phase; ratio_of_universe = count / Tgt.",
+    "Exit = execution recon (recon_YYYYMMDD.json, ntfy と同一 source): count=fired(exit_submitted), close/protect は fired 分のみ, armed=未発火の保護注文 (別枠)。"
   ]
 }
