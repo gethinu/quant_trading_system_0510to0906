@@ -79,6 +79,38 @@ def _empty_side_bucket() -> dict[str, int]:
     }
 
 
+def _empty_exit_bucket() -> dict[str, int]:
+    """exit 集計。fired(submitted) と armed(未発火) を分けて持つ。
+
+    - ``submitted`` = fired = broker へ送信できた手仕舞い (order_id あり & error なし)。
+    - ``close`` / ``protect`` = **submitted 分だけ**の内訳 (N=close+protect が常に成立)。
+    - ``armed`` = リスト計上されたが未送信 (order_id なし) = 保護注文が張られただけ。
+      ``armed_close`` / ``armed_protect`` はその内訳。
+    """
+    return {
+        "submitted": 0,
+        "close": 0,
+        "protect": 0,
+        "armed": 0,
+        "armed_close": 0,
+        "armed_protect": 0,
+    }
+
+
+def _empty_system_bucket() -> dict[str, Any]:
+    return {
+        "long": _empty_side_bucket(),
+        "short": _empty_side_bucket(),
+        "funnel": None,
+        "exit": _empty_exit_bucket(),
+    }
+
+
+# system 不明 (例: reason=flatten_all で system=null の exit) を集計から落とさず
+# 振り分ける先。per-system 内訳には出るが sysN funnel には紐付かない。
+_UNASSIGNED_SYSTEM = "__unassigned__"
+
+
 def _load_json(path: Path | None) -> dict[str, Any] | None:
     if path is None or not path.exists():
         return None
@@ -100,27 +132,13 @@ def build_recon(
 ) -> dict[str, Any]:
     """3 つの JSON payload を突合し recon dict を返す (pure、I/O なし)。"""
     systems: dict[str, dict[str, Any]] = {
-        name: {
-            "long": _empty_side_bucket(),
-            "short": _empty_side_bucket(),
-            "funnel": None,
-            "exit": {"submitted": 0, "close": 0, "protect": 0},
-        }
-        for name in _SYSTEMS
+        name: _empty_system_bucket() for name in _SYSTEMS
     }
 
     def _sys(name: str | None) -> dict[str, Any] | None:
         if name is None:
             return None
-        return systems.setdefault(
-            name,
-            {
-                "long": _empty_side_bucket(),
-                "short": _empty_side_bucket(),
-                "funnel": None,
-                "exit": {"submitted": 0, "close": 0, "protect": 0},
-            },
-        )
+        return systems.setdefault(name, _empty_system_bucket())
 
     universe_target: int | None = None
     total_signals = 0
@@ -176,18 +194,28 @@ def build_recon(
     if exit_orders:
         for e in exit_orders.get("exits", []) or []:
             name = _norm_system(e.get("system"))
-            bucket = _sys(name)
-            if bucket is None:
+            # system 不明 (flatten_all で system=null 等) は落とさず __unassigned__ へ。
+            # 落とすと close 内訳が過少計上される (旧: system=None → drop)。
+            bucket = _sys(name) or _sys(_UNASSIGNED_SYSTEM)
+            if bucket is None:  # 論理上到達しないが型のため
                 continue
             ex = bucket["exit"]
-            # 送信済 (order_id あり & error なし) のみ submitted カウント
-            if e.get("order_id") and not e.get("error"):
+            is_submitted = bool(e.get("order_id")) and not e.get("error")
+            is_protect = str(e.get("reason") or "").lower() in _PROTECT_REASONS
+            if is_submitted:
+                # fired: 送信できた手仕舞い。close/protect 内訳は fired 分だけ。
                 ex["submitted"] += 1
-            reason = str(e.get("reason") or "").lower()
-            if reason in _PROTECT_REASONS:
-                ex["protect"] += 1
+                if is_protect:
+                    ex["protect"] += 1
+                else:
+                    ex["close"] += 1
             else:
-                ex["close"] += 1
+                # armed: 計算されたが未送信 (保護注文が張られただけ)。
+                ex["armed"] += 1
+                if is_protect:
+                    ex["armed_protect"] += 1
+                else:
+                    ex["armed_close"] += 1
 
     # --- portfolio aggregate --------------------------------------------
     def _agg(field: str) -> int:
@@ -200,6 +228,9 @@ def build_recon(
     exit_submitted = sum(b["exit"]["submitted"] for b in systems.values())
     exit_close = sum(b["exit"]["close"] for b in systems.values())
     exit_protect = sum(b["exit"]["protect"] for b in systems.values())
+    exit_armed = sum(b["exit"]["armed"] for b in systems.values())
+    exit_armed_close = sum(b["exit"]["armed_close"] for b in systems.values())
+    exit_armed_protect = sum(b["exit"]["armed_protect"] for b in systems.values())
 
     portfolio_out = {
         "universe_target": universe_target,
@@ -220,6 +251,9 @@ def build_recon(
         "exit_submitted": exit_submitted,
         "exit_close": exit_close,
         "exit_protect": exit_protect,
+        "exit_armed": exit_armed,
+        "exit_armed_close": exit_armed_close,
+        "exit_armed_protect": exit_armed_protect,
         "drop_breakdown": drop_breakdown,
         "account_equity": account_equity,
     }
@@ -234,6 +268,7 @@ def build_recon(
             or data["long"]["generated"]
             or data["short"]["generated"]
             or data["exit"]["submitted"]
+            or data["exit"]["armed"]
             or data["funnel"] is not None
         )
     }
@@ -299,6 +334,9 @@ def exit_counts_from_recon(recon: dict[str, Any] | None) -> dict[str, dict[str, 
             "submitted": _i(ex.get("submitted")),
             "close": _i(ex.get("close")),
             "protect": _i(ex.get("protect")),
+            "armed": _i(ex.get("armed")),
+            "armed_close": _i(ex.get("armed_close")),
+            "armed_protect": _i(ex.get("armed_protect")),
         }
     return out
 
@@ -308,9 +346,13 @@ def patch_pipeline_exit(
 ) -> tuple[dict[str, Any], int, str]:
     """pipeline_*.json の各 system の Exit phase を recon の実測で埋める (in-place)。
 
-    ntfy (``exit {submitted} (close C / protect P)``) と同じ recon を single source に
-    するための配線。Exit の ``count`` は per-system ``exit.submitted`` (= ntfy 見出しの
-    exit 数と同じ定義)、close/protect 内訳は condition 末尾に併記する。
+    ntfy (``exit {fired} fired (close Cs / protect Ps) · M armed``) と同じ recon を
+    single source にするための配線。Exit の ``count`` は per-system ``exit.submitted``
+    (= fired = ntfy 見出しの exit 数と同じ定義。funnel バーは発火数を表す)。
+    close/protect 内訳は **fired 分だけ** (Cs+Ps=count が常に成立)。未発火の保護注文は
+    ``armed`` として別枠に持ち、condition 末尾にも併記する。フロントが
+    「count fired / armed armed」相当を出せるよう Exit オブジェクトに
+    ``fired`` / ``armed`` / ``armed_close`` / ``armed_protect`` を追加する。
 
     戻り値 ``(pipeline, n_filled, status)``:
       - ``status="ok"``            : recon から Exit を埋めた
@@ -337,17 +379,27 @@ def patch_pipeline_exit(
         prev_count: int | None = None
         for p in phases:
             if p.get("name") == "Exit":
-                ec = exits.get(sysk) or {"submitted": 0, "close": 0, "protect": 0}
-                cnt = int(ec["submitted"])
+                ec = exits.get(sysk) or {
+                    "submitted": 0, "close": 0, "protect": 0,
+                    "armed": 0, "armed_close": 0, "armed_protect": 0,
+                }
+                cnt = int(ec["submitted"])  # fired
+                armed = int(ec.get("armed") or 0)
                 base = str(p.get("condition") or EXIT_CONDITION_BASE).split(
                     " (close"
                 )[0]
                 p["count"] = cnt
                 p["measured"] = True
+                p["fired"] = cnt
                 p["exit_close"] = int(ec["close"])
                 p["exit_protect"] = int(ec["protect"])
+                p["armed"] = armed
+                p["armed_close"] = int(ec.get("armed_close") or 0)
+                p["armed_protect"] = int(ec.get("armed_protect") or 0)
+                armed_suffix = f" · {armed} armed" if armed else ""
                 p["condition"] = (
                     f"{base} (close {int(ec['close'])} / protect {int(ec['protect'])})"
+                    f"{armed_suffix}"
                 )
                 p["ratio_of_prev"] = (
                     round(cnt / prev_count, 6)
@@ -369,7 +421,8 @@ def patch_pipeline_exit(
         if isinstance(notes, list):
             marker = (
                 "Exit = execution recon (recon_YYYYMMDD.json, ntfy と同一 source): "
-                "count=exit_submitted, condition に close/protect 内訳。"
+                "count=fired(exit_submitted), close/protect は fired 分のみ, "
+                "armed=未発火の保護注文 (別枠)。"
             )
             if marker not in notes:
                 notes.append(marker)
