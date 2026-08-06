@@ -13,9 +13,12 @@ repos:
     rev: v6.0.0
     hooks:
       - id: end-of-file-fixer
-        exclude: ^\.vscode/
+        # Exclude machine-generated daily pipeline data (rewritten every run)
+        # to stop churn/conflicts. See apps/dashboards/alpaca-next/data/.
+        exclude: ^(\.vscode/|apps/dashboards/alpaca-next/data/)
       - id: trailing-whitespace
-        exclude: ^.*\.(md|rst)$
+        # Keep the existing md/rst carve-out AND exclude generated data dir.
+        exclude: ^(.*\.(md|rst)$|apps/dashboards/alpaca-next/data/)
       - id: check-yaml
         args: ["--allow-multiple-documents"]
       - id: check-json
@@ -54,7 +57,7 @@ repos:
 
       - id: auto-benchmark
         name: Performance Regression Check
-        entry: python tools/auto_benchmark.py --threshold 0.10 --confirm
+        entry: python tools/auto_benchmark.py --threshold 0.10 --skip-interactive
         language: system
         files: ^(core/|common/|scripts/run_all_systems_today\.py)
         pass_filenames: false

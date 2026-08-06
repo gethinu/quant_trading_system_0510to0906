@@ -15,6 +15,18 @@ import subprocess
 import sys
 from typing import Dict, List, Optional
 
+# --- Windows console (cp932) safety -------------------------------------
+# Force UTF-8 on stdout/stderr so emoji / non-ASCII output does not raise
+# UnicodeEncodeError under Windows' default cp932 code page when this hook
+# runs at pre-push. reconfigure() exists on Python 3.7+; guard for streams
+# that don't support it.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+# ------------------------------------------------------------------------
+
 BENCHMARK_HISTORY = Path("benchmarks/history.jsonl")
 BENCHMARK_DIR = Path("benchmarks")
 
