@@ -1,5 +1,5 @@
 {
-  "date": "2026-07-28",
+  "date": "2026-08-08",
   "provider": "polygon_grouped_daily",
   "schema": "signal_pipeline/v1",
   "systems": {
@@ -10,28 +10,28 @@
           "name": "Tgt",
           "label": "Tgt",
           "condition": "ユニバース対象銘柄数",
-          "count": 5139,
-          "measured": true,
+          "count": null,
+          "measured": false,
           "ratio_of_prev": null,
-          "ratio_of_universe": 1.0
+          "ratio_of_universe": null
         },
         {
           "name": "FILpass",
           "label": "FILpass",
           "condition": "Close >= 5 かつ DollarVolume20 > 50M",
-          "count": 1441,
-          "measured": true,
-          "ratio_of_prev": 0.280405,
-          "ratio_of_universe": 0.280405
+          "count": null,
+          "measured": false,
+          "ratio_of_prev": null,
+          "ratio_of_universe": null
         },
         {
           "name": "STUpass",
           "label": "STUpass",
           "condition": "SMA25 > SMA50 かつ ROC200 > 0",
-          "count": 625,
+          "count": null,
           "measured": false,
-          "ratio_of_prev": 0.433727,
-          "ratio_of_universe": 0.121619
+          "ratio_of_prev": null,
+          "ratio_of_universe": null
         },
         {
           "name": "TRDlist",
@@ -39,29 +39,35 @@
           "condition": "ROC200 降順 上位候補",
           "count": 10,
           "measured": false,
-          "ratio_of_prev": 0.016,
-          "ratio_of_universe": 0.001946
+          "ratio_of_prev": null,
+          "ratio_of_universe": null
         },
         {
           "name": "Entry",
           "label": "Entry",
           "condition": "allocation 後エントリ発火",
-          "count": 3,
+          "count": 8,
           "measured": false,
-          "ratio_of_prev": 0.3,
-          "ratio_of_universe": 0.000584
+          "ratio_of_prev": 0.8,
+          "ratio_of_universe": null
         },
         {
           "name": "Exit",
           "label": "Exit",
-          "condition": "本日手仕舞い発火",
-          "count": null,
-          "measured": false,
-          "ratio_of_prev": null,
-          "ratio_of_universe": null
+          "condition": "本日手仕舞い発火 (close 0 / protect 0) · 2 armed",
+          "count": 0,
+          "measured": true,
+          "ratio_of_prev": 0.0,
+          "ratio_of_universe": null,
+          "fired": 0,
+          "exit_close": 0,
+          "exit_protect": 0,
+          "armed": 2,
+          "armed_close": 0,
+          "armed_protect": 2
         }
       ],
-      "final_signals": 3
+      "final_signals": 8
     },
     "sys2": {
       "system_id": "sys2",
@@ -70,58 +76,64 @@
           "name": "Tgt",
           "label": "Tgt",
           "condition": "ユニバース対象銘柄数",
-          "count": 5139,
-          "measured": true,
+          "count": null,
+          "measured": false,
           "ratio_of_prev": null,
-          "ratio_of_universe": 1.0
+          "ratio_of_universe": null
         },
         {
           "name": "FILpass",
           "label": "FILpass",
           "condition": "Close >= 5 かつ DollarVolume20 > 25M かつ ATR_Ratio > 0.03",
-          "count": 1870,
-          "measured": true,
-          "ratio_of_prev": 0.363884,
-          "ratio_of_universe": 0.363884
+          "count": null,
+          "measured": false,
+          "ratio_of_prev": null,
+          "ratio_of_universe": null
         },
         {
           "name": "STUpass",
           "label": "STUpass",
           "condition": "RSI3 > 90 かつ twodayup",
-          "count": 8,
+          "count": null,
           "measured": false,
-          "ratio_of_prev": 0.004278,
-          "ratio_of_universe": 0.001557
+          "ratio_of_prev": null,
+          "ratio_of_universe": null
         },
         {
           "name": "TRDlist",
           "label": "TRDlist",
           "condition": "ADX7 降順 上位候補",
-          "count": 8,
+          "count": 10,
           "measured": false,
-          "ratio_of_prev": 1.0,
-          "ratio_of_universe": 0.001557
+          "ratio_of_prev": null,
+          "ratio_of_universe": null
         },
         {
           "name": "Entry",
           "label": "Entry",
           "condition": "allocation 後エントリ発火",
-          "count": 8,
+          "count": 10,
           "measured": false,
           "ratio_of_prev": 1.0,
-          "ratio_of_universe": 0.001557
+          "ratio_of_universe": null
         },
         {
           "name": "Exit",
           "label": "Exit",
-          "condition": "本日手仕舞い発火",
-          "count": null,
-          "measured": false,
-          "ratio_of_prev": null,
-          "ratio_of_universe": null
+          "condition": "本日手仕舞い発火 (close 0 / protect 0) · 20 armed",
+          "count": 0,
+          "measured": true,
+          "ratio_of_prev": 0.0,
+          "ratio_of_universe": null,
+          "fired": 0,
+          "exit_close": 0,
+          "exit_protect": 0,
+          "armed": 20,
+          "armed_close": 0,
+          "armed_protect": 20
         }
       ],
-      "final_signals": 8
+      "final_signals": 10
     },
     "sys3": {
       "system_id": "sys3",
@@ -130,28 +142,28 @@
           "name": "Tgt",
           "label": "Tgt",
           "condition": "ユニバース対象銘柄数",
-          "count": 5139,
-          "measured": true,
+          "count": null,
+          "measured": false,
           "ratio_of_prev": null,
-          "ratio_of_universe": 1.0
+          "ratio_of_universe": null
         },
         {
           "name": "FILpass",
           "label": "FILpass",
           "condition": "Close >= 5 かつ DollarVolume20 > 25M かつ ATR_Ratio >= 0.05",
-          "count": 1870,
-          "measured": true,
-          "ratio_of_prev": 0.363884,
-          "ratio_of_universe": 0.363884
+          "count": null,
+          "measured": false,
+          "ratio_of_prev": null,
+          "ratio_of_universe": null
         },
         {
           "name": "STUpass",
           "label": "STUpass",
           "condition": "drop3d >= 0.125",
-          "count": 47,
+          "count": null,
           "measured": false,
-          "ratio_of_prev": 0.025134,
-          "ratio_of_universe": 0.009146
+          "ratio_of_prev": null,
+          "ratio_of_universe": null
         },
         {
           "name": "TRDlist",
@@ -159,29 +171,35 @@
           "condition": "drop3d 降順 上位候補",
           "count": 10,
           "measured": false,
-          "ratio_of_prev": 0.212766,
-          "ratio_of_universe": 0.001946
+          "ratio_of_prev": null,
+          "ratio_of_universe": null
         },
         {
           "name": "Entry",
           "label": "Entry",
           "condition": "allocation 後エントリ発火",
-          "count": 0,
+          "count": 1,
           "measured": false,
-          "ratio_of_prev": 0.0,
-          "ratio_of_universe": 0.0
+          "ratio_of_prev": 0.1,
+          "ratio_of_universe": null
         },
         {
           "name": "Exit",
           "label": "Exit",
-          "condition": "本日手仕舞い発火",
-          "count": null,
-          "measured": false,
-          "ratio_of_prev": null,
-          "ratio_of_universe": null
+          "condition": "本日手仕舞い発火 (close 0 / protect 0) · 2 armed",
+          "count": 0,
+          "measured": true,
+          "ratio_of_prev": 0.0,
+          "ratio_of_universe": null,
+          "fired": 0,
+          "exit_close": 0,
+          "exit_protect": 0,
+          "armed": 2,
+          "armed_close": 0,
+          "armed_protect": 2
         }
       ],
-      "final_signals": 0
+      "final_signals": 1
     },
     "sys4": {
       "system_id": "sys4",
@@ -190,28 +208,28 @@
           "name": "Tgt",
           "label": "Tgt",
           "condition": "ユニバース対象銘柄数",
-          "count": 5139,
-          "measured": true,
+          "count": null,
+          "measured": false,
           "ratio_of_prev": null,
-          "ratio_of_universe": 1.0
+          "ratio_of_universe": null
         },
         {
           "name": "FILpass",
           "label": "FILpass",
           "condition": "DollarVolume50 > 100M かつ HV50 in [10,40]",
-          "count": 988,
-          "measured": true,
-          "ratio_of_prev": 0.192255,
-          "ratio_of_universe": 0.192255
+          "count": null,
+          "measured": false,
+          "ratio_of_prev": null,
+          "ratio_of_universe": null
         },
         {
           "name": "STUpass",
           "label": "STUpass",
           "condition": "Close > SMA200",
-          "count": 351,
+          "count": null,
           "measured": false,
-          "ratio_of_prev": 0.355263,
-          "ratio_of_universe": 0.068301
+          "ratio_of_prev": null,
+          "ratio_of_universe": null
         },
         {
           "name": "TRDlist",
@@ -219,8 +237,8 @@
           "condition": "RSI4 昇順 上位候補 (最も oversold)",
           "count": 10,
           "measured": false,
-          "ratio_of_prev": 0.02849,
-          "ratio_of_universe": 0.001946
+          "ratio_of_prev": null,
+          "ratio_of_universe": null
         },
         {
           "name": "Entry",
@@ -229,16 +247,22 @@
           "count": 0,
           "measured": false,
           "ratio_of_prev": 0.0,
-          "ratio_of_universe": 0.0
+          "ratio_of_universe": null
         },
         {
           "name": "Exit",
           "label": "Exit",
-          "condition": "本日手仕舞い発火",
-          "count": null,
-          "measured": false,
+          "condition": "本日手仕舞い発火 (close 0 / protect 0)",
+          "count": 0,
+          "measured": true,
           "ratio_of_prev": null,
-          "ratio_of_universe": null
+          "ratio_of_universe": null,
+          "fired": 0,
+          "exit_close": 0,
+          "exit_protect": 0,
+          "armed": 0,
+          "armed_close": 0,
+          "armed_protect": 0
         }
       ],
       "final_signals": 0
@@ -250,37 +274,37 @@
           "name": "Tgt",
           "label": "Tgt",
           "condition": "ユニバース対象銘柄数",
-          "count": 5139,
-          "measured": true,
+          "count": null,
+          "measured": false,
           "ratio_of_prev": null,
-          "ratio_of_universe": 1.0
+          "ratio_of_universe": null
         },
         {
           "name": "FILpass",
           "label": "FILpass",
           "condition": "Close >= 5 かつ ADX7 > 55 かつ ATR_Pct > 0.04 かつ AvgVolume50 > 500k かつ DollarVolume50 > 2.5M",
-          "count": 3696,
-          "measured": true,
-          "ratio_of_prev": 0.719206,
-          "ratio_of_universe": 0.719206
+          "count": null,
+          "measured": false,
+          "ratio_of_prev": null,
+          "ratio_of_universe": null
         },
         {
           "name": "STUpass",
           "label": "STUpass",
           "condition": "ADX7 > 55 かつ Close > SMA100+ATR10 かつ RSI3 < 50",
-          "count": 7,
+          "count": null,
           "measured": false,
-          "ratio_of_prev": 0.001894,
-          "ratio_of_universe": 0.001362
+          "ratio_of_prev": null,
+          "ratio_of_universe": null
         },
         {
           "name": "TRDlist",
           "label": "TRDlist",
           "condition": "ADX7 降順 上位候補",
-          "count": 7,
+          "count": 6,
           "measured": false,
-          "ratio_of_prev": 1.0,
-          "ratio_of_universe": 0.001362
+          "ratio_of_prev": null,
+          "ratio_of_universe": null
         },
         {
           "name": "Entry",
@@ -289,16 +313,22 @@
           "count": 0,
           "measured": false,
           "ratio_of_prev": 0.0,
-          "ratio_of_universe": 0.0
+          "ratio_of_universe": null
         },
         {
           "name": "Exit",
           "label": "Exit",
-          "condition": "本日手仕舞い発火",
-          "count": null,
-          "measured": false,
+          "condition": "本日手仕舞い発火 (close 0 / protect 0)",
+          "count": 0,
+          "measured": true,
           "ratio_of_prev": null,
-          "ratio_of_universe": null
+          "ratio_of_universe": null,
+          "fired": 0,
+          "exit_close": 0,
+          "exit_protect": 0,
+          "armed": 0,
+          "armed_close": 0,
+          "armed_protect": 0
         }
       ],
       "final_signals": 0
@@ -310,28 +340,28 @@
           "name": "Tgt",
           "label": "Tgt",
           "condition": "ユニバース対象銘柄数",
-          "count": 5139,
-          "measured": true,
+          "count": null,
+          "measured": false,
           "ratio_of_prev": null,
-          "ratio_of_universe": 1.0
+          "ratio_of_universe": null
         },
         {
           "name": "FILpass",
           "label": "FILpass",
           "condition": "Low >= 5 かつ DollarVolume50 > 10M",
-          "count": 2339,
-          "measured": true,
-          "ratio_of_prev": 0.455147,
-          "ratio_of_universe": 0.455147
+          "count": null,
+          "measured": false,
+          "ratio_of_prev": null,
+          "ratio_of_universe": null
         },
         {
           "name": "STUpass",
           "label": "STUpass",
           "condition": "return_6d > 0.20 かつ UpTwoDays",
-          "count": 0,
+          "count": null,
           "measured": false,
-          "ratio_of_prev": 0.0,
-          "ratio_of_universe": 0.0
+          "ratio_of_prev": null,
+          "ratio_of_universe": null
         },
         {
           "name": "TRDlist",
@@ -340,7 +370,7 @@
           "count": 0,
           "measured": false,
           "ratio_of_prev": null,
-          "ratio_of_universe": 0.0
+          "ratio_of_universe": null
         },
         {
           "name": "Entry",
@@ -349,16 +379,22 @@
           "count": 0,
           "measured": false,
           "ratio_of_prev": null,
-          "ratio_of_universe": 0.0
+          "ratio_of_universe": null
         },
         {
           "name": "Exit",
           "label": "Exit",
-          "condition": "本日手仕舞い発火",
-          "count": null,
-          "measured": false,
+          "condition": "本日手仕舞い発火 (close 0 / protect 0)",
+          "count": 0,
+          "measured": true,
           "ratio_of_prev": null,
-          "ratio_of_universe": null
+          "ratio_of_universe": null,
+          "fired": 0,
+          "exit_close": 0,
+          "exit_protect": 0,
+          "armed": 0,
+          "armed_close": 0,
+          "armed_protect": 0
         }
       ],
       "final_signals": 0
@@ -370,28 +406,28 @@
           "name": "Tgt",
           "label": "Tgt",
           "condition": "ユニバース対象銘柄数",
-          "count": 1,
-          "measured": true,
+          "count": null,
+          "measured": false,
           "ratio_of_prev": null,
-          "ratio_of_universe": 1.0
+          "ratio_of_universe": null
         },
         {
           "name": "FILpass",
           "label": "FILpass",
           "condition": "SPY 固定 (共通フィルター無し)",
-          "count": 1,
-          "measured": true,
-          "ratio_of_prev": 1.0,
-          "ratio_of_universe": 1.0
+          "count": null,
+          "measured": false,
+          "ratio_of_prev": null,
+          "ratio_of_universe": null
         },
         {
           "name": "STUpass",
           "label": "STUpass",
           "condition": "Low <= Min_50 (52週安値)",
-          "count": 0,
+          "count": null,
           "measured": false,
-          "ratio_of_prev": 0.0,
-          "ratio_of_universe": 0.0
+          "ratio_of_prev": null,
+          "ratio_of_universe": null
         },
         {
           "name": "TRDlist",
@@ -400,7 +436,7 @@
           "count": 0,
           "measured": false,
           "ratio_of_prev": null,
-          "ratio_of_universe": 0.0
+          "ratio_of_universe": null
         },
         {
           "name": "Entry",
@@ -409,16 +445,22 @@
           "count": 0,
           "measured": false,
           "ratio_of_prev": null,
-          "ratio_of_universe": 0.0
+          "ratio_of_universe": null
         },
         {
           "name": "Exit",
           "label": "Exit",
-          "condition": "本日手仕舞い発火",
-          "count": null,
-          "measured": false,
+          "condition": "本日手仕舞い発火 (close 0 / protect 0)",
+          "count": 0,
+          "measured": true,
           "ratio_of_prev": null,
-          "ratio_of_universe": null
+          "ratio_of_universe": null,
+          "fired": 0,
+          "exit_close": 0,
+          "exit_protect": 0,
+          "armed": 0,
+          "armed_close": 0,
+          "armed_protect": 0
         }
       ],
       "final_signals": 0
@@ -426,7 +468,8 @@
   },
   "notes": [
     "phases are reference counts, not evaluation criteria.",
-    "Tgt/FILpass prefer grouped-daily measurement; STUpass/TRDlist/Entry/Exit come from the signal engine funnel (today_signals funnel block).",
-    "ratio_of_prev = count / previous phase; ratio_of_universe = count / Tgt."
+    "monitor measures Tgt / FILpass only; STUpass/Exit are unmeasured (null).",
+    "ratio_of_prev = count / previous measured phase; ratio_of_universe = count / Tgt.",
+    "Exit = execution recon (recon_YYYYMMDD.json, ntfy と同一 source): count=fired(exit_submitted), close/protect は fired 分のみ, armed=未発火の保護注文 (別枠)。"
   ]
 }
