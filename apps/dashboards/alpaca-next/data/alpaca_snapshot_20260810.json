@@ -1,7 +1,7 @@
 {
   "schema": "alpaca_snapshot/v1",
   "date": "2026-08-10",
-  "generated_at": "2026-08-09T21:24:56Z",
+  "generated_at": "2026-08-09T23:00:20Z",
   "provider": "alpaca-paper",
   "account": {
     "equity": 101258.76,
@@ -2967,8 +2967,8 @@
     "stale": false,
     "reason": null,
     "ledger_date": "2026-08-10",
-    "ledger_run_id": "20260810_062445_1c3b1e",
-    "ledger_generated_at": "2026-08-09T21:24:50Z",
+    "ledger_run_id": "20260810_080007_812da8",
+    "ledger_generated_at": "2026-08-09T23:00:11Z",
     "all_time": {
       "n_trades": 982,
       "total_realized_pl": -385.09,
