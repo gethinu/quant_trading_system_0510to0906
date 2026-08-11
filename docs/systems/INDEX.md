@@ -59,3 +59,18 @@
 - [今日のシグナル処理](../today_signal_scan/) - 実行フロー詳細
 - [必須指標](../technical/required_indicators.md) - 計算仕様
 - [統合バックテスト](../../common/integrated_backtest.py) - テスト基盤
+
+### 手法検証（アンチオーバーフィット）
+
+バックテスト評価の統計的厳密性を担保する検証レイヤ。両バックテストエンジン
+（`simulate_trades_with_risk` / `run_integrated_backtest`）を**変更せず**その上に
+かぶせる read-only ラッパで、**既定は全フラグ OFF・本番未 import＝inert**。
+
+- 概要・フラグ・実行方法・実機ログ: [手法検証パイプライン](../METHODOLOGY_VALIDATION.md)
+- 実装: [`common/validation/`](../../common/validation/) ／ 入口: [`scripts/run_validation.py`](../../scripts/run_validation.py)
+- 内容: CPCV（purge/embargo）＋ moving-block bootstrap ＋ Deflated Sharpe（N 試行デフレ）
+- **survivorship（生存者バイアス）の測定可能化**: `PointInTimeUniverse.members_asof()`＋
+  audit/guard。バイアス源は現行 universe が current-membership スナップショットを
+  歴史データに適用している点（`common/universe.py:41-52` 他）。完全補正には
+  `data/universe_membership.csv`（dated membership）の供給が必要。
+- 監査スコア 45→83 の根拠と残ギャップ: [`outputs/methodology_upgrade_20260811.md`](../../outputs/methodology_upgrade_20260811.md)
