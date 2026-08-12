@@ -1,7 +1,7 @@
 {
   "version": "1.0",
-  "date": "2026-08-06",
-  "generated_at": "2026-08-06T22:50:52+09:00",
+  "date": "2026-08-13",
+  "generated_at": "2026-08-13T06:37:47+09:00",
   "provider": "polygon",
   "systems": {
     "sys1": {
@@ -9,160 +9,152 @@
         {
           "symbol": "ADVB",
           "side": "BUY",
-          "entry_price": 7.99,
-          "weight": 0.0189,
+          "entry_price": 7.77,
+          "weight": 0.0173,
           "rank": 1,
-          "reason": "ROC200が1位（全1463銘柄中）のため"
-        },
-        {
-          "symbol": "AMIX",
-          "side": "BUY",
-          "entry_price": 19.5,
-          "weight": 0.0286,
-          "rank": 2,
-          "reason": "ROC200が2位（全1463銘柄中）のため"
+          "reason": "ROC200が1位（全1395銘柄中）のため"
         },
         {
           "symbol": "BNY",
           "side": "BUY",
-          "entry_price": 156.82,
-          "weight": 0.062,
-          "rank": 3,
-          "reason": "ROC200が3位（全1463銘柄中）のため"
+          "entry_price": 160.32,
+          "weight": 0.0642,
+          "rank": 2,
+          "reason": "ROC200が2位（全1395銘柄中）のため"
         },
         {
           "symbol": "ERAS",
           "side": "BUY",
-          "entry_price": 18.38,
-          "weight": 0.0332,
-          "rank": 4,
-          "reason": "ROC200が6位（全1463銘柄中）のため"
-        },
-        {
-          "symbol": "LXP",
-          "side": "BUY",
-          "entry_price": 60.55,
-          "weight": 0.0547,
-          "rank": 5,
-          "reason": "ROC200が7位（全1463銘柄中）のため"
+          "entry_price": 18.31,
+          "weight": 0.0387,
+          "rank": 3,
+          "reason": "ROC200が6位（全1395銘柄中）のため"
         },
         {
           "symbol": "FBRX",
           "side": "BUY",
-          "entry_price": 76.56,
-          "weight": 0.0259,
-          "rank": 6,
-          "reason": "ROC200が8位（全1463銘柄中）のため"
+          "entry_price": 76.87,
+          "weight": 0.0483,
+          "rank": 4,
+          "reason": "ROC200が7位（全1395銘柄中）のため"
+        },
+        {
+          "symbol": "LXP",
+          "side": "BUY",
+          "entry_price": 60.66,
+          "weight": 0.052,
+          "rank": 5,
+          "reason": "ROC200が8位（全1395銘柄中）のため"
         },
         {
           "symbol": "AMCR",
           "side": "BUY",
-          "entry_price": 47.14,
-          "weight": 0.0479,
-          "rank": 7,
-          "reason": "ROC200が9位（全1463銘柄中）のため"
+          "entry_price": 47.4,
+          "weight": 0.0488,
+          "rank": 6,
+          "reason": "ROC200が9位（全1395銘柄中）のため"
         },
         {
           "symbol": "SLS",
           "side": "BUY",
-          "entry_price": 11.81,
-          "weight": 0.0153,
-          "rank": 8,
-          "reason": "ROC200が上位のため"
+          "entry_price": 11.05,
+          "weight": 0.0171,
+          "rank": 7,
+          "reason": "ROC200が10位（全1395銘柄中）のため"
         }
       ],
       "n_candidates_input": 10,
-      "n_signals_output": 8,
-      "gate_survival_ratio": 0.8,
+      "n_signals_output": 7,
+      "gate_survival_ratio": 0.7,
       "funnel": {
-        "target": 6591,
-        "filter_pass": 1508,
-        "setup_pass": 650,
+        "target": 5206,
+        "filter_pass": 1435,
+        "setup_pass": 617,
         "candidate_count": 10,
-        "entry_count": 8,
+        "entry_count": 7,
         "exit_count": null
       }
     },
     "sys2": {
       "signals": [
         {
-          "symbol": "CNK",
+          "symbol": "EFOR",
           "side": "SELL",
-          "entry_price": 38.07,
-          "weight": 0.1117,
-          "rank": 26,
-          "reason": "モメンタムが強く過熱のため"
-        },
-        {
-          "symbol": "IMAX",
-          "side": "SELL",
-          "entry_price": 51.26,
-          "weight": 0.1013,
-          "rank": 27,
-          "reason": "モメンタムが強く過熱のため"
-        },
-        {
-          "symbol": "PAY",
-          "side": "SELL",
-          "entry_price": 44.6,
-          "weight": 0.0906,
+          "entry_price": 32.83,
+          "weight": 0.1126,
           "rank": 28,
           "reason": "モメンタムが強く過熱のため"
         },
         {
-          "symbol": "STUB",
+          "symbol": "ZBRA",
           "side": "SELL",
-          "entry_price": 9.46,
-          "weight": 0.0822,
+          "entry_price": 383.06,
+          "weight": 0.0876,
           "rank": 29,
           "reason": "モメンタムが強く過熱のため"
         },
         {
-          "symbol": "GRMN",
+          "symbol": "LIFE",
           "side": "SELL",
-          "entry_price": 307.36,
-          "weight": 0.0694,
+          "entry_price": 33.45,
+          "weight": 0.0669,
           "rank": 30,
-          "reason": "モメンタムが強く過熱のため"
-        },
-        {
-          "symbol": "LIND",
-          "side": "SELL",
-          "entry_price": 34.09,
-          "weight": 0.0674,
-          "rank": 31,
-          "reason": "モメンタムが強く過熱のため"
-        },
-        {
-          "symbol": "IDCC",
-          "side": "SELL",
-          "entry_price": 323.17,
-          "weight": 0.0547,
-          "rank": 32,
-          "reason": "モメンタムが強く過熱のため"
-        },
-        {
-          "symbol": "EPAM",
-          "side": "SELL",
-          "entry_price": 112.06,
-          "weight": 0.0506,
-          "rank": 33,
-          "reason": "モメンタムが強く過熱のため"
-        },
-        {
-          "symbol": "FSLR",
-          "side": "SELL",
-          "entry_price": 243.63,
-          "weight": 0.0413,
-          "rank": 34,
           "reason": "モメンタムが強く過熱のため"
         },
         {
           "symbol": "PCOR",
           "side": "SELL",
-          "entry_price": 55.9,
-          "weight": 0.0442,
+          "entry_price": 58.74,
+          "weight": 0.0873,
+          "rank": 31,
+          "reason": "モメンタムが強く過熱のため"
+        },
+        {
+          "symbol": "TEAM",
+          "side": "SELL",
+          "entry_price": 154.08,
+          "weight": 0.0705,
+          "rank": 32,
+          "reason": "モメンタムが強く過熱のため"
+        },
+        {
+          "symbol": "SN",
+          "side": "SELL",
+          "entry_price": 187.68,
+          "weight": 0.0644,
+          "rank": 33,
+          "reason": "モメンタムが強く過熱のため"
+        },
+        {
+          "symbol": "LDOS",
+          "side": "SELL",
+          "entry_price": 140.89,
+          "weight": 0.0644,
+          "rank": 34,
+          "reason": "モメンタムが強く過熱のため"
+        },
+        {
+          "symbol": "ORA",
+          "side": "SELL",
+          "entry_price": 114.46,
+          "weight": 0.0589,
           "rank": 35,
+          "reason": "モメンタムが強く過熱のため"
+        },
+        {
+          "symbol": "CACI",
+          "side": "SELL",
+          "entry_price": 667.57,
+          "weight": 0.0382,
+          "rank": 36,
+          "reason": "モメンタムが強く過熱のため"
+        },
+        {
+          "symbol": "GKOS",
+          "side": "SELL",
+          "entry_price": 182.0,
+          "weight": 0.0416,
+          "rank": 37,
           "reason": "モメンタムが強く過熱のため"
         }
       ],
@@ -170,25 +162,34 @@
       "n_signals_output": 10,
       "gate_survival_ratio": 1.0,
       "funnel": {
-        "target": 6591,
-        "filter_pass": 1639,
-        "setup_pass": 102,
+        "target": 5206,
+        "filter_pass": 1518,
+        "setup_pass": 82,
         "candidate_count": 10,
         "entry_count": 10,
         "exit_count": null
       }
     },
     "sys3": {
-      "signals": [],
+      "signals": [
+        {
+          "symbol": "CRIS",
+          "side": "BUY",
+          "entry_price": 2.31,
+          "weight": 0.0213,
+          "rank": 8,
+          "reason": "3日下落率が5位（全1047銘柄中）のため"
+        }
+      ],
       "n_candidates_input": 10,
-      "n_signals_output": 0,
-      "gate_survival_ratio": 0.0,
+      "n_signals_output": 1,
+      "gate_survival_ratio": 0.1,
       "funnel": {
-        "target": 6591,
-        "filter_pass": 1078,
-        "setup_pass": 10,
+        "target": 5206,
+        "filter_pass": 1047,
+        "setup_pass": 20,
         "candidate_count": 10,
-        "entry_count": 0,
+        "entry_count": 1,
         "exit_count": null
       }
     },
@@ -198,9 +199,9 @@
       "n_signals_output": 0,
       "gate_survival_ratio": 0.0,
       "funnel": {
-        "target": 6591,
-        "filter_pass": 510,
-        "setup_pass": 10,
+        "target": 5206,
+        "filter_pass": 474,
+        "setup_pass": 354,
         "candidate_count": 10,
         "entry_count": 0,
         "exit_count": null
@@ -208,14 +209,14 @@
     },
     "sys5": {
       "signals": [],
-      "n_candidates_input": 2,
+      "n_candidates_input": 4,
       "n_signals_output": 0,
       "gate_survival_ratio": 0.0,
       "funnel": {
-        "target": 6591,
-        "filter_pass": 1419,
-        "setup_pass": 2,
-        "candidate_count": 2,
+        "target": 5206,
+        "filter_pass": 1379,
+        "setup_pass": 4,
+        "candidate_count": 4,
         "entry_count": 0,
         "exit_count": null
       }
@@ -226,8 +227,8 @@
       "n_signals_output": 0,
       "gate_survival_ratio": 0.0,
       "funnel": {
-        "target": 6591,
-        "filter_pass": 1139,
+        "target": 5206,
+        "filter_pass": 1004,
         "setup_pass": 0,
         "candidate_count": 0,
         "entry_count": 0,
@@ -240,7 +241,7 @@
       "n_signals_output": 0,
       "gate_survival_ratio": 0.0,
       "funnel": {
-        "target": 6591,
+        "target": 1,
         "filter_pass": 1,
         "setup_pass": 0,
         "candidate_count": 0,
@@ -251,20 +252,20 @@
   },
   "portfolio": {
     "total_signals": 18,
-    "total_notional_usd": 17715.04,
+    "total_notional_usd": 17493.25,
     "hedge": null,
-    "universe_target": 6591,
+    "universe_target": 5206,
     "caps": {
       "applied": true,
       "held": {
         "long": 32,
-        "short": 11,
-        "total": 43
+        "short": 10,
+        "total": 42
       },
       "held_unmapped": {
         "long": 30,
-        "short": 11,
-        "total": 41
+        "short": 10,
+        "total": 40
       },
       "caps": {
         "max_total": 70,
@@ -275,8 +276,8 @@
       },
       "allow": {
         "long": 8,
-        "short": 19,
-        "total": 27
+        "short": 20,
+        "total": 28
       },
       "kept": {
         "long": 8,
@@ -284,17 +285,18 @@
         "total": 18
       },
       "trimmed": {
-        "long_count": 17
+        "long_count": 19
       },
-      "new_long_usd": 5076.79,
-      "new_short_usd": 12638.25
+      "new_long_usd": 5381.67,
+      "new_short_usd": 12111.58
     }
   },
   "meta": {
     "cli_version": "0.1.0",
-    "run_id": "20260806_223505_48dfac",
-    "elapsed_seconds": 946.8,
+    "run_id": "20260813_062338_b26b32",
+    "elapsed_seconds": 849.8,
     "status": "ok",
-    "abort_reason": null
+    "abort_reason": null,
+    "publish_status": "ok"
   }
 }
