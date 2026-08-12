@@ -429,6 +429,176 @@ def patch_pipeline_exit(
     return pipeline, n_filled, "ok"
 
 
+# ---------------------------------------------------------------------------
+# pipeline funnel の配線 (Tgt/FILpass/STUpass/TRDlist/Entry を today_signals から)
+# ---------------------------------------------------------------------------
+# 背景 (2026-08-12 observability fix):
+#   ダッシュが読む pipeline_YYYYMMDD.json は funnel phase が全 system measured=false。
+#   一方 today_signals_YYYYMMDD.json の per-system ``funnel`` には実測が満載
+#   (target/filter_pass/setup_pass/candidate_count/entry_count)。既知の配線ギャップ
+#   (docs/operations/exit_unmeasured_rootcause_20260730.md) で funnel 配線が prod 生成
+#   経路に未着地なため、pipeline は毎日 measured=false に戻る。
+#   patch_pipeline_exit と同じ思想で、today_signals を single source に funnel phase を
+#   実数 + measured=True で埋める pure 関数 (I/O 無し) を用意する。
+#
+# 正直さ (honesty) の担保:
+#   - signals が無い/不正なら **埋めない** (measured=false を維持。0 で誤魔化さない)。
+#   - funnel に実数 (int) が無い phase は触らない。
+#   - 既に measured=True の phase (grouped-daily 実測など) は **上書きしない**
+#     (Tgt/FILpass の平日連続性を尊重)。
+#   - spy_only (sys7) の Tgt は共通株ユニバース (~6,600) を funnel target に持つが
+#     pipeline 側は 1 に矯正済み。誤って 6,600 に戻さぬよう Tgt を skip する。
+
+# phase 名 -> today_signals funnel key。Exit は recon 由来なので patch_pipeline_exit 側。
+FUNNEL_PHASE_KEY: dict[str, str] = {
+    "Tgt": "target",
+    "FILpass": "filter_pass",
+    "STUpass": "setup_pass",
+    "TRDlist": "candidate_count",
+    "Entry": "entry_count",
+}
+
+# funnel を反映してよい phase の順序 (ratio 計算のため定義順を保持)。
+_FUNNEL_PHASES = ("Tgt", "FILpass", "STUpass", "TRDlist", "Entry")
+
+# spy_only システム (Tgt を funnel target で上書きしない)。
+_SPY_ONLY_SYSTEMS = frozenset({"sys7"})
+
+
+def funnel_counts_from_signals(
+    signals: dict[str, Any] | None,
+) -> dict[str, dict[str, int]]:
+    """today_signals -> ``{"sys1": {"Tgt": .., "FILpass": .., ...}, ...}`` (sysN key)。
+
+    today_signals の system key は "sys1" / "system1" どちらもあり得るため sysN に正規化。
+    funnel が dict でない/欠損する system は legacy count field
+    (n_candidates_input / n_signals_output) から TRDlist/Entry のみ最小再構成する。
+    """
+    out: dict[str, dict[str, int]] = {}
+    if not isinstance(signals, dict):
+        return out
+    for raw_name, entry in (signals.get("systems") or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        sysk = str(raw_name).replace("system", "sys")
+        fnl = entry.get("funnel")
+        counts: dict[str, int] = {}
+        if isinstance(fnl, dict):
+            for phase, key in FUNNEL_PHASE_KEY.items():
+                v = fnl.get(key)
+                if isinstance(v, (int, float)) and not isinstance(v, bool):
+                    counts[phase] = int(v)
+        else:
+            # funnel 欠如時: legacy field から TRDlist/Entry のみ。
+            ci = entry.get("n_candidates_input")
+            so = entry.get("n_signals_output")
+            if isinstance(ci, (int, float)) and not isinstance(ci, bool):
+                counts["TRDlist"] = int(ci)
+            if isinstance(so, (int, float)) and not isinstance(so, bool):
+                counts["Entry"] = int(so)
+        if counts:
+            out[sysk] = counts
+    return out
+
+
+def patch_pipeline_funnel(
+    pipeline: dict[str, Any],
+    signals: dict[str, Any] | None,
+    *,
+    spy_only_systems: frozenset[str] = _SPY_ONLY_SYSTEMS,
+) -> tuple[dict[str, Any], int, str]:
+    """pipeline_*.json の funnel phase を today_signals の funnel 実測で埋める (in-place)。
+
+    Exit を除く Tgt/FILpass/STUpass/TRDlist/Entry を対象に、funnel に実数がある phase を
+    ``count`` + ``measured=True`` にし、``ratio_of_prev`` / ``ratio_of_universe`` を
+    その pipeline 内で再計算する (前 phase 数と Tgt に対して)。
+
+    戻り値 ``(pipeline, n_patched, status)``:
+      - ``status="ok"``          : funnel を反映した (n_patched = 反映 phase 総数)
+      - ``status="no_signals"``  : signals が無い/不正 → 未計測を維持 (何もしない)
+      - ``status="empty_funnel"``: signals はあるが funnel 実数ゼロ → 何もしない
+
+    保護規則: 既に ``measured=True`` の phase は上書きしない (grouped-daily 実測を尊重)。
+    spy_only システムの Tgt は skip (funnel target = 共通株ユニバースで矯正値 1 を壊すため)。
+
+    idempotent: 既に埋めた pipeline を再度渡しても同じ結果。
+    """
+    if not isinstance(signals, dict):
+        return pipeline, 0, "no_signals"
+    counts_by_sys = funnel_counts_from_signals(signals)
+    if not counts_by_sys:
+        return pipeline, 0, "empty_funnel"
+
+    n_patched = 0
+    for sysk, sysobj in (pipeline.get("systems") or {}).items():
+        if not isinstance(sysobj, dict):
+            continue
+        fcounts = counts_by_sys.get(sysk)
+        if not fcounts:
+            continue
+        phases = sysobj.get("phases") or []
+        # universe (Tgt) は funnel 反映後 or 既存の Tgt count を使う。
+        tgt_from_funnel = fcounts.get("Tgt")
+        existing_tgt = next(
+            (p.get("count") for p in phases if p.get("name") == "Tgt"), None
+        )
+        is_spy_only = sysk in spy_only_systems
+        universe: int | None = existing_tgt
+        if tgt_from_funnel is not None and not is_spy_only:
+            universe = tgt_from_funnel
+
+        prev_count: int | None = None
+        for p in phases:
+            name = p.get("name")
+            if name not in _FUNNEL_PHASES:
+                # Exit 等は触らず、prev_count 追跡のみ継続。
+                if p.get("count") is not None:
+                    prev_count = p.get("count")
+                continue
+            if is_spy_only and name == "Tgt":
+                if p.get("count") is not None:
+                    prev_count = p.get("count")
+                continue
+            new_count = fcounts.get(name)
+            if new_count is None:
+                if p.get("count") is not None:
+                    prev_count = p.get("count")
+                continue
+            if p.get("measured") is True and p.get("count") is not None:
+                # grouped-daily 等の既存実測は尊重して上書きしない。
+                prev_count = p.get("count")
+                continue
+            p["count"] = new_count
+            p["measured"] = True
+            p["ratio_of_prev"] = (
+                round(new_count / prev_count, 6)
+                if isinstance(prev_count, (int, float)) and prev_count
+                else None
+            )
+            p["ratio_of_universe"] = (
+                round(new_count / universe, 6)
+                if isinstance(universe, (int, float)) and universe
+                else None
+            )
+            prev_count = new_count
+            n_patched += 1
+        # final_signals も funnel Entry で補強 (未設定/None のみ)。
+        if sysobj.get("final_signals") is None and fcounts.get("Entry") is not None:
+            sysobj["final_signals"] = fcounts["Entry"]
+
+    if n_patched:
+        notes = pipeline.get("notes")
+        if isinstance(notes, list):
+            marker = (
+                "Funnel (Tgt/FILpass/STUpass/TRDlist/Entry) = signal engine funnel "
+                "(today_signals_YYYYMMDD.json), measured=True。grouped-daily 実測 phase と "
+                "spy_only Tgt は保護 (上書きしない)。"
+            )
+            if marker not in notes:
+                notes.append(marker)
+    return pipeline, n_patched, "ok"
+
+
 def _default_path(results_dir: Path, stem: str, date_str: str) -> Path:
     return results_dir / f"{stem}_{date_str.replace('-', '')}.json"
 
