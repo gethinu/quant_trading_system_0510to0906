@@ -1,5 +1,5 @@
 {
-  "date": "2026-08-07",
+  "date": "2026-08-14",
   "provider": "polygon_grouped_daily",
   "schema": "signal_pipeline/v1",
   "systems": {
@@ -54,7 +54,7 @@
         {
           "name": "Exit",
           "label": "Exit",
-          "condition": "本日手仕舞い発火 (close 0 / protect 0) · 1 armed",
+          "condition": "本日手仕舞い発火 (close 0 / protect 0) · 2 armed",
           "count": 0,
           "measured": true,
           "ratio_of_prev": 0.0,
@@ -62,9 +62,9 @@
           "fired": 0,
           "exit_close": 0,
           "exit_protect": 0,
-          "armed": 1,
+          "armed": 2,
           "armed_close": 0,
-          "armed_protect": 1
+          "armed_protect": 2
         }
       ],
       "final_signals": 8
@@ -186,7 +186,7 @@
         {
           "name": "Exit",
           "label": "Exit",
-          "condition": "本日手仕舞い発火 (close 0 / protect 0) · 1 armed",
+          "condition": "本日手仕舞い発火 (close 0 / protect 0) · 2 armed",
           "count": 0,
           "measured": true,
           "ratio_of_prev": 0.0,
@@ -194,9 +194,9 @@
           "fired": 0,
           "exit_close": 0,
           "exit_protect": 0,
-          "armed": 1,
-          "armed_close": 1,
-          "armed_protect": 0
+          "armed": 2,
+          "armed_close": 0,
+          "armed_protect": 2
         }
       ],
       "final_signals": 1
@@ -301,7 +301,7 @@
           "name": "TRDlist",
           "label": "TRDlist",
           "condition": "ADX7 降順 上位候補",
-          "count": 3,
+          "count": 2,
           "measured": false,
           "ratio_of_prev": null,
           "ratio_of_universe": null
