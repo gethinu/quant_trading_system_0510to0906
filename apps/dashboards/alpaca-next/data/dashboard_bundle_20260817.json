@@ -6,25 +6,25 @@
   "files": {
     "today_signals": {
       "name": "today_signals_20260817.json",
-      "sha256": "50ddee4fe7482ecd13aea06aa73ca34ba3e3555a6a26d5aa58668591294e3128"
+      "sha256": "34bb1bdc9f06344605d4c104e5d5e7a842cab08632c0b13b15292cf243ba1fc5"
     },
     "pipeline": {
       "name": "pipeline_20260817.json",
-      "sha256": "3627f2165f0e2275aa1d22b18dab611423749d64bae242c5e20d7e51b12db80c"
+      "sha256": "6e67184f1114c52a96948462c2a6b1b3fa02a4a7750f11f513b7ea874b095bc7"
     },
     "narrative": {
       "name": "narrative_20260817.json",
-      "sha256": "e4d5b94df23db4fbd8e54f13f410d7689045d27870c93237dfa16ea0830566db"
+      "sha256": "d261695efe86a99a65061e94dec6ead2dee8375d3c37b1795f98b514a7f5bf94"
     },
     "alpaca_snapshot": {
       "name": "alpaca_snapshot_20260817.json",
-      "sha256": "a9e82fb744fd99c1c28f74fc3cf933959e7001c1bb802498830eddb4183253bb"
+      "sha256": "20171acc101192ea20564d083798507dd8cc80fee61ead33f353bfb4b2fb592c"
     }
   },
   "sources": {
     "recon": {
       "name": "recon_20260817.json",
-      "sha256": "2ce090dcc0bdbb6894cabbebff886bbf977a7c6730db03183460b40bf302eae5"
+      "sha256": "001bd31444a8cb5a0c394763412a9c665b980c785311c56152af0eb5872de398"
     }
   },
   "measurement": {

@@ -608,8 +608,8 @@
   ],
   "source_signals_run_id": "20260817_060721_dbdc19",
   "source_signals_generated_at": "2026-08-17T06:21:09+09:00",
-  "source_signals_sha256": "50ddee4fe7482ecd13aea06aa73ca34ba3e3555a6a26d5aa58668591294e3128",
-  "source_recon_sha256": "2ce090dcc0bdbb6894cabbebff886bbf977a7c6730db03183460b40bf302eae5",
+  "source_signals_sha256": "34bb1bdc9f06344605d4c104e5d5e7a842cab08632c0b13b15292cf243ba1fc5",
+  "source_recon_sha256": "001bd31444a8cb5a0c394763412a9c665b980c785311c56152af0eb5872de398",
   "source_recon_generated_at": "2026-08-16T21:23:51+00:00",
   "materialized_at": "2026-08-16T21:23:51+00:00"
 }
