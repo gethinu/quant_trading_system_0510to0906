@@ -326,7 +326,9 @@ class NtfyPublisher(Publisher):
                         publisher=self.name,
                         ok=True,
                         status_code=resp.status_code,
-                        detail="sent",
+                        # 2xx は ntfy server に受理されたことだけを表す。
+                        # subscriber/device への到達確認ではない。
+                        detail="accepted",
                         target=_mask_topic(self.topic),
                     )
                 if resp.status_code == 429 or resp.status_code >= 500:
@@ -337,21 +339,29 @@ class NtfyPublisher(Publisher):
                         attempt,
                         backoff,
                     )
-                    time.sleep(backoff)
                     last_detail = f"retryable_{resp.status_code}"
+                    # 最終試行の後に待っても再試行しないので待たない。
+                    if attempt < _MAX_RETRIES:
+                        time.sleep(backoff)
                     continue
-                last_detail = f"http_{resp.status_code}: {resp.text[:200]}"
+                # provider-controlled な response body は secret topic を含み得るため、
+                # status code 以外を result/log へ残さない。
+                last_detail = f"http_{resp.status_code}"
                 break
             except Exception as exc:  # noqa: BLE001
                 backoff = min(2 ** (attempt - 1), 8)
-                last_detail = f"exception: {exc}"
+                # requests 例外文字列には request URL (末尾が secret topic) が
+                # 入り得る。型名だけを永続化・ログ出力する。
+                exc_name = type(exc).__name__
+                last_detail = f"exception:{exc_name}"
                 logger.warning(
-                    "ntfy post 例外 (attempt %d): %s backoff=%ss",
+                    "ntfy post 例外 (attempt %d): type=%s backoff=%ss",
                     attempt,
-                    exc,
+                    exc_name,
                     backoff,
                 )
-                time.sleep(backoff)
+                if attempt < _MAX_RETRIES:
+                    time.sleep(backoff)
 
         return PublishResult(
             publisher=self.name,
@@ -379,9 +389,8 @@ def _dump_dry_run(endpoint: str, headers: dict[str, str], body: str) -> str:
             masked_path = "/" + "/".join(segments)
             endpoint = urlunsplit(parts._replace(path=masked_path))
     except Exception:
-        # Never fail dry-run rendering on an unparseable URL; better to
-        # ship the raw endpoint than crash the publisher.
-        pass
+        # topic は access secret。parse 失敗時に raw endpoint を返さず fail closed。
+        endpoint = "<invalid-endpoint>"
     return json.dumps(
         {"endpoint": endpoint, "headers": headers, "body": body}, ensure_ascii=False
     )
