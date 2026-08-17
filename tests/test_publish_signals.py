@@ -268,7 +268,9 @@ def test_build_signals_json_from_dataframe():
     )
     assert payload["version"] == "1.0"
     assert payload["meta"]["run_id"] == "testrun_1"
-    assert payload["meta"]["publish_status"] == "not_attempted"
+    # legacy scalar は publish 試行前には書かない (truthy だと旧 dashboard が
+    # 未試行を成功色で描く)。構造化 field だけが not_attempted を表現する。
+    assert "publish_status" not in payload["meta"]
     assert payload["meta"]["publish_delivery"] == {
         "state": "not_attempted",
         "attempted_at": None,
@@ -312,7 +314,8 @@ def test_new_run_does_not_inherit_previous_publish_delivery(tmp_path):
 
     stored = json.loads(output.read_text(encoding="utf-8"))
     assert stored["meta"]["run_id"] == "night_run"
-    assert stored["meta"]["publish_status"] == "not_attempted"
+    # 朝 run の "ok" を引き継がず、legacy scalar ごと消える。
+    assert "publish_status" not in stored["meta"]
     assert stored["meta"]["publish_delivery"] == {
         "state": "not_attempted",
         "attempted_at": None,

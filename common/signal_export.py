@@ -398,9 +398,15 @@ def build_signals_json(
                 else None
             ),
             # Delivery はこの run_id 固有の状態。夜間の再生成時に朝 run の成功表示を
-            # 引き継がず、かつ legacy の「field 自体が無い」とも区別できるよう、
-            # 実際の publish 試行前は常に明示的な not_attempted で初期化する。
-            "publish_status": "not_attempted",
+            # 引き継がないよう、publish 試行前は構造化 field を not_attempted で
+            # 初期化する (payload は毎回新規 dict なので朝の値は自然に消える)。
+            #
+            # legacy scalar ``publish_status`` は **ここでは書かない**。既存の
+            # dashboard (SignalsSection.tsx) は `publish_status ? ...` の真値判定で
+            # failed/partial 以外を成功色 (bg-ok) に落とすため、"not_attempted" を
+            # 入れると「未試行」が緑の成功として表示される。field 不在なら badge
+            # 自体が出ないので、consumer 更新前でも誤表示にならない。実際に publish
+            # を試行した時だけ publish_signals が両表現を同時に書き戻す。
             "publish_delivery": {
                 "state": "not_attempted",
                 "attempted_at": None,
