@@ -117,26 +117,70 @@ def _collect_entry_orders_index(
     return idx
 
 
-def _load_ticker_rename_aliases(path: Path = TICKER_RENAMES) -> dict[str, str]:
-    """config の現 ticker(alias) -> entry 時 ticker(canonical) を読む。
+def _load_ticker_renames(path: Path = TICKER_RENAMES) -> dict[str, dict[str, Any]]:
+    """config の現 ticker(alias) -> {"canonical": 旧 ticker, "qty": 株数} を読む。
 
     rename は broker 上の保有 symbol を変更しない。exit は常に broker が返した
     alias で出し、ここでは旧 symbol の entry system/date を引く用途に限定する。
     壊れた/未配備の config は空へ縮退して既存の unmanaged 表示を維持する。
+
+    ``qty`` は「株数がちょうど打ち消し合う」という採用根拠そのものなので必須に
+    する。qty を持たない行は証拠が無い = alias を作らない。この config は exit
+    order の生成に効くので、書いただけで効く経路を残さない。
     """
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
     rows = data.get("renames") if isinstance(data, dict) else None
-    aliases: dict[str, str] = {}
+    renames: dict[str, dict[str, Any]] = {}
     for row in rows or []:
         if not isinstance(row, dict):
             continue
         alias = str(row.get("alias") or "").strip().upper()
         canonical = str(row.get("canonical") or "").strip().upper()
-        if alias and canonical and alias != canonical:
-            aliases[alias] = canonical
+        if not alias or not canonical or alias == canonical:
+            continue
+        try:
+            qty = abs(float(row.get("qty")))
+        except (TypeError, ValueError):
+            continue
+        if qty <= 0:
+            continue
+        renames[alias] = {"canonical": canonical, "qty": qty}
+    return renames
+
+
+def _resolve_rename_aliases(
+    snapshots: list[PositionSnapshot],
+    renames: dict[str, dict[str, Any]],
+) -> dict[str, str]:
+    """保有株数が config の qty と一致する alias だけを採用する。
+
+    ledger 側 (build_exit_ledger) は「残差が一意に打ち消す」対だけを採る。exit 側
+    には約定履歴の再構成が無いので、代わりに **今 broker が返している株数** を
+    突き合わせる。株数が動いた建玉 (部分決済 / 買い増し / 別物) は alias を捨て、
+    従来どおり unmanaged のまま残す。silent に落とさず理由を出す。
+    """
+    if not renames or not snapshots:
+        return {}
+    qty_by_symbol = {
+        str(snap.symbol).strip().upper(): abs(float(snap.qty or 0))
+        for snap in snapshots
+    }
+    aliases: dict[str, str] = {}
+    for alias, row in renames.items():
+        held = qty_by_symbol.get(alias)
+        if held is None:
+            # その alias を保有していない。今回の run には無関係。
+            continue
+        if abs(held - float(row["qty"])) > 1e-6:
+            print(
+                f"[warn] rename alias 不採用 (qty 不一致): {alias} 保有 {held:g} "
+                f"!= config {float(row['qty']):g} -> {row['canonical']} に寄せない"
+            )
+            continue
+        aliases[alias] = str(row["canonical"])
     return aliases
 
 
@@ -439,7 +483,9 @@ def main(argv: list[str] | None = None) -> int:
     # させないための anomaly フラグ (--no-alpaca の意図的 offline とは区別する)。
     broker_unreachable = False
     # alias は現 broker symbol を変えず、旧 entry metadata を探すためだけに使う。
-    rename_aliases = _load_ticker_rename_aliases()
+    # config を読むだけでは効かせない。実際の保有株数と突合してから採用する。
+    rename_rows = _load_ticker_renames()
+    rename_aliases: dict[str, str] = {}
 
     if not args.no_alpaca:
         if args.confirm:
@@ -468,10 +514,14 @@ def main(argv: list[str] | None = None) -> int:
         else:
             existing_protect_coids = fetch_existing_protect_coids(client)
             existing_exit_coids = fetch_existing_exit_coids(client)
+            # positions が取れて初めて qty ゲートを掛けられる。
+            rename_aliases = _resolve_rename_aliases(snapshots, rename_rows)
             _hydrate_from_alpaca_coids(snapshots, client, symbol_aliases=rename_aliases)
 
     # --- 2) tracker / entry_orders_index --------------------------------
     tracker = load_tracker()
+    # 既定 window を越えて遡るのは、採用済み alias の canonical を埋める時だけ
+    # (qty ゲートを通っていない = 保有していない alias では深掘りしない)。
     entry_orders_index = _collect_entry_orders_index(
         results_dir, required_symbols=set(rename_aliases.values())
     )

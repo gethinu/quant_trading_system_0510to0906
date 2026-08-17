@@ -1689,6 +1689,10 @@ def hydrate_system_tags(
       3. symbol_aliases[symbol] の旧 symbol を 1, 2 で再照合
          (ticker rename/corporate action 後も broker の現 symbol で exit する)
 
+    ``symbol_aliases`` は **検証済みの対だけ** を渡すこと。ここでは真偽を判定せず
+    そのまま信用する (採否の判断は config を持つ呼び出し側の責務。
+    scripts/paper_exit_check.py は保有株数と config の qty 一致を条件にしている)。
+
     どちらも無い symbol は system=None のまま返す (exit_check 側で skip される)。
     """
     idx = entry_orders_index or {}

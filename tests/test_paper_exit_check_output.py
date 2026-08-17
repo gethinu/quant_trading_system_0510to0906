@@ -20,7 +20,8 @@ from common.alpaca_trading import PositionSnapshot
 from scripts.paper_exit_check import (
     _collect_entry_orders_index,
     _hydrate_from_alpaca_coids,
-    _load_ticker_rename_aliases,
+    _load_ticker_renames,
+    _resolve_rename_aliases,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -85,9 +86,68 @@ def test_offline_mode_yields_no_positions(tmp_path: Path):
     assert data["count"] == 0
 
 
+def _mf(qty: float = 100) -> PositionSnapshot:
+    return PositionSnapshot(symbol="MF", qty=qty, side="long", avg_entry_price=4.7)
+
+
 def test_ticker_rename_config_includes_mf_alias_for_exit_resolution():
     """open_auto_run 側でも MF の entry metadata を UBXG から解決できる。"""
-    assert _load_ticker_rename_aliases()["MF"] == "UBXG"
+    row = _load_ticker_renames()["MF"]
+    assert row["canonical"] == "UBXG"
+    assert row["qty"] == 100
+
+
+def test_rename_alias_requires_holding_qty_to_match_config():
+    """config を書いただけでは効かない。保有株数が qty と一致した時だけ採用する。"""
+    renames = {"MF": {"canonical": "UBXG", "qty": 100.0}}
+    assert _resolve_rename_aliases([_mf(100)], renames) == {"MF": "UBXG"}
+
+
+def test_rename_alias_is_rejected_when_holding_qty_diverged(capsys):
+    """部分決済 / 買い増し / 別物なら alias を捨て、unmanaged のまま残す。"""
+    renames = {"MF": {"canonical": "UBXG", "qty": 100.0}}
+    assert _resolve_rename_aliases([_mf(50)], renames) == {}
+    # silent に落とさない (stale config が見えなくならないように)
+    assert "qty 不一致" in capsys.readouterr().out
+
+
+def test_rename_row_without_qty_evidence_is_not_loaded(tmp_path: Path):
+    """qty は採用根拠そのもの。無い行は alias を作らない。"""
+    p = tmp_path / "ticker_renames.json"
+    p.write_text(
+        json.dumps(
+            {
+                "renames": [
+                    {"alias": "AAA", "canonical": "BBB"},
+                    {"alias": "CCC", "canonical": "DDD", "qty": 0},
+                    {"alias": "EEE", "canonical": "FFF", "qty": 7},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert set(_load_ticker_renames(p)) == {"EEE"}
+
+
+def test_unheld_alias_does_not_widen_artifact_lookback():
+    """保有していない alias は採用しない (過去 artifact を無用に遡らせない)。"""
+    renames = {"CHRN": {"canonical": "EKSO", "qty": 119.0}}
+    assert _resolve_rename_aliases([_mf(100)], renames) == {}
+
+
+def test_rename_config_keeps_ledger_uniqueness_invariant():
+    """build_exit_ledger 側の二段ゲートの記述を exit 側の都合で消さない。
+
+    この config は main では build_exit_ledger と共有される。片方の consumer の
+    説明だけに書き換えると、merge 時にもう片方の不変条件が消える。
+    """
+    data = json.loads(
+        (ROOT / "config" / "ticker_renames.json").read_text(encoding="utf-8")
+    )
+    safety = data["safety"]
+    assert "一意に打ち消し合う" in safety
+    assert "build_exit_ledger" in safety
+    assert "paper_exit_check" in safety
 
 
 def test_required_renamed_symbol_is_loaded_beyond_normal_lookback(tmp_path: Path):
