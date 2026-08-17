@@ -131,6 +131,10 @@ def build_recon(
     generated_at: str | None = None,
 ) -> dict[str, Any]:
     """3 つの JSON payload を突合し recon dict を返す (pure、I/O なし)。"""
+    signals_meta = signals.get("meta") if isinstance(signals, dict) else None
+    source_signals_run_id = (
+        signals_meta.get("run_id") if isinstance(signals_meta, dict) else None
+    )
     systems: dict[str, dict[str, Any]] = {
         name: _empty_system_bucket() for name in _SYSTEMS
     }
@@ -278,6 +282,7 @@ def build_recon(
         "date": date_str or (signals or {}).get("date") or "",
         "generated_at": generated_at
         or datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "source_signals_run_id": source_signals_run_id,
         "inputs": {
             "signals": signals is not None,
             "paper_orders": paper_orders is not None,
@@ -381,14 +386,18 @@ def patch_pipeline_exit(
         for p in phases:
             if p.get("name") == "Exit":
                 ec = exits.get(sysk) or {
-                    "submitted": 0, "close": 0, "protect": 0,
-                    "armed": 0, "armed_close": 0, "armed_protect": 0,
+                    "submitted": 0,
+                    "close": 0,
+                    "protect": 0,
+                    "armed": 0,
+                    "armed_close": 0,
+                    "armed_protect": 0,
                 }
                 cnt = int(ec["submitted"])  # fired
                 armed = int(ec.get("armed") or 0)
-                base = str(p.get("condition") or EXIT_CONDITION_BASE).split(
-                    " (close"
-                )[0]
+                base = str(p.get("condition") or EXIT_CONDITION_BASE).split(" (close")[
+                    0
+                ]
                 p["count"] = cnt
                 p["measured"] = True
                 p["fired"] = cnt

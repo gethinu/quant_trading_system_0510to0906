@@ -19,6 +19,7 @@ from scripts.build_execution_recon import build_recon  # noqa: E402
 def _signals() -> dict:
     return {
         "date": "2026-07-08",
+        "meta": {"run_id": "night-20260708-open"},
         "systems": {
             "sys1": {
                 "signals": [
@@ -101,6 +102,7 @@ def test_full_join():
     assert p["exit_close"] == 1
     assert p["exit_protect"] == 2
     assert p["account_equity"] == 10120.0
+    assert recon["source_signals_run_id"] == "night-20260708-open"
     # drop 内訳: min_notional 1, fail 1
     assert recon["portfolio"]["drop_breakdown"]["below_min_notional"] == 1
     assert recon["portfolio"]["drop_breakdown"]["fail"] == 1
@@ -135,3 +137,9 @@ def test_empty_systems_pruned():
     recon = build_recon(_signals(), None, None)
     # sys3-7 は全 0 なので出力から落ちる
     assert set(recon["systems"].keys()) == {"system1", "system2"}
+
+
+def test_source_signals_run_id_is_none_without_signals():
+    recon = build_recon(None, _paper_orders(), _exit_orders())
+
+    assert recon["source_signals_run_id"] is None

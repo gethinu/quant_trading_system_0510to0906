@@ -110,8 +110,8 @@ def runner(tmp_path, monkeypatch):
         monkeypatch.setattr(r, "equity", lambda: 100_000.0)
         monkeypatch.setattr(r, "wait_exit_fills", lambda ids: None)
         monkeypatch.setattr(r, "record_stage", lambda: None)
-        monkeypatch.setattr(r, "publish", lambda: None)
-        monkeypatch.setattr(r, "notify", lambda eq: None)
+        monkeypatch.setattr(r, "publish", lambda: 0)
+        monkeypatch.setattr(r, "notify", lambda eq: 0)
         monkeypatch.setattr(r, "gate", lambda: True)
 
         def _exit_stage():

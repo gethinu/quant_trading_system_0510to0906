@@ -19,7 +19,8 @@
     gates on market-open + signal count, and enforces exit->entry ordering.
 
 .NOTES
-    Exit codes propagate from open_auto_run.py (0 ok / 3 aborted-by-gate).
+    Exit codes propagate from open_auto_run.py
+    (0 ok / 3 aborted-before-trades / 4 trades-complete, observability degraded).
     Keep this file ASCII-only; the Python side owns all Japanese output.
 #>
 param(
@@ -93,8 +94,8 @@ $env:PYTHONIOENCODING = "utf-8"
 # logs\RESET_ONCE.flag が在れば「次に成功したオープン run」で一度だけ全ポジションを
 # flatten してからクリーン再エントリーする (PHASE 2 リセット)。
 #   - dry-run では消費も強制もしない (テストが marker に干渉しない)。
-#   - 成功 (exit 0) した時にのみ marker を削除 = 冪等な一回限り。
-#   - abort (thin signals / market closed = exit 3) では marker 保持 -> 次の open で再試行。
+#   - 注文完了 (exit 0 / 4) で marker を削除 = 観測劣化だけなら再 flatten しない。
+#   - pre-trade abort (market closed 等 = exit 3) は marker 保持 -> 次の open で再試行。
 $ResetMarker = Join-Path $LogDir "RESET_ONCE.flag"
 $ConsumeResetMarker = $false
 if ((Test-Path $ResetMarker) -and (-not $DryRun)) {
@@ -123,9 +124,10 @@ Write-Launch ("python " + ($pyArgs -join " "))
 $code = $LASTEXITCODE
 Write-Launch "=== open_auto_run.py exit=$code ==="
 
-# 成功した flatten-all リセット run の後にのみ marker を消費 (再発防止 = 一回限り)。
+# 注文が完了した flatten-all run の後に marker を消費 (再発防止 = 一回限り)。
+# exit 4 は notify/publish の劣化だけで trades + DONE は完了済みなので消費対象。
 if ($ConsumeResetMarker) {
-    if ($code -eq 0) {
+    if (($code -eq 0) -or ($code -eq 4)) {
         try {
             Remove-Item $ResetMarker -Force -ErrorAction Stop
             Write-Launch "RESET_ONCE.flag を消費 (リセット完了、以降は通常 open run)"

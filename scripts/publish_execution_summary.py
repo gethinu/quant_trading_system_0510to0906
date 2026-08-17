@@ -88,17 +88,40 @@ def _resolve_recon(args: argparse.Namespace) -> dict | None:
             logger.error("recon JSON を読めません: %s", args.recon_json)
         return recon
 
-    # recon default path があればそれを使う
-    default_recon = _default_path(results_dir, "recon", date_str)
-    if default_recon.exists():
-        return _load_json(default_recon)
-
-    # 無ければ 3 JSON から build
     signals = _load_json(
         Path(args.signals_json)
         if args.signals_json
         else _default_path(results_dir, "today_signals", date_str)
     )
+    signals_meta = signals.get("meta") if isinstance(signals, dict) else None
+    current_run_id = (
+        signals_meta.get("run_id") if isinstance(signals_meta, dict) else None
+    )
+
+    # default recon は、current signals runとのlineageが一致する場合だけ再利用する。
+    # 旧schema（source_signals_run_idなし）や朝run由来のmismatchを使うと、夜runの
+    # 発注結果を古いsignalsへ結び付けて誤通知するため、current inputsから再構築する。
+    default_recon = _default_path(results_dir, "recon", date_str)
+    if default_recon.exists():
+        recon = _load_json(default_recon)
+        if (
+            isinstance(current_run_id, str)
+            and bool(current_run_id.strip())
+            and isinstance(recon, dict)
+            and recon.get("source_signals_run_id") == current_run_id
+        ):
+            return recon
+        logger.info(
+            "default recon lineage不一致のため再構築: recon=%r signals=%r",
+            (
+                (recon or {}).get("source_signals_run_id")
+                if isinstance(recon, dict)
+                else None
+            ),
+            current_run_id,
+        )
+
+    # lineage一致のreconが無ければcurrent inputsからbuild
     paper = _load_json(
         Path(args.paper_orders_json)
         if args.paper_orders_json

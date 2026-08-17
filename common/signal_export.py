@@ -397,6 +397,15 @@ def build_signals_json(
                 if elapsed_seconds is not None
                 else None
             ),
+            # Delivery はこの run_id 固有の状態。夜間の再生成時に朝 run の成功表示を
+            # 引き継がず、かつ legacy の「field 自体が無い」とも区別できるよう、
+            # 実際の publish 試行前は常に明示的な not_attempted で初期化する。
+            "publish_status": "not_attempted",
+            "publish_delivery": {
+                "state": "not_attempted",
+                "attempted_at": None,
+                "channels": {},
+            },
             # F2 P0#6: subscribers が abort と flat book を区別できるよう明示。
             # 既定 "ok" は真の flat book / 正常了、"aborted" は pipeline 側の
             # 停止 (stale cache 等)。abort_reason は運用側 log 収集用。

@@ -8,7 +8,8 @@ on:
       - "**/*.md"
       - ".github/ISSUE_TEMPLATE/**"
   pull_request:
-    branches: [main, develop, branch0906]
+    branches:
+      [main, develop, branch0906, "claude/monitor-webapp", "claude/open-auto-run"]
     paths-ignore:
       - "docs/**"
       - "**/*.md"
