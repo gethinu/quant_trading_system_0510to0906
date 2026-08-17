@@ -59,6 +59,7 @@ from common.trade_management import SYSTEM_TRADE_RULES  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 SPY_ROLLING = ROOT / "data_cache" / "rolling" / "SPY.csv"
+TICKER_RENAMES = ROOT / "config" / "ticker_renames.json"
 
 
 # -------------------------------------------------------------------------
@@ -69,14 +70,28 @@ SPY_ROLLING = ROOT / "data_cache" / "rolling" / "SPY.csv"
 
 
 def _collect_entry_orders_index(
-    results_dir: Path, lookback_days: int = 30
+    results_dir: Path,
+    lookback_days: int = 30,
+    required_symbols: set[str] | None = None,
 ) -> dict[str, dict[str, Any]]:
+    """paper order artifact から entry metadata を集める。
+
+    通常は直近 ``lookback_days`` 件だけを読む。ticker rename で現 symbol が
+    旧 entry より後に変わった場合だけ、``required_symbols`` の不足分を満たすまで
+    過去 artifact を遡る。無関係な古い建玉を広く採用しないための限定的な fallback。
+    """
     idx: dict[str, dict[str, Any]] = {}
     if not results_dir.exists():
         return idx
+    required = {str(symbol).strip().upper() for symbol in required_symbols or set()}
+    required.discard("")
+    unresolved = set(required)
     # 新しい方から見る (最新 entry_date で上書き)
     files = sorted(results_dir.glob("paper_orders_*.json"), reverse=True)
-    for f in files[:lookback_days]:
+    for position, f in enumerate(files):
+        # 既定 window を越えるのは、configured alias の旧 symbol を補う時だけ。
+        if position >= lookback_days and not unresolved:
+            break
         try:
             data = json.loads(f.read_text(encoding="utf-8"))
         except Exception:
@@ -84,6 +99,8 @@ def _collect_entry_orders_index(
         for row in (data or {}).get("orders", []) or []:
             sym = str(row.get("symbol", "")).upper()
             if not sym:
+                continue
+            if position >= lookback_days and sym not in unresolved:
                 continue
             sys_tag = row.get("system") or parse_system_from_client_order_id(
                 row.get("client_order_id")
@@ -93,13 +110,41 @@ def _collect_entry_orders_index(
             )
             if sym not in idx:
                 idx[sym] = {"system": sys_tag, "entry_date": ed}
+                unresolved.discard(sym)
             else:
                 # 既存より新しい entry_date が入ってきたら update しない (先に見た方=新しい)
                 pass
     return idx
 
 
-def _hydrate_from_alpaca_coids(snapshots: list[PositionSnapshot], client: Any) -> None:
+def _load_ticker_rename_aliases(path: Path = TICKER_RENAMES) -> dict[str, str]:
+    """config の現 ticker(alias) -> entry 時 ticker(canonical) を読む。
+
+    rename は broker 上の保有 symbol を変更しない。exit は常に broker が返した
+    alias で出し、ここでは旧 symbol の entry system/date を引く用途に限定する。
+    壊れた/未配備の config は空へ縮退して既存の unmanaged 表示を維持する。
+    """
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    rows = data.get("renames") if isinstance(data, dict) else None
+    aliases: dict[str, str] = {}
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        alias = str(row.get("alias") or "").strip().upper()
+        canonical = str(row.get("canonical") or "").strip().upper()
+        if alias and canonical and alias != canonical:
+            aliases[alias] = canonical
+    return aliases
+
+
+def _hydrate_from_alpaca_coids(
+    snapshots: list[PositionSnapshot],
+    client: Any,
+    symbol_aliases: dict[str, str] | None = None,
+) -> None:
     """Alpaca の直近 orders から client_order_id を pull し、system/entry_date を補う。"""
     if client is None:
         return
@@ -140,6 +185,11 @@ def _hydrate_from_alpaca_coids(snapshots: list[PositionSnapshot], client: Any) -
     except Exception:
         return
     coid_by_symbol: dict[str, str] = {}
+    aliases = {
+        str(alias).strip().upper(): str(canonical).strip().upper()
+        for alias, canonical in (symbol_aliases or {}).items()
+        if str(alias).strip() and str(canonical).strip()
+    }
     for o in raw or []:
         try:
             sym = str(getattr(o, "symbol", "") or "").upper()
@@ -157,7 +207,12 @@ def _hydrate_from_alpaca_coids(snapshots: list[PositionSnapshot], client: Any) -
     for snap in snapshots:
         if snap.system and snap.entry_date:
             continue
-        coid = coid_by_symbol.get(snap.symbol)
+        observed_symbol = str(snap.symbol).strip().upper()
+        # broker の現 symbol で見つかればそれを優先する。見つからない rename 済み
+        # 建玉だけ、config で裏づけた旧 symbol の entry coid を参照する。
+        coid = coid_by_symbol.get(observed_symbol)
+        if not coid:
+            coid = coid_by_symbol.get(aliases.get(observed_symbol, ""))
         if not coid:
             continue
         if not snap.system:
@@ -383,6 +438,8 @@ def main(argv: list[str] | None = None) -> int:
     # broker が到達不能で positions を取れなかった場合、「0 exits = 成功」と誤認
     # させないための anomaly フラグ (--no-alpaca の意図的 offline とは区別する)。
     broker_unreachable = False
+    # alias は現 broker symbol を変えず、旧 entry metadata を探すためだけに使う。
+    rename_aliases = _load_ticker_rename_aliases()
 
     if not args.no_alpaca:
         if args.confirm:
@@ -411,11 +468,13 @@ def main(argv: list[str] | None = None) -> int:
         else:
             existing_protect_coids = fetch_existing_protect_coids(client)
             existing_exit_coids = fetch_existing_exit_coids(client)
-            _hydrate_from_alpaca_coids(snapshots, client)
+            _hydrate_from_alpaca_coids(snapshots, client, symbol_aliases=rename_aliases)
 
     # --- 2) tracker / entry_orders_index --------------------------------
     tracker = load_tracker()
-    entry_orders_index = _collect_entry_orders_index(results_dir)
+    entry_orders_index = _collect_entry_orders_index(
+        results_dir, required_symbols=set(rename_aliases.values())
+    )
     # durable な symbol->system マップ (tracker/entry_index が空でも system を拾う保険)。
     try:
         symbol_map = load_symbol_system_map()
@@ -437,6 +496,7 @@ def main(argv: list[str] | None = None) -> int:
         unassigned_out=unassigned,
         tracker=tracker,
         symbol_map=symbol_map,
+        symbol_aliases=rename_aliases,
         entry_orders_index=entry_orders_index,
         existing_protect_coids=existing_protect_coids,
         existing_exit_coids=existing_exit_coids,

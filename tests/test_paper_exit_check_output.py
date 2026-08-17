@@ -14,6 +14,14 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+from types import SimpleNamespace
+
+from common.alpaca_trading import PositionSnapshot
+from scripts.paper_exit_check import (
+    _collect_entry_orders_index,
+    _hydrate_from_alpaca_coids,
+    _load_ticker_rename_aliases,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "paper_exit_check.py"
@@ -75,3 +83,45 @@ def test_offline_mode_yields_no_positions(tmp_path: Path):
     assert data["positions"] == []
     assert data["exits"] == []
     assert data["count"] == 0
+
+
+def test_ticker_rename_config_includes_mf_alias_for_exit_resolution():
+    """open_auto_run 側でも MF の entry metadata を UBXG から解決できる。"""
+    assert _load_ticker_rename_aliases()["MF"] == "UBXG"
+
+
+def test_required_renamed_symbol_is_loaded_beyond_normal_lookback(tmp_path: Path):
+    """35日超の UBXG entry も、MF alias が必要なら artifact から補える。"""
+    for i in range(1, 31):
+        (tmp_path / f"paper_orders_202608{i:02d}.json").write_text(
+            '{"orders": []}', encoding="utf-8"
+        )
+    (tmp_path / "paper_orders_20260713.json").write_text(
+        json.dumps(
+            {
+                "orders": [
+                    {
+                        "symbol": "UBXG",
+                        "system": "system3",
+                        "entry_date": "2026-07-13",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    index = _collect_entry_orders_index(tmp_path, required_symbols={"UBXG"})
+    assert index["UBXG"] == {"system": "system3", "entry_date": "2026-07-13"}
+
+
+def test_alpaca_entry_coid_uses_rename_alias_when_broker_symbol_changed():
+    """live path でも UBXG order metadata を MF position に補完する。"""
+    order = SimpleNamespace(symbol="UBXG", client_order_id="system3-UBXG-20260713")
+    client = SimpleNamespace(get_orders=lambda _request: [order])
+    snap = PositionSnapshot(symbol="MF", qty=100, side="long", avg_entry_price=4.7)
+
+    _hydrate_from_alpaca_coids([snap], client, symbol_aliases={"MF": "UBXG"})
+
+    assert snap.system == "system3"
+    assert snap.entry_date == "2026-07-13"

@@ -104,6 +104,19 @@ class TestHydrateSystemTags:
         assert snap.system is None
         assert snap.entry_date is None
 
+    def test_ticker_rename_alias_resolves_canonical_entry_metadata(self):
+        """MF のように broker の現 ticker と entry ticker が異なる建玉を解決する。"""
+        snap = PositionSnapshot(symbol="MF", qty=100, side="long", avg_entry_price=4.7)
+        hydrate_system_tags(
+            [snap],
+            entry_orders_index={
+                "UBXG": {"system": "system3", "entry_date": "2026-07-13"}
+            },
+            symbol_aliases={"MF": "UBXG"},
+        )
+        assert snap.system == "system3"
+        assert snap.entry_date == "2026-07-13"
+
 
 # -------------------------------------------------------------------------
 # compute_holding_days
@@ -178,6 +191,23 @@ class TestBuildExitOrders:
             atr_by_symbol={"MSFT": {10: 4.0}},
         )
         assert any(e.reason == ExitReasonCode.TIME and e.side == "sell" for e in exits)
+
+    def test_renamed_position_enters_time_exit_plan_with_current_broker_symbol(self):
+        """旧 UBXG の entry 情報を使いつつ、MF を close 対象として残す。"""
+        snap = PositionSnapshot(symbol="MF", qty=100, side="long", avg_entry_price=4.7)
+        exits = build_exit_orders_from_positions(
+            [snap],
+            today="2026-08-17",
+            entry_orders_index={
+                "UBXG": {"system": "system3", "entry_date": "2026-07-13"}
+            },
+            symbol_aliases={"MF": "UBXG"},
+        )
+        time_exits = [e for e in exits if e.reason == ExitReasonCode.TIME]
+        assert len(time_exits) == 1
+        assert time_exits[0].symbol == "MF"
+        assert time_exits[0].system == "system3"
+        assert time_exits[0].entry_date == "2026-07-13"
 
     def test_system5_time_based_at_6_days(self):
         snap = _snap("NVDA", "system5", "long", 3, 120.0, "2026-06-26")
