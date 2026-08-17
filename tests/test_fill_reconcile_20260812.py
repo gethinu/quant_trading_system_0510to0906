@@ -18,29 +18,40 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scripts.reconcile_fills import (  # noqa: E402
-    fill_reconcile_enabled,
-    main as reconcile_main,
-    patch_recon_fills,
-    recompute_fills_from_status,
-)
+from scripts.reconcile_fills import fill_reconcile_enabled
+from scripts.reconcile_fills import main as reconcile_main  # noqa: E402
+from scripts.reconcile_fills import patch_recon_fills, recompute_fills_from_status
 
 
 def _paper_orders() -> dict:
     """system2 ショート 10 件 submit (order_id あり) + system1 ロング 2 件 skip。"""
     orders = []
     for i in range(10):
-        orders.append({
-            "symbol": f"S{i}", "side": "sell", "system": "system2",
-            "client_order_id": f"system2-S{i}-20260812", "order_id": f"oid-s2-{i}",
-            "status": "pending_new", "skip_reason": None, "error": None,
-        })
+        orders.append(
+            {
+                "symbol": f"S{i}",
+                "side": "sell",
+                "system": "system2",
+                "client_order_id": f"system2-S{i}-20260812",
+                "order_id": f"oid-s2-{i}",
+                "status": "pending_new",
+                "skip_reason": None,
+                "error": None,
+            }
+        )
     for i in range(2):
-        orders.append({
-            "symbol": f"L{i}", "side": "buy", "system": "system1",
-            "client_order_id": f"system1-L{i}-20260812", "order_id": None,
-            "status": None, "skip_reason": "already_held:x", "error": None,
-        })
+        orders.append(
+            {
+                "symbol": f"L{i}",
+                "side": "buy",
+                "system": "system1",
+                "client_order_id": f"system1-L{i}-20260812",
+                "order_id": None,
+                "status": None,
+                "skip_reason": "already_held:x",
+                "error": None,
+            }
+        )
     return {"date": "2026-08-12", "orders": orders}
 
 
@@ -48,15 +59,24 @@ def _recon() -> dict:
     return {
         "date": "2026-08-12",
         "systems": {
-            "system1": {"long": {"entry_submitted": 0, "filled": 0},
-                        "short": {"entry_submitted": 0, "filled": 0},
-                        "exit": {"submitted": 2, "close": 0, "protect": 2}},
-            "system2": {"long": {"entry_submitted": 0, "filled": 0},
-                        "short": {"entry_submitted": 10, "filled": 0},
-                        "exit": {"submitted": 10, "close": 10, "protect": 0}},
+            "system1": {
+                "long": {"entry_submitted": 0, "filled": 0},
+                "short": {"entry_submitted": 0, "filled": 0},
+                "exit": {"submitted": 2, "close": 0, "protect": 2},
+            },
+            "system2": {
+                "long": {"entry_submitted": 0, "filled": 0},
+                "short": {"entry_submitted": 10, "filled": 0},
+                "exit": {"submitted": 10, "close": 10, "protect": 0},
+            },
         },
-        "portfolio": {"entry_submitted": 10, "entry_filled": 0,
-                      "exit_submitted": 12, "exit_close": 10, "exit_protect": 2},
+        "portfolio": {
+            "entry_submitted": 10,
+            "entry_filled": 0,
+            "exit_submitted": 12,
+            "exit_close": 10,
+            "exit_protect": 2,
+        },
     }
 
 
@@ -112,7 +132,9 @@ def test_patch_recon_updates_only_fill():
 
 def test_patch_recon_no_fills_is_noop():
     recon = _recon()
-    _, n, status = patch_recon_fills(recon, {"n_orders": 0, "portfolio": {}, "systems": {}})
+    _, n, status = patch_recon_fills(
+        recon, {"n_orders": 0, "portfolio": {}, "systems": {}}
+    )
     assert status == "no_fills" and n == 0
     assert recon["portfolio"]["entry_filled"] == 0
 
@@ -124,7 +146,8 @@ def test_cli_off_by_default_writes_nothing(tmp_path, monkeypatch):
     # paper_orders を置くが、flag OFF なので触られないはず
     rd = tmp_path
     (rd / "paper_orders_20260812.json").write_text(
-        json.dumps(_paper_orders(), ensure_ascii=False), encoding="utf-8")
+        json.dumps(_paper_orders(), ensure_ascii=False), encoding="utf-8"
+    )
     before = set(p.name for p in rd.iterdir())
     rc = reconcile_main(["--date", "2026-08-12", "--results-dir", str(rd)])
     assert rc == 0
@@ -137,15 +160,23 @@ def test_cli_on_with_injected_status_map(tmp_path, monkeypatch):
     monkeypatch.setenv("FILL_RECONCILE_ENABLED", "1")
     rd = tmp_path
     (rd / "paper_orders_20260812.json").write_text(
-        json.dumps(_paper_orders(), ensure_ascii=False), encoding="utf-8")
+        json.dumps(_paper_orders(), ensure_ascii=False), encoding="utf-8"
+    )
     (rd / "recon_20260812.json").write_text(
-        json.dumps(_recon(), ensure_ascii=False), encoding="utf-8")
+        json.dumps(_recon(), ensure_ascii=False), encoding="utf-8"
+    )
     smap = {f"oid-s2-{i}": "filled" for i in range(10)}
     (rd / "smap.json").write_text(json.dumps(smap), encoding="utf-8")
-    rc = reconcile_main([
-        "--date", "2026-08-12", "--results-dir", str(rd),
-        "--status-map-json", str(rd / "smap.json"),
-    ])
+    rc = reconcile_main(
+        [
+            "--date",
+            "2026-08-12",
+            "--results-dir",
+            str(rd),
+            "--status-map-json",
+            str(rd / "smap.json"),
+        ]
+    )
     assert rc == 0
     fills = json.loads((rd / "fills_20260812.json").read_text(encoding="utf-8"))
     assert fills["portfolio"]["entry_filled"] == 10

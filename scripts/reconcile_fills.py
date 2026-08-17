@@ -95,8 +95,10 @@ def recompute_fills_from_status(
         key = _norm_system(name) or "__unassigned__"
         sysobj = systems.setdefault(
             key,
-            {"long": {"entry_submitted": 0, "filled": 0},
-             "short": {"entry_submitted": 0, "filled": 0}},
+            {
+                "long": {"entry_submitted": 0, "filled": 0},
+                "short": {"entry_submitted": 0, "filled": 0},
+            },
         )
         return sysobj[side]
 
@@ -189,7 +191,9 @@ def patch_recon_fills(
     if isinstance(port, dict):
         prev_port_fill = port.get("entry_filled")
         port["entry_filled"] = int(fills["portfolio"].get("entry_filled") or 0)
-        port["long_entry_filled"] = int(fills["portfolio"].get("long_entry_filled") or 0)
+        port["long_entry_filled"] = int(
+            fills["portfolio"].get("long_entry_filled") or 0
+        )
         port["short_entry_filled"] = int(
             fills["portfolio"].get("short_entry_filled") or 0
         )
@@ -244,7 +248,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args(argv)
-    logging.basicConfig(level=str(args.log_level).upper(), format="%(levelname)s: %(message)s")
+    logging.basicConfig(
+        level=str(args.log_level).upper(), format="%(levelname)s: %(message)s"
+    )
 
     # --- master flag: 既定 OFF なら完全に inert (byte-parity) --------------
     if not fill_reconcile_enabled():

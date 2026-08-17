@@ -27,13 +27,13 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta
 import json
 import logging
 import os
-import sys
-from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
 from pathlib import Path
+import sys
 from typing import Any
 
 # スクリプトを直接 (python scripts/daily_polygon_monitor.py / .ps1 経由) 実行しても
@@ -219,7 +219,9 @@ def _compute_dv_from_grouped(
 ) -> dict[str, dict[str, float]]:
     """Grouped Daily を過去 ``lookback_days`` 営業日分 fetch し DV20/50 を on-the-fly 計算。"""
     import time
+
     import pandas as pd
+
     from common.polygon_data import get_polygon_grouped_daily
 
     end = datetime.strptime(target_date, "%Y-%m-%d").date()
@@ -566,7 +568,9 @@ def build_pipeline_report(
         try:
             from scripts.build_execution_recon import patch_pipeline_funnel
 
-            sig_path = signals_dir / f"today_signals_{target_date.replace('-', '')}.json"
+            sig_path = (
+                signals_dir / f"today_signals_{target_date.replace('-', '')}.json"
+            )
             if sig_path.exists():
                 sig = json.loads(sig_path.read_text(encoding="utf-8"))
                 _, n_patched, status = patch_pipeline_funnel(report, sig)

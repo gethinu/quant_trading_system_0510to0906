@@ -39,7 +39,9 @@ class _RaisingPublisher(Publisher):
         self._exc = exc
         self.calls: int = 0
 
-    def send(self, signals_json: dict[str, Any], *, dry_run: bool = False) -> PublishResult:
+    def send(
+        self, signals_json: dict[str, Any], *, dry_run: bool = False
+    ) -> PublishResult:
         self.calls += 1
         raise self._exc
 
@@ -58,7 +60,9 @@ class _RecordingPublisher(Publisher):
         self.last_payload: dict[str, Any] | None = None
         self.last_dry_run: bool | None = None
 
-    def send(self, signals_json: dict[str, Any], *, dry_run: bool = False) -> PublishResult:
+    def send(
+        self, signals_json: dict[str, Any], *, dry_run: bool = False
+    ) -> PublishResult:
         self.calls += 1
         self.last_payload = signals_json
         self.last_dry_run = dry_run
@@ -187,13 +191,16 @@ def test_publisher_exception_does_not_expose_internal_secrets() -> None:
     target = publisher.name (a well-known identifier). Nothing more.
     This protects against a chained failure of P0#3 (ntfy topic leak) via P0#4.
     """
+
     class LeakyPublisher(Publisher):
         name = "ntfy"
 
         def __init__(self) -> None:
             self.topic = "super-secret-topic-12345"
 
-        def send(self, signals_json: dict[str, Any], *, dry_run: bool = False) -> PublishResult:
+        def send(
+            self, signals_json: dict[str, Any], *, dry_run: bool = False
+        ) -> PublishResult:
             # Any attempt to embed the topic in the exception must not end up
             # in the persisted PublishResult.
             raise RuntimeError(f"render fail for topic={self.topic}")

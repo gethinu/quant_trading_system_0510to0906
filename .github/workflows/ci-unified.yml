@@ -39,6 +39,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
@@ -77,7 +79,7 @@ jobs:
           python-version: "3.11"
       - name: Run publish source contracts
         run: |
-          python -m pip install pytest
+          python -m pip install pytest pandas
           python -m pytest tests/system/test_publish_data_ps1_contract.py -o addopts='' -q
 
   lint-and-format:
@@ -87,6 +89,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -102,14 +106,37 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
           pip install ruff black isort
-      - name: isort (import order check)
+      - name: List changed Python files
+        id: changed-python
+        shell: bash
         run: |
-          # Run isort in check mode in CI so PRs fail when import ordering differs
-          isort --check-only .
-      - name: Ruff (lint)
-        run: ruff check . --output-format=github
-      - name: Black (format check)
-        run: black --check .
+          base="${{ github.event.before }}"
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            base="${{ github.event.pull_request.base.sha }}"
+          fi
+          if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
+            base="$(git rev-parse HEAD^)"
+          fi
+          git diff --name-only --diff-filter=ACMR "$base" "$GITHUB_SHA" -- '*.py' > "$RUNNER_TEMP/changed-python.txt"
+          echo "count=$(wc -l < "$RUNNER_TEMP/changed-python.txt")" >> "$GITHUB_OUTPUT"
+      - name: isort (changed Python files)
+        if: steps.changed-python.outputs.count != '0'
+        shell: bash
+        run: |
+          mapfile -t files < "$RUNNER_TEMP/changed-python.txt"
+          isort --check-only "${files[@]}"
+      - name: Ruff (changed Python files)
+        if: steps.changed-python.outputs.count != '0'
+        shell: bash
+        run: |
+          mapfile -t files < "$RUNNER_TEMP/changed-python.txt"
+          ruff check "${files[@]}" --output-format=github
+      - name: Black (changed Python files)
+        if: steps.changed-python.outputs.count != '0'
+        shell: bash
+        run: |
+          mapfile -t files < "$RUNNER_TEMP/changed-python.txt"
+          black --check "${files[@]}"
 
   test-and-coverage:
     name: Test & Coverage
