@@ -305,6 +305,25 @@ def materialize_dashboard_bundle(
                 f"recon.date={recon.get('date')!r}, expected={date_str!r}"
             )
         if require_exit:
+            # recon が「どの execution input も current run 由来と確認できた」と
+            # 明示していない限り、Exit を current run の実測として公開しない。
+            # (同日 rerun で Step5b/5c が skip / 失敗し、前 run の
+            #  paper_orders / exit_orders が残っているケース)
+            lineage = recon.get("execution_lineage")
+            if isinstance(lineage, dict):
+                unverified = sorted(
+                    name
+                    for name, state in lineage.items()
+                    if state not in {"verified", "missing"}
+                )
+                if unverified:
+                    detail = ", ".join(f"{n}={lineage[n]}" for n in unverified)
+                    raise BundleContractError(
+                        "execution inputs are not bound to the current signals run: "
+                        f"{detail}"
+                    )
+            elif recon.get("execution_lineage_ok") is False:
+                raise BundleContractError("recon reports execution_lineage_ok=false")
             if recon_run_id and recon_run_id != signals_run_id:
                 raise BundleContractError(
                     "recon.source_signals_run_id does not match signals.meta.run_id "

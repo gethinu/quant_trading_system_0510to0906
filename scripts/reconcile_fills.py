@@ -90,6 +90,7 @@ def recompute_fills_from_status(
     systems: dict[str, dict[str, dict[str, int]]] = {}
     orders_out: list[dict[str, Any]] = []
     tot_sub = tot_fill = long_fill = short_fill = 0
+    tot_unknown = 0
 
     def _bucket(name: str | None, side: str) -> dict[str, int]:
         key = _norm_system(name) or "__unassigned__"
@@ -110,6 +111,11 @@ def recompute_fills_from_status(
         side = _norm_side(o.get("side"))
         name = o.get("system")
         refreshed = status_map.get(order_id, None)
+        # None = broker lookup が失敗/未取得。「未 fill が確定した」ではないので
+        # unknown として数え、後段の patch がこの不完全な集計で durable 値を
+        # 上書きしないようにする。
+        if refreshed is None:
+            tot_unknown += 1
         filled = _is_filled(refreshed)
         sb = _bucket(name, side)
         sb["entry_submitted"] += 1
@@ -135,6 +141,9 @@ def recompute_fills_from_status(
     return {
         "as_of": datetime.now(timezone.utc).isoformat(),
         "n_orders": tot_sub,
+        # status を取得できなかった order 数。>0 なら fill 集計は下振れし得る。
+        "n_unknown": tot_unknown,
+        "complete": tot_unknown == 0,
         "systems": systems,
         "portfolio": {
             "entry_submitted": tot_sub,
@@ -161,12 +170,31 @@ def patch_recon_fills(
       - ``status="ok"``          : filled を更新した
       - ``status="no_recon"``    : recon 無効
       - ``status="no_fills"``    : fills 無効 / 対象 order 0 → 何もしない
+      - ``status="incomplete_status"``: broker lookup に未確定が有り、既知の
+        filled を保持したまま更新を見送った (0 への後退を防ぐ)
     idempotent: 同じ fills を再度当てても同じ結果。
     """
     if not isinstance(recon, dict):
         return recon, 0, "no_recon"
     if not isinstance(fills, dict) or not fills.get("n_orders"):
         return recon, 0, "no_fills"
+    # broker lookup が 1 件でも未確定なら fill 集計は下振れし得る。durable な
+    # filled 実績を transient な API 失敗で 0 へ後退させないため、上書きせず
+    # 既知値を保持したまま「不完全」として返す (audit 用に meta だけ残す)。
+    if not fills.get("complete", True):
+        meta = recon.setdefault("meta", {})
+        if isinstance(meta, dict):
+            meta["fill_reconcile"] = {
+                "as_of": fills.get("as_of"),
+                "n_orders": fills.get("n_orders"),
+                "n_unknown": fills.get("n_unknown"),
+                "status": "incomplete_status",
+                "note": (
+                    "order status を取得できない件があるため filled を更新しない "
+                    "(既知値を保持)"
+                ),
+            }
+        return recon, 0, "incomplete_status"
 
     n_updated = 0
     fsys = fills.get("systems") or {}
@@ -203,6 +231,8 @@ def patch_recon_fills(
         meta["fill_reconcile"] = {
             "as_of": fills.get("as_of"),
             "n_orders": fills.get("n_orders"),
+            "n_unknown": fills.get("n_unknown", 0),
+            "status": "ok",
             "entry_filled": fills["portfolio"].get("entry_filled"),
             "entry_filled_prev": prev_port_fill,
         }

@@ -182,3 +182,80 @@ def test_cli_on_with_injected_status_map(tmp_path, monkeypatch):
     assert fills["portfolio"]["entry_filled"] == 10
     recon = json.loads((rd / "recon_20260812.json").read_text(encoding="utf-8"))
     assert recon["portfolio"]["entry_filled"] == 10
+
+
+# --- 不確定な lookup で durable な filled を 0 へ後退させない -----------------------
+# Codex review (PR#153): get_orders_status_map() は broker 例外を None に潰すため、
+# transient な API 失敗時に「未 fill が確定した」と誤解して台帳を巻き戻し得た。
+def test_unknown_status_is_counted_and_marks_incomplete():
+    po = _paper_orders()
+    # 10 件中 3 件が lookup 失敗 (None)、残りは filled
+    partial = {f"oid-s2-{i}": (None if i < 3 else "filled") for i in range(10)}
+    fills = recompute_fills_from_status(po, partial)
+    assert fills["n_unknown"] == 3
+    assert fills["complete"] is False
+    # 既知の filled は 7 件だけ数える (unknown を filled とは数えない)
+    assert fills["portfolio"]["entry_filled"] == 7
+
+
+def test_missing_order_id_in_status_map_is_unknown_not_unfilled():
+    po = _paper_orders()
+    fills = recompute_fills_from_status(po, {})  # 1 件も引けなかった
+    assert fills["n_unknown"] == 10
+    assert fills["complete"] is False
+    assert fills["portfolio"]["entry_filled"] == 0
+
+
+def test_incomplete_status_does_not_regress_recorded_fills():
+    """全件 filled を記録した後、lookup 全失敗で再実行しても 0 に戻らない。"""
+    po = _paper_orders()
+    settled = recompute_fills_from_status(
+        po, {f"oid-s2-{i}": "filled" for i in range(10)}
+    )
+    recon = _recon()
+    patch_recon_fills(recon, settled)
+    assert recon["portfolio"]["entry_filled"] == 10
+
+    # broker が全滅 (全 order で例外 -> None)
+    blackout = recompute_fills_from_status(po, {f"oid-s2-{i}": None for i in range(10)})
+    _, n, status = patch_recon_fills(recon, blackout)
+
+    assert status == "incomplete_status"
+    assert n == 0
+    # durable な実績は保持される
+    assert recon["portfolio"]["entry_filled"] == 10
+    assert recon["systems"]["system2"]["short"]["filled"] == 10
+    # 監査メタに理由が残る
+    assert recon["meta"]["fill_reconcile"]["status"] == "incomplete_status"
+    assert recon["meta"]["fill_reconcile"]["n_unknown"] == 10
+
+
+def test_partial_blackout_also_refuses_to_overwrite():
+    """一部だけ引けない場合も下振れ値で上書きしない。"""
+    po = _paper_orders()
+    settled = recompute_fills_from_status(
+        po, {f"oid-s2-{i}": "filled" for i in range(10)}
+    )
+    recon = _recon()
+    patch_recon_fills(recon, settled)
+
+    partial = recompute_fills_from_status(
+        po, {f"oid-s2-{i}": (None if i < 2 else "filled") for i in range(10)}
+    )
+    _, n, status = patch_recon_fills(recon, partial)
+    assert status == "incomplete_status" and n == 0
+    assert recon["portfolio"]["entry_filled"] == 10
+
+
+def test_complete_status_still_updates_normally():
+    """全件 status が引ければ従来どおり更新する (fail-safe が過剰に効かない)。"""
+    po = _paper_orders()
+    fills = recompute_fills_from_status(
+        po, {f"oid-s2-{i}": ("filled" if i < 6 else "canceled") for i in range(10)}
+    )
+    assert fills["complete"] is True
+    recon = _recon()
+    _, _, status = patch_recon_fills(recon, fills)
+    assert status == "ok"
+    assert recon["portfolio"]["entry_filled"] == 6
+    assert recon["meta"]["fill_reconcile"]["status"] == "ok"

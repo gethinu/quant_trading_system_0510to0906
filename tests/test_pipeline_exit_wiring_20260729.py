@@ -74,8 +74,11 @@ def _pipeline(date: str = "2026-07-29") -> dict:
     }
 
 
-def _exit_orders(rows: list[dict]) -> dict:
-    return {"date": "2026-07-29", "exits": rows}
+def _exit_orders(rows: list[dict], *, run_id: str | None = None) -> dict:
+    payload = {"date": "2026-07-29", "exits": rows}
+    if run_id is not None:
+        payload["source_signals_run_id"] = run_id
+    return payload
 
 
 def _exit_phase(pipeline: dict, sysk: str) -> dict:
@@ -106,13 +109,39 @@ def test_exit_counts_normalizes_system_to_sys_key() -> None:
 
 
 def test_recon_records_the_exact_signals_run_id() -> None:
+    """execution input が current run に紐付いている時だけ run_id を stamp する。"""
+    recon = build_recon(
+        {"date": "2026-07-29", "meta": {"run_id": "20260729_223500_exact"}},
+        None,  # entry 段が動いていない = missing (突合対象なし) は許容
+        _exit_orders([], run_id="20260729_223500_exact"),
+        date_str="2026-07-29",
+    )
+    assert recon["source_signals_run_id"] == "20260729_223500_exact"
+    assert recon["execution_lineage_ok"] is True
+
+
+def test_recon_withholds_run_id_when_exit_orders_are_from_another_run() -> None:
+    """同日 rerun で前 run の exit_orders が残っていても current と偽らない。"""
+    recon = build_recon(
+        {"date": "2026-07-29", "meta": {"run_id": "20260729_223500_exact"}},
+        None,
+        _exit_orders([], run_id="20260729_060000_morning"),
+        date_str="2026-07-29",
+    )
+    assert recon["source_signals_run_id"] is None
+    assert recon["execution_lineage"]["exit_orders"] == "stale"
+
+
+def test_recon_withholds_run_id_when_exit_orders_lack_provenance() -> None:
+    """旧 producer 出力 (run_id なし) を推測で current 扱いしない。"""
     recon = build_recon(
         {"date": "2026-07-29", "meta": {"run_id": "20260729_223500_exact"}},
         None,
         _exit_orders([]),
         date_str="2026-07-29",
     )
-    assert recon["source_signals_run_id"] == "20260729_223500_exact"
+    assert recon["source_signals_run_id"] is None
+    assert recon["execution_lineage"]["exit_orders"] == "unverified"
 
 
 def test_patch_fills_exit_and_matches_ntfy_headline() -> None:
