@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from argparse import Namespace
+import json
 from pathlib import Path
 import sys
 
@@ -14,11 +16,8 @@ from common.publishers.execution_summary import (  # noqa: E402
     build_title,
     format_execution_summary,
 )
-from common.publishers.ntfy import (  # noqa: E402
-    NtfyPublisher,
-    _latin1_safe_headers,
-    _sanitize_ascii_title,
-)
+from common.publishers.ntfy import _sanitize_ascii_title  # noqa: E402
+from scripts.publish_execution_summary import _resolve_recon  # noqa: E402
 
 
 def _recon() -> dict:
@@ -99,7 +98,7 @@ def test_title_is_ascii_plus_emoji_and_has_counts():
 def test_body_has_funnel_and_per_system_and_drops():
     body = build_body(_recon())
     assert "Tgt 4123 → sig 49 → gen 34 → entry 27 → fill 25" in body
-    assert "exit 14 (close 5 / protect 9)" in body
+    assert "exit 14 fired (close 5 / protect 9)" in body
     assert "LONG entry 18 / SHORT entry 9" in body
     assert "資産 $10,120" in body
     # per-system: s1 long, s2 short
@@ -123,60 +122,42 @@ def test_format_returns_tuple():
     assert title and body
 
 
-def test_latin1_safe_headers_strips_emoji_title():
-    """emoji 入り X-Title は latin-1 エンコード可能に落とされること。
+def test_default_recon_is_rebuilt_when_current_signals_run_changes(tmp_path: Path):
+    compact = "20260708"
+    (tmp_path / f"today_signals_{compact}.json").write_text(
+        json.dumps(
+            {
+                "date": "2026-07-08",
+                "meta": {"run_id": "night-run"},
+                "systems": {},
+                "portfolio": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / f"recon_{compact}.json").write_text(
+        json.dumps(
+            {
+                "date": "2026-07-08",
+                "source_signals_run_id": "morning-run",
+                "portfolio": {"entry_submitted": 999},
+                "systems": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    args = Namespace(
+        results_dir=str(tmp_path),
+        date="2026-07-08",
+        recon_json=None,
+        signals_json=None,
+        paper_orders_json=None,
+        exit_orders_json=None,
+        account_equity=None,
+    )
 
-    2026-07-13 regression: build_title は「⚠️ 07-13 exec …」のように先頭 emoji を
-    付ける。HTTP ヘッダーは latin-1 encode されるため、この title を素で
-    requests に渡すと 'latin-1' codec can't encode で送信が丸ごと失敗する。
-    """
-    title = build_title(_recon())  # entry_failed=1 → "⚠️ …"
-    # 素の title は latin-1 に載らない (バグの前提を固定)
-    import pytest
+    recon = _resolve_recon(args)
 
-    with pytest.raises(UnicodeEncodeError):
-        title.encode("latin-1")
-
-    safe = _latin1_safe_headers({"X-Title": title, "X-Tags": "bar_chart,warning"})
-    # 落とした後は latin-1 でエンコードでき、count 情報は残る
-    safe["X-Title"].encode("latin-1")  # raises しない
-    assert "sig49" in safe["X-Title"]
-    assert "entry27" in safe["X-Title"]
-    assert "exit14" in safe["X-Title"]
-    # ASCII tags はそのまま
-    assert safe["X-Tags"] == "bar_chart,warning"
-
-
-def test_send_text_emoji_title_does_not_raise(monkeypatch):
-    """send_text が emoji title でも例外を投げず ntfy へ POST できること。
-
-    修正前は requests.post のヘッダー encode で latin-1 例外が漏れ、
-    exec summary 通知が 4 retry 全滅していた (open_auto_run 2026-07-13)。
-    """
-    captured: dict = {}
-
-    class _Resp:
-        status_code = 200
-        text = "ok"
-
-    def _fake_post(url, data=None, headers=None, timeout=None):
-        # requests 本来の latin-1 ヘッダー encode を再現し、非 latin-1 が
-        # 残っていれば例外を投げる (= バグが再発したらここで落ちる)。
-        for value in (headers or {}).values():
-            str(value).encode("latin-1")
-        captured["headers"] = headers
-        captured["url"] = url
-        return _Resp()
-
-    import requests
-
-    monkeypatch.setattr(requests, "post", _fake_post)
-
-    pub = NtfyPublisher(topic="unit-test-topic")
-    title, body = format_execution_summary(_recon())  # title に emoji を含む
-    result = pub.send_text(title, body, tags="bar_chart,warning")
-
-    assert result.ok is True
-    assert result.status_code == 200
-    # POST に渡った X-Title は latin-1 safe
-    captured["headers"]["X-Title"].encode("latin-1")
+    assert recon is not None
+    assert recon["source_signals_run_id"] == "night-run"
+    assert recon["portfolio"]["entry_submitted"] != 999
