@@ -248,7 +248,8 @@ try {
     else {
         $pubArgs = @(
             (Join-Path $ProjectRoot "scripts\publish_signals.py"),
-            "--input", $SignalsJson
+            "--input", $SignalsJson,
+            "--fallback"
         )
         if ($DryRunPublish) { $pubArgs += @("--dry-run") }
         $p = Invoke-Step -Name "publish" -PyArgs $pubArgs

@@ -106,7 +106,7 @@ def test_primary_raise_still_fires_secondary_fallback() -> None:
     assert len(result.results) == 2
     assert result.results[0].ok is False
     assert result.results[0].publisher == "ntfy"
-    assert "publisher_exception" in result.results[0].detail
+    assert result.results[0].detail == "publisher_exception:RuntimeError"
     assert result.results[1].ok is True
 
     # Chain outcome: partial (primary failed, secondary ok) — NOT failed.
@@ -207,12 +207,8 @@ def test_publisher_exception_does_not_expose_internal_secrets() -> None:
 
     dumped = json.dumps(result.as_dict())
     # The registry-synthesized result MUST NOT quote the secret.
-    # The exception text itself is unavoidable if a publisher decides to
-    # embed a secret in str(exc); the *registry* is responsible for keeping
-    # target=publisher.name, not the whole message.
     assert result.results[0].target == "ntfy"
-    # And target itself is what dashboards persist — verify no leak there.
-    assert "super-secret-topic-12345" not in result.results[0].target
+    assert "super-secret-topic-12345" not in dumped
 
 
 # -----------------------------------------------------------------------

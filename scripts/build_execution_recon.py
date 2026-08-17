@@ -24,6 +24,7 @@ import argparse
 from datetime import datetime, timezone
 import json
 import logging
+import math
 from pathlib import Path
 from typing import Any
 
@@ -276,7 +277,14 @@ def build_recon(
     return {
         "version": "1.0",
         "date": date_str or (signals or {}).get("date") or "",
-        "generated_at": generated_at or datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "generated_at": generated_at
+        or datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        # Same-date reruns are common. Bind execution measurements to the
+        # exact signals run so an older recon cannot patch a newer bundle.
+        "source_signals_run_id": str(
+            ((signals or {}).get("meta") or {}).get("run_id") or ""
+        )
+        or None,
         "inputs": {
             "signals": signals is not None,
             "paper_orders": paper_orders is not None,
@@ -363,6 +371,10 @@ def patch_pipeline_exit(
     """
     if not isinstance(recon, dict):
         return pipeline, 0, "no_recon"
+    pipeline_date = str(pipeline.get("date") or "")
+    recon_date = str(recon.get("date") or "")
+    if pipeline_date and recon_date and pipeline_date != recon_date:
+        return pipeline, 0, "date_mismatch"
     # 部分 recon (exit_orders 入力欠損) は「発火 0」ではなく「未計測」。埋めない。
     if not (recon.get("inputs") or {}).get("exit_orders"):
         return pipeline, 0, "exit_orders_input_missing"
@@ -380,16 +392,22 @@ def patch_pipeline_exit(
         for p in phases:
             if p.get("name") == "Exit":
                 ec = exits.get(sysk) or {
-                    "submitted": 0, "close": 0, "protect": 0,
-                    "armed": 0, "armed_close": 0, "armed_protect": 0,
+                    "submitted": 0,
+                    "close": 0,
+                    "protect": 0,
+                    "armed": 0,
+                    "armed_close": 0,
+                    "armed_protect": 0,
                 }
                 cnt = int(ec["submitted"])  # fired
                 armed = int(ec.get("armed") or 0)
-                base = str(p.get("condition") or EXIT_CONDITION_BASE).split(
-                    " (close"
-                )[0]
+                base = str(p.get("condition") or EXIT_CONDITION_BASE).split(" (close")[
+                    0
+                ]
                 p["count"] = cnt
                 p["measured"] = True
+                p["source"] = "execution_recon"
+                p["source_observed_at"] = recon.get("generated_at")
                 p["fired"] = cnt
                 p["exit_close"] = int(ec["close"])
                 p["exit_protect"] = int(ec["protect"])
@@ -463,6 +481,24 @@ _FUNNEL_PHASES = ("Tgt", "FILpass", "STUpass", "TRDlist", "Entry")
 
 # spy_only システム (Tgt を funnel target で上書きしない)。
 _SPY_ONLY_SYSTEMS = frozenset({"sys7"})
+_FUNNEL_SOURCE = "today_signals.funnel"
+_SPY_TARGET_REASON = "shared_universe_not_applicable_to_spy_only"
+
+
+def _as_nonnegative_int(value: Any) -> int | None:
+    """Accept only finite, non-negative integral counts.
+
+    Funnel counts are cardinalities.  Silently truncating ``3.8`` to ``3`` or
+    accepting NaN makes a payload look measured when its schema is invalid.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if isinstance(value, float) and (
+        not math.isfinite(value) or not value.is_integer()
+    ):
+        return None
+    parsed = int(value)
+    return parsed if parsed >= 0 else None
 
 
 def funnel_counts_from_signals(
@@ -480,22 +516,28 @@ def funnel_counts_from_signals(
     for raw_name, entry in (signals.get("systems") or {}).items():
         if not isinstance(entry, dict):
             continue
-        sysk = str(raw_name).replace("system", "sys")
+        normalized = _norm_system(raw_name)
+        if normalized is None:
+            continue
+        sysk = normalized.replace("system", "sys", 1)
         fnl = entry.get("funnel")
         counts: dict[str, int] = {}
         if isinstance(fnl, dict):
             for phase, key in FUNNEL_PHASE_KEY.items():
                 v = fnl.get(key)
-                if isinstance(v, (int, float)) and not isinstance(v, bool):
-                    counts[phase] = int(v)
+                parsed = _as_nonnegative_int(v)
+                if parsed is not None:
+                    counts[phase] = parsed
         else:
             # funnel 欠如時: legacy field から TRDlist/Entry のみ。
             ci = entry.get("n_candidates_input")
             so = entry.get("n_signals_output")
-            if isinstance(ci, (int, float)) and not isinstance(ci, bool):
-                counts["TRDlist"] = int(ci)
-            if isinstance(so, (int, float)) and not isinstance(so, bool):
-                counts["Entry"] = int(so)
+            parsed_candidates = _as_nonnegative_int(ci)
+            parsed_signals = _as_nonnegative_int(so)
+            if parsed_candidates is not None:
+                counts["TRDlist"] = parsed_candidates
+            if parsed_signals is not None:
+                counts["Entry"] = parsed_signals
         if counts:
             out[sysk] = counts
     return out
@@ -518,17 +560,26 @@ def patch_pipeline_funnel(
       - ``status="no_signals"``  : signals が無い/不正 → 未計測を維持 (何もしない)
       - ``status="empty_funnel"``: signals はあるが funnel 実数ゼロ → 何もしない
 
-    保護規則: 既に ``measured=True`` の phase は上書きしない (grouped-daily 実測を尊重)。
-    spy_only システムの Tgt は skip (funnel target = 共通株ユニバースで矯正値 1 を壊すため)。
+    保護規則: grouped-daily 等、別 source の既存実測は上書きしない。同じ
+    ``today_signals.funnel`` source は新しい run_id で上書きし、同日再生成を反映する。
+    spy_only システムで共有 universe 値が来た Tgt は未計測理由を明示して採用しない。
 
     idempotent: 既に埋めた pipeline を再度渡しても同じ結果。
     """
     if not isinstance(signals, dict):
         return pipeline, 0, "no_signals"
+    if pipeline.get("schema") != "signal_pipeline/v1":
+        return pipeline, 0, "invalid_pipeline_schema"
+    pipeline_date = str(pipeline.get("date") or "")
+    signals_date = str(signals.get("date") or "")
+    if pipeline_date and signals_date and pipeline_date != signals_date:
+        return pipeline, 0, "date_mismatch"
     counts_by_sys = funnel_counts_from_signals(signals)
     if not counts_by_sys:
         return pipeline, 0, "empty_funnel"
 
+    source_run_id = str((signals.get("meta") or {}).get("run_id") or "")
+    source_generated_at = signals.get("generated_at")
     n_patched = 0
     for sysk, sysobj in (pipeline.get("systems") or {}).items():
         if not isinstance(sysobj, dict):
@@ -537,62 +588,119 @@ def patch_pipeline_funnel(
         if not fcounts:
             continue
         phases = sysobj.get("phases") or []
-        # universe (Tgt) は funnel 反映後 or 既存の Tgt count を使う。
-        tgt_from_funnel = fcounts.get("Tgt")
-        existing_tgt = next(
-            (p.get("count") for p in phases if p.get("name") == "Tgt"), None
-        )
         is_spy_only = sysk in spy_only_systems
-        universe: int | None = existing_tgt
-        if tgt_from_funnel is not None and not is_spy_only:
-            universe = tgt_from_funnel
-
-        prev_count: int | None = None
         for p in phases:
             name = p.get("name")
             if name not in _FUNNEL_PHASES:
-                # Exit 等は触らず、prev_count 追跡のみ継続。
-                if p.get("count") is not None:
-                    prev_count = p.get("count")
-                continue
-            if is_spy_only and name == "Tgt":
-                if p.get("count") is not None:
-                    prev_count = p.get("count")
                 continue
             new_count = fcounts.get(name)
             if new_count is None:
-                if p.get("count") is not None:
-                    prev_count = p.get("count")
                 continue
-            if p.get("measured") is True and p.get("count") is not None:
-                # grouped-daily 等の既存実測は尊重して上書きしない。
-                prev_count = p.get("count")
+
+            existing_source = p.get("source")
+            if (
+                p.get("measured") is True
+                and p.get("count") is not None
+                and existing_source != _FUNNEL_SOURCE
+            ):
+                # grouped-daily / explicit upstream measurement wins.  Its
+                # count also becomes the denominator during the second pass.
                 continue
+
+            if is_spy_only and name == "Tgt" and new_count != 1:
+                before = (
+                    p.get("count"),
+                    p.get("measured"),
+                    p.get("source"),
+                    p.get("source_run_id"),
+                    p.get("unmeasured_reason"),
+                )
+                p["count"] = None
+                p["measured"] = False
+                p["source"] = _FUNNEL_SOURCE
+                p["source_run_id"] = source_run_id or None
+                p["source_observed_at"] = source_generated_at
+                p["unmeasured_reason"] = _SPY_TARGET_REASON
+                after = (
+                    p.get("count"),
+                    p.get("measured"),
+                    p.get("source"),
+                    p.get("source_run_id"),
+                    p.get("unmeasured_reason"),
+                )
+                if after != before:
+                    n_patched += 1
+                continue
+
+            before = (
+                p.get("count"),
+                p.get("measured"),
+                p.get("source"),
+                p.get("source_run_id"),
+                p.get("unmeasured_reason"),
+            )
             p["count"] = new_count
             p["measured"] = True
-            p["ratio_of_prev"] = (
-                round(new_count / prev_count, 6)
-                if isinstance(prev_count, (int, float)) and prev_count
+            p["source"] = _FUNNEL_SOURCE
+            p["source_run_id"] = source_run_id or None
+            p["source_observed_at"] = source_generated_at
+            p.pop("unmeasured_reason", None)
+            after = (
+                p.get("count"),
+                p.get("measured"),
+                p.get("source"),
+                p.get("source_run_id"),
+                p.get("unmeasured_reason"),
+            )
+            if after != before:
+                n_patched += 1
+
+        # Ratios are derived only after source-priority merge.  This avoids
+        # mixing a protected grouped Tgt count with a signal-derived universe.
+        tgt_phase = next((p for p in phases if p.get("name") == "Tgt"), None)
+        universe = (
+            tgt_phase.get("count")
+            if isinstance(tgt_phase, dict) and tgt_phase.get("measured") is True
+            else None
+        )
+        prev_count: int | None = None
+        for phase in phases:
+            count = _as_nonnegative_int(phase.get("count"))
+            measured = phase.get("measured") is True and count is not None
+            phase["ratio_of_prev"] = (
+                round(count / prev_count, 6)
+                if measured and isinstance(prev_count, int) and prev_count
                 else None
             )
-            p["ratio_of_universe"] = (
-                round(new_count / universe, 6)
-                if isinstance(universe, (int, float)) and universe
+            phase["ratio_of_universe"] = (
+                round(count / universe, 6)
+                if measured and isinstance(universe, int) and universe
                 else None
             )
-            prev_count = new_count
-            n_patched += 1
-        # final_signals も funnel Entry で補強 (未設定/None のみ)。
-        if sysobj.get("final_signals") is None and fcounts.get("Entry") is not None:
+            if measured:
+                prev_count = count
+
+        # final_signals is a projection of Entry and must move with a newer
+        # signals run.  Unknown legacy source is treated as this projection.
+        entry_count = fcounts.get("Entry")
+        if entry_count is not None and sysobj.get("final_signals_source") in (
+            None,
+            _FUNNEL_SOURCE,
+        ):
             sysobj["final_signals"] = fcounts["Entry"]
+            sysobj["final_signals_source"] = _FUNNEL_SOURCE
+            sysobj["final_signals_source_run_id"] = source_run_id or None
+
+    pipeline["source_signals_run_id"] = source_run_id or None
+    pipeline["source_signals_generated_at"] = source_generated_at
 
     if n_patched:
         notes = pipeline.get("notes")
         if isinstance(notes, list):
             marker = (
                 "Funnel (Tgt/FILpass/STUpass/TRDlist/Entry) = signal engine funnel "
-                "(today_signals_YYYYMMDD.json), measured=True。grouped-daily 実測 phase と "
-                "spy_only Tgt は保護 (上書きしない)。"
+                "(today_signals_YYYYMMDD.json), measured=True。別 source の実測 phase は "
+                "保護し、spy_only Tgt の共有 universe は未計測理由を明示する。"
             )
             if marker not in notes:
                 notes.append(marker)
@@ -605,24 +713,47 @@ def _default_path(results_dir: Path, stem: str, date_str: str) -> Path:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--date", help="対象日 (YYYY-MM-DD)。default paths の解決に使う。")
+    parser.add_argument(
+        "--date", help="対象日 (YYYY-MM-DD)。default paths の解決に使う。"
+    )
     parser.add_argument("--signals-json", help="today_signals JSON path。")
     parser.add_argument("--paper-orders-json", help="paper_orders JSON path。")
     parser.add_argument("--exit-orders-json", help="exit_orders JSON path。")
-    parser.add_argument("--output-json", help="recon 出力先 (default: results_csv/recon_YYYYMMDD.json)。")
-    parser.add_argument("--results-dir", default="results_csv", help="default path 解決の基準 dir。")
-    parser.add_argument("--account-equity", type=float, default=None, help="口座残高 (通知表示用)。")
+    parser.add_argument(
+        "--output-json",
+        help="recon 出力先 (default: results_csv/recon_YYYYMMDD.json)。",
+    )
+    parser.add_argument(
+        "--results-dir", default="results_csv", help="default path 解決の基準 dir。"
+    )
+    parser.add_argument(
+        "--account-equity", type=float, default=None, help="口座残高 (通知表示用)。"
+    )
     parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args(argv)
 
-    logging.basicConfig(level=str(args.log_level).upper(), format="%(levelname)s: %(message)s")
+    logging.basicConfig(
+        level=str(args.log_level).upper(), format="%(levelname)s: %(message)s"
+    )
 
     results_dir = Path(args.results_dir)
     date_str = args.date or datetime.now().strftime("%Y-%m-%d")
 
-    signals_path = Path(args.signals_json) if args.signals_json else _default_path(results_dir, "today_signals", date_str)
-    paper_path = Path(args.paper_orders_json) if args.paper_orders_json else _default_path(results_dir, "paper_orders", date_str)
-    exit_path = Path(args.exit_orders_json) if args.exit_orders_json else _default_path(results_dir, "exit_orders", date_str)
+    signals_path = (
+        Path(args.signals_json)
+        if args.signals_json
+        else _default_path(results_dir, "today_signals", date_str)
+    )
+    paper_path = (
+        Path(args.paper_orders_json)
+        if args.paper_orders_json
+        else _default_path(results_dir, "paper_orders", date_str)
+    )
+    exit_path = (
+        Path(args.exit_orders_json)
+        if args.exit_orders_json
+        else _default_path(results_dir, "exit_orders", date_str)
+    )
 
     signals = _load_json(signals_path)
     paper_orders = _load_json(paper_path)
@@ -645,7 +776,11 @@ def main(argv: list[str] | None = None) -> int:
         account_equity=args.account_equity,
     )
 
-    out_path = Path(args.output_json) if args.output_json else _default_path(results_dir, "recon", date_str)
+    out_path = (
+        Path(args.output_json)
+        if args.output_json
+        else _default_path(results_dir, "recon", date_str)
+    )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     tmp = out_path.with_suffix(out_path.suffix + ".tmp")
     tmp.write_text(json.dumps(recon, ensure_ascii=False, indent=2), encoding="utf-8")

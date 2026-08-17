@@ -26,8 +26,7 @@ import json
 
 import pytest
 
-from common.publishers.ntfy import NtfyPublisher, _mask_topic
-
+from common.publishers.ntfy import NtfyPublisher, _latin1_safe_headers, _mask_topic
 
 SECRET_TOPIC = "super-secret-abcdef1234567890"
 
@@ -112,4 +111,61 @@ def test_publish_result_dry_run_with_no_topic_is_marked_dry_run() -> None:
     assert result.target == "dry-run"
     # Still no accidental leak of an empty-string-looking topic in detail.
     dumped = json.dumps(result.as_dict())
-    assert "://ntfy.sh/\"" not in dumped  # rough sanity — no bare endpoint
+    assert '://ntfy.sh/"' not in dumped  # rough sanity — no bare endpoint
+
+
+def test_latin1_guard_keeps_transport_alive_for_emoji_title(monkeypatch) -> None:
+    captured: dict = {}
+
+    class Response:
+        status_code = 202
+        text = "accepted"
+
+    def fake_post(url, *, data, headers, timeout):
+        for value in headers.values():
+            value.encode("latin-1")
+        captured.update(
+            {"url": url, "data": data, "headers": headers, "timeout": timeout}
+        )
+        return Response()
+
+    monkeypatch.setattr("requests.post", fake_post)
+    pub = NtfyPublisher(topic=SECRET_TOPIC)
+    result = pub.send_text("⚠️ 08-13 execution summary", "日本語本文")
+
+    assert result.ok is True
+    assert result.detail == "accepted"
+    assert captured["headers"]["X-Title"] == "08-13 execution summary"
+    assert SECRET_TOPIC not in result.target
+
+
+def test_latin1_guard_is_noop_for_valid_headers() -> None:
+    headers = {"X-Title": "Execution 12", "X-Priority": "4"}
+    assert _latin1_safe_headers(headers) == headers
+
+
+def test_dry_run_url_parse_failure_fails_closed(monkeypatch) -> None:
+    import urllib.parse
+
+    def broken_urlsplit(_endpoint):
+        raise ValueError("bad url")
+
+    monkeypatch.setattr(urllib.parse, "urlsplit", broken_urlsplit)
+    result = NtfyPublisher(topic=SECRET_TOPIC).send(_sample_payload(), dry_run=True)
+    assert SECRET_TOPIC not in result.detail
+    assert json.loads(result.detail)["endpoint"] == "<invalid-endpoint>"
+
+
+def test_transport_exception_does_not_leak_topic_in_result_or_logs(
+    monkeypatch, caplog
+) -> None:
+    def fake_post(*_args, **_kwargs):
+        raise RuntimeError(f"request failed at https://ntfy.sh/{SECRET_TOPIC}")
+
+    monkeypatch.setattr("requests.post", fake_post)
+    monkeypatch.setattr("common.publishers.ntfy.time.sleep", lambda *_args: None)
+    result = NtfyPublisher(topic=SECRET_TOPIC).send_text("summary", "body")
+    dumped = json.dumps(result.as_dict()) + caplog.text
+    assert result.ok is False
+    assert result.detail == "exception:RuntimeError"
+    assert SECRET_TOPIC not in dumped

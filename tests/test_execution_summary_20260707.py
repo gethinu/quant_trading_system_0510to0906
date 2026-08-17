@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from argparse import Namespace
+import json
 from pathlib import Path
 import sys
 
@@ -15,6 +17,7 @@ from common.publishers.execution_summary import (  # noqa: E402
     format_execution_summary,
 )
 from common.publishers.ntfy import _sanitize_ascii_title  # noqa: E402
+from scripts.publish_execution_summary import _resolve_recon  # noqa: E402
 
 
 def _recon() -> dict:
@@ -38,14 +41,42 @@ def _recon() -> dict:
         },
         "systems": {
             "system1": {
-                "long": {"signals": 12, "generated": 8, "entry_submitted": 7, "filled": 7, "skipped": 1, "failed": 0},
-                "short": {"signals": 0, "generated": 0, "entry_submitted": 0, "filled": 0, "skipped": 0, "failed": 0},
+                "long": {
+                    "signals": 12,
+                    "generated": 8,
+                    "entry_submitted": 7,
+                    "filled": 7,
+                    "skipped": 1,
+                    "failed": 0,
+                },
+                "short": {
+                    "signals": 0,
+                    "generated": 0,
+                    "entry_submitted": 0,
+                    "filled": 0,
+                    "skipped": 0,
+                    "failed": 0,
+                },
                 "exit": {"submitted": 2, "close": 0, "protect": 2},
                 "funnel": None,
             },
             "system2": {
-                "long": {"signals": 0, "generated": 0, "entry_submitted": 0, "filled": 0, "skipped": 0, "failed": 0},
-                "short": {"signals": 9, "generated": 5, "entry_submitted": 3, "filled": 3, "skipped": 1, "failed": 1},
+                "long": {
+                    "signals": 0,
+                    "generated": 0,
+                    "entry_submitted": 0,
+                    "filled": 0,
+                    "skipped": 0,
+                    "failed": 0,
+                },
+                "short": {
+                    "signals": 9,
+                    "generated": 5,
+                    "entry_submitted": 3,
+                    "filled": 3,
+                    "skipped": 1,
+                    "failed": 1,
+                },
                 "exit": {"submitted": 1, "close": 1, "protect": 0},
                 "funnel": None,
             },
@@ -89,3 +120,44 @@ def test_format_returns_tuple():
     title, body = format_execution_summary(_recon())
     assert isinstance(title, str) and isinstance(body, str)
     assert title and body
+
+
+def test_default_recon_is_rebuilt_when_current_signals_run_changes(tmp_path: Path):
+    compact = "20260708"
+    (tmp_path / f"today_signals_{compact}.json").write_text(
+        json.dumps(
+            {
+                "date": "2026-07-08",
+                "meta": {"run_id": "night-run"},
+                "systems": {},
+                "portfolio": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / f"recon_{compact}.json").write_text(
+        json.dumps(
+            {
+                "date": "2026-07-08",
+                "source_signals_run_id": "morning-run",
+                "portfolio": {"entry_submitted": 999},
+                "systems": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    args = Namespace(
+        results_dir=str(tmp_path),
+        date="2026-07-08",
+        recon_json=None,
+        signals_json=None,
+        paper_orders_json=None,
+        exit_orders_json=None,
+        account_equity=None,
+    )
+
+    recon = _resolve_recon(args)
+
+    assert recon is not None
+    assert recon["source_signals_run_id"] == "night-run"
+    assert recon["portfolio"]["entry_submitted"] != 999

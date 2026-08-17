@@ -150,11 +150,20 @@ if ($AutoLatest) {
         $Date = "{0}-{1}-{2}" -f $dc.Substring(0, 4), $dc.Substring(4, 2), $dc.Substring(6, 2)
         Write-Host "[publish_data] AutoLatest: newest generated date = $Date ($($latest.Name))"
     }
+    # AutoLatest is a catch-up publisher for already-generated artifacts.  A
+    # read-only account refresh still changes generated_at/hash and defeats the
+    # promised idempotent no-op, creating a data commit on every catch-up run.
+    # Explicit -Date runs remain the account refresh path.
+    if ($RefreshAccount) {
+        Write-Host "[publish_data] AutoLatest: account再生成を省略 (既存bundleをbyte-stableに再送)。"
+        $RefreshAccount = $false
+    }
 }
 if (-not $Date) { $Date = Get-Date -Format "yyyy-MM-dd" }
 $DateCompact = $Date -replace "-", ""
 
 Set-Location $ProjectRoot
+$py = if ($env:QTS_PYTHON) { $env:QTS_PYTHON } else { "python" }
 
 # --- git dir を解決 (worktree でも正しく) --------------------------------
 $GitDir = & git rev-parse --git-dir 2>$null
@@ -251,7 +260,6 @@ if (-not (Test-Path $DataDir)) {
 # 2026-07-30: Alpaca キー未設定による exit=1 は WARN 継続のまま。後段の verify は
 # today_signals しか見ないので、これが publish の成否判定を汚すことはない (human #9)。
 if ($RefreshAccount) {
-    $py = if ($env:QTS_PYTHON) { $env:QTS_PYTHON } else { "python" }
     $ledgerScript = Join-Path $ProjectRoot "scripts\build_exit_ledger.py"
     $snapScript = Join-Path $ProjectRoot "scripts\export_alpaca_snapshot.py"
 
@@ -268,12 +276,34 @@ if ($RefreshAccount) {
     }
 }
 
+# --- dashboard bundle preflight (repair only deterministic fields) --------
+# publish の直前に同日 signals/pipeline/recon を 1 bundle として materialize する。
+# date/run/schema/count/provenance が一致しない bundle は data commit に載せない。
+$bundleScript = Join-Path $ProjectRoot "scripts\prepare_dashboard_bundle.py"
+if (-not (Test-Path $bundleScript)) {
+    Write-Log "ERROR: dashboard bundle preflight が無い: $bundleScript"
+    Send-PublishNtfy -Title "bundle preflight MISSING $Date" `
+        -Body "prepare_dashboard_bundle.py が無いため publish を fail-closed しました。"
+    exit 1
+}
+Write-Log "dashboard bundle preflight: same-date/run/schema + funnel/Exit coverage"
+& $py $bundleScript --date $Date --results-dir $SrcDir --require-exit 2>&1 |
+    ForEach-Object { Write-Log $_ }
+$bundleExit = $LASTEXITCODE
+if ($bundleExit -ne 0) {
+    Write-Log "ERROR: dashboard bundle preflight failed (exit=$bundleExit)。publish しません。"
+    Send-PublishNtfy -Title "bundle preflight FAIL $Date" `
+        -Body "dashboard bundle contract違反 (exit=$bundleExit)。不整合/未計測のまま公開せず停止しました。"
+    exit 1
+}
+
 # 当日生成される JSON を data/ に日付付きのままコピー。
 # pipeline_*.json = 新 schema (signal_pipeline/v1, 絞込フロー)。
 # polygon_daily_coverage_*.json = 旧 schema (移行期は両方 push し dashboard で fallback)。
 $patterns = @(
     "today_signals_$DateCompact.json",
     "pipeline_$DateCompact.json",
+    "dashboard_bundle_$DateCompact.json",
     "polygon_daily_coverage_$DateCompact.json",
     "narrative_$DateCompact.json",
     # Alpaca paper 口座の read-only スナップショット (scripts/export_alpaca_snapshot.py)。
@@ -330,7 +360,31 @@ function Test-PublishServed {
             -Body "dashboard publish 検証失敗: served(origin/$Branch)=$served < generated=$gen。data/ が $Branch に届いていません。"
         return $false
     }
-    Write-Log "verify OK: served(origin/$Branch)=$served >= generated=$gen"
+
+    # 日付だけでは同日再生成の stale blob を検知できない。signals/pipeline/manifest
+    # の exact git blob id を source と origin ref で比較する。
+    $verifyNames = @(
+        "today_signals_$DateCompact.json",
+        "pipeline_$DateCompact.json",
+        "dashboard_bundle_$DateCompact.json"
+    )
+    foreach ($name in $verifyNames) {
+        $localPath = Join-Path $SrcDir $name
+        if (-not (Test-Path $localPath)) {
+            Write-Log "verify FAIL: local artifact missing: $name"
+            return $false
+        }
+        $localBlob = "$(& git hash-object -- $localPath 2>$null)".Trim()
+        $remoteSpec = "${RelData}/$name"
+        $servedBlob = "$(& git rev-parse "origin/${Branch}:${remoteSpec}" 2>$null)".Trim()
+        if (-not $localBlob -or -not $servedBlob -or $localBlob -ne $servedBlob) {
+            Write-Log "verify FAIL: blob mismatch $name local=$localBlob served=$servedBlob"
+            Send-PublishNtfy -Title "publish blob verify FAIL $Date" `
+                -Body "$name のblobが origin/$Branch と一致しません。同日stale publishを検知しました。"
+            return $false
+        }
+    }
+    Write-Log "verify OK: served date=$served, exact bundle blobs match generated source"
     return $true
 }
 
@@ -356,7 +410,7 @@ function Test-PublishServed {
 # ============================================================================
 
 # 世代整理の対象 prefix (data/ 内の日付付き JSON 群)。
-$prefixes = @("today_signals_", "pipeline_", "polygon_daily_coverage_", "narrative_", "alpaca_snapshot_", "exit_ledger_")
+$prefixes = @("today_signals_", "pipeline_", "dashboard_bundle_", "polygon_daily_coverage_", "narrative_", "alpaca_snapshot_", "exit_ledger_")
 
 # base tip を解決 (origin 優先 = Vercel が build で読む ref)。current HEAD は使わない。
 & git fetch origin $Branch 2>&1 | ForEach-Object { Write-Log $_ }
