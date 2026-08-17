@@ -1,0 +1,42 @@
+{
+  "schema": "dashboard_bundle/v1",
+  "date": "2026-08-17",
+  "source_run_id": "20260817_060721_dbdc19",
+  "materialized_at": "2026-08-16T21:23:51+00:00",
+  "files": {
+    "today_signals": {
+      "name": "today_signals_20260817.json",
+      "sha256": "50ddee4fe7482ecd13aea06aa73ca34ba3e3555a6a26d5aa58668591294e3128"
+    },
+    "pipeline": {
+      "name": "pipeline_20260817.json",
+      "sha256": "3627f2165f0e2275aa1d22b18dab611423749d64bae242c5e20d7e51b12db80c"
+    },
+    "narrative": {
+      "name": "narrative_20260817.json",
+      "sha256": "e4d5b94df23db4fbd8e54f13f410d7689045d27870c93237dfa16ea0830566db"
+    },
+    "alpaca_snapshot": {
+      "name": "alpaca_snapshot_20260817.json",
+      "sha256": "a9e82fb744fd99c1c28f74fc3cf933959e7001c1bb802498830eddb4183253bb"
+    }
+  },
+  "sources": {
+    "recon": {
+      "name": "recon_20260817.json",
+      "sha256": "2ce090dcc0bdbb6894cabbebff886bbf977a7c6730db03183460b40bf302eae5"
+    }
+  },
+  "measurement": {
+    "funnel_measured": 35,
+    "funnel_total": 35,
+    "exit_measured": 7
+  },
+  "warnings": [
+    "legacy recon lineage verified by generated_at only; upgrade producer to source_signals_run_id"
+  ],
+  "materialization": {
+    "funnel_status": "ok",
+    "exit_status": "ok"
+  }
+}
