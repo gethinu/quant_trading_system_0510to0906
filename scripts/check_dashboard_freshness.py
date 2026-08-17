@@ -47,6 +47,15 @@ import re
 import sys
 
 _SIGNAL_RE = re.compile(r"today_signals_(\d{8})\.json$")
+_BUNDLE_RE = re.compile(r"dashboard_bundle_(\d{8})\.json$")
+
+# 本番 URL。dashboard は静的 export で data/*.json を **build 時に取り込む** ため、
+# JSON は URL で配信されない。到達確認は描画済み HTML に run_id が現れるかで行う。
+_PROD_URL_DEFAULT = "https://quant-trading-monitor.vercel.app/"
+
+# git push から Vercel の build/deploy 完了までの許容遅延。2026-08-17 に実測で
+# 約 20 分かかった実績があるため、これより短いと正常な遅延を誤検知する。
+_DEPLOY_GRACE_MINUTES_DEFAULT = 30
 
 # repo layout: <root>/scripts/check_dashboard_freshness.py
 _REPO_ROOT_DEFAULT = Path(__file__).resolve().parents[1]
@@ -134,6 +143,104 @@ def check_freshness(results_dir: Path, data_dir: Path) -> dict:
         "data_date_str": _fmt(data_date),
         "results_generated_at": _generated_at(results_dir, results_date),
         "data_generated_at": _generated_at(data_dir, data_date),
+    }
+
+
+def newest_bundle(data_dir: Path) -> dict | None:
+    """data/ で最も新しい dashboard_bundle_*.json を読む (無ければ None)。"""
+    best: tuple[int, Path] | None = None
+    try:
+        entries = list(data_dir.iterdir())
+    except OSError:
+        return None
+    for path in entries:
+        m = _BUNDLE_RE.search(path.name)
+        if not m:
+            continue
+        key = int(m.group(1))
+        if best is None or key > best[0]:
+            best = (key, path)
+    if best is None:
+        return None
+    try:
+        payload = json.loads(best[1].read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 - 壊れた manifest は「不明」扱い
+        return None
+    if not isinstance(payload, dict):
+        return None
+    payload["_path"] = str(best[1])
+    return payload
+
+
+def _fetch_served_html(url: str, timeout: float) -> str | None:
+    """本番 HTML を取得する。取得できなければ None (未確認と区別する)。"""
+    try:
+        import urllib.request
+
+        req = urllib.request.Request(url, headers={"Cache-Control": "no-cache"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+            return resp.read().decode("utf-8", errors="replace")
+    except Exception:  # noqa: BLE001 - ネットワーク失敗は "unknown"
+        return None
+
+
+def _minutes_since(path_str: str | None) -> float | None:
+    if not path_str:
+        return None
+    try:
+        mtime = Path(path_str).stat().st_mtime
+    except OSError:
+        return None
+    return (datetime.now(timezone.utc).timestamp() - mtime) / 60.0
+
+
+def check_served_run(
+    data_dir: Path,
+    *,
+    url: str = _PROD_URL_DEFAULT,
+    grace_minutes: float = _DEPLOY_GRACE_MINUTES_DEFAULT,
+    timeout: float = 20.0,
+) -> dict:
+    """publish した run_id が **本番で実際に配信されているか** を確認する。
+
+    既存の freshness チェックは results_csv と data/ という **どちらもローカルの
+    ファイル** を比べるだけなので、git push が成功していれば「fresh」と答える。
+    Vercel の build が落ちた / 発火しなかった場合を検出できない
+    (2026-08-17: publish は成功し blob も一致していたのに本番は朝の run のままだった)。
+
+    status:
+      "served"        -- 本番 HTML に manifest の run_id が現れた
+      "deploy_lagging"-- まだ現れないが grace 内 (正常な遅延の可能性)
+      "deploy_missing"-- grace を超えても現れない (build 不達の疑い)
+      "unknown"       -- manifest 不在 / run_id 不明 / HTML 取得失敗
+    """
+    manifest = newest_bundle(data_dir)
+    if not manifest:
+        return {"status": "unknown", "reason": "no_bundle_manifest"}
+    run_id = str(manifest.get("source_run_id") or "")
+    if not run_id:
+        return {"status": "unknown", "reason": "manifest_has_no_run_id"}
+
+    age = _minutes_since(manifest.get("_path"))
+    html = _fetch_served_html(url, timeout)
+    if html is None:
+        return {
+            "status": "unknown",
+            "reason": "fetch_failed",
+            "run_id": run_id,
+            "url": url,
+        }
+
+    if run_id in html:
+        return {"status": "served", "run_id": run_id, "url": url, "age_min": age}
+
+    lagging = age is not None and age < grace_minutes
+    return {
+        "status": "deploy_lagging" if lagging else "deploy_missing",
+        "run_id": run_id,
+        "url": url,
+        "age_min": age,
+        "grace_minutes": grace_minutes,
     }
 
 
@@ -268,6 +375,30 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="emit the result as a JSON line (for machine consumers).",
     )
+    parser.add_argument(
+        "--check-served",
+        action="store_true",
+        help=(
+            "本番 URL を取得し、publish した run_id が実際に配信されているか確認する "
+            "(git push 成功だけでは Vercel の build 不達を検出できないため)。"
+        ),
+    )
+    parser.add_argument(
+        "--prod-url",
+        default=os.getenv("QTS_DASHBOARD_URL", _PROD_URL_DEFAULT),
+        help="本番 dashboard の URL (--check-served 用)。",
+    )
+    parser.add_argument(
+        "--deploy-grace-minutes",
+        type=float,
+        default=float(
+            os.getenv("QTS_DEPLOY_GRACE_MINUTES", _DEPLOY_GRACE_MINUTES_DEFAULT)
+        ),
+        help=(
+            "publish から deploy 完了までの許容遅延 (分)。既定 30。"
+            "2026-08-17 に約 20 分の実績があるため短くしすぎない。"
+        ),
+    )
     args = parser.parse_args(argv)
 
     root = Path(args.repo_root)
@@ -290,6 +421,39 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+    # --- deploy watchdog: publish した run が本番に届いているか -----------------
+    # 既存の stale 判定はローカル同士の比較なので、Vercel の build 不達を検出できない。
+    served: dict | None = None
+    if args.check_served:
+        served = check_served_run(
+            data_dir,
+            url=args.prod_url,
+            grace_minutes=args.deploy_grace_minutes,
+        )
+        print(
+            f"[dashboard_deploy] status={served['status']} "
+            f"run={served.get('run_id') or '-'} "
+            f"age_min={served.get('age_min') if served.get('age_min') is None else round(served['age_min'], 1)}"
+        )
+        if served["status"] == "deploy_missing":
+            print(
+                "[dashboard_deploy] MISSING: publish 済みの run が本番に出ていません "
+                f"(run={served.get('run_id')}, {args.deploy_grace_minutes} 分超過)。"
+                " Vercel の build 発火を確認してください。"
+            )
+            if args.notify:
+                _notify_stale(
+                    {
+                        "status": "deploy_missing",
+                        "results_date_str": str(served.get("run_id") or "?"),
+                        "data_date_str": "not served",
+                        **result,
+                    },
+                    root,
+                    now,
+                )
+            return 3
 
     if result["status"] == "stale":
         print(
