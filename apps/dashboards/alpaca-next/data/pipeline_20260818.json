@@ -1,5 +1,5 @@
 {
-  "date": "2026-08-11",
+  "date": "2026-08-18",
   "provider": "polygon_grouped_daily",
   "schema": "signal_pipeline/v1",
   "systems": {
@@ -46,15 +46,15 @@
           "name": "Entry",
           "label": "Entry",
           "condition": "allocation 後エントリ発火",
-          "count": 7,
+          "count": 8,
           "measured": false,
-          "ratio_of_prev": 0.7,
+          "ratio_of_prev": 0.8,
           "ratio_of_universe": null
         },
         {
           "name": "Exit",
           "label": "Exit",
-          "condition": "本日手仕舞い発火 (close 0 / protect 0) · 3 armed",
+          "condition": "本日手仕舞い発火 (close 0 / protect 0) · 2 armed",
           "count": 0,
           "measured": true,
           "ratio_of_prev": 0.0,
@@ -62,12 +62,12 @@
           "fired": 0,
           "exit_close": 0,
           "exit_protect": 0,
-          "armed": 3,
+          "armed": 2,
           "armed_close": 0,
-          "armed_protect": 3
+          "armed_protect": 2
         }
       ],
-      "final_signals": 7
+      "final_signals": 8
     },
     "sys2": {
       "system_id": "sys2",
@@ -178,28 +178,28 @@
           "name": "Entry",
           "label": "Entry",
           "condition": "allocation 後エントリ発火",
-          "count": 0,
+          "count": 2,
           "measured": false,
-          "ratio_of_prev": 0.0,
+          "ratio_of_prev": 0.2,
           "ratio_of_universe": null
         },
         {
           "name": "Exit",
           "label": "Exit",
-          "condition": "本日手仕舞い発火 (close 0 / protect 0) · 4 armed",
+          "condition": "本日手仕舞い発火 (close 0 / protect 0)",
           "count": 0,
           "measured": true,
-          "ratio_of_prev": null,
+          "ratio_of_prev": 0.0,
           "ratio_of_universe": null,
           "fired": 0,
           "exit_close": 0,
           "exit_protect": 0,
-          "armed": 4,
+          "armed": 0,
           "armed_close": 0,
-          "armed_protect": 4
+          "armed_protect": 0
         }
       ],
-      "final_signals": 0
+      "final_signals": 2
     },
     "sys4": {
       "system_id": "sys4",
@@ -301,7 +301,7 @@
           "name": "TRDlist",
           "label": "TRDlist",
           "condition": "ADX7 降順 上位候補",
-          "count": 6,
+          "count": 7,
           "measured": false,
           "ratio_of_prev": null,
           "ratio_of_universe": null
