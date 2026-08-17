@@ -64,11 +64,18 @@ def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
 
 
 def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+    """Hash the artifact's content with line endings normalized to LF.
+
+    The producer runs on Windows, so these JSON files sit in the working tree
+    with CRLF, while git stores and checks out LF.  Hashing the raw bytes here
+    records a digest the dashboard can never reproduce after checkout, which
+    fail-closes the whole page on a perfectly valid publish.  Normalizing makes
+    the digest identical on both sides while still detecting any real content
+    difference (stale or partial publishes).  The reader applies the same
+    normalization.
+    """
+    raw = path.read_bytes()
+    return hashlib.sha256(raw.replace(b"\r\n", b"\n")).hexdigest()
 
 
 def _valid_count(value: Any) -> bool:

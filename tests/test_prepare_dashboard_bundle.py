@@ -96,7 +96,11 @@ def _fixtures(
 
 
 def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    # producer と同じく行末を LF に正規化する。fixture は Windows の text mode で
+    # 書かれ CRLF になるが、git が保存/checkout するのは LF なので manifest は
+    # 正規化後の digest を記録する (2026-08-17 の fail-closed incident の再発防止)。
+    raw = path.read_bytes().replace(bytes([13, 10]), bytes([10]))
+    return hashlib.sha256(raw).hexdigest()
 
 
 def test_materializes_same_run_funnel_exit_and_manifest(tmp_path: Path) -> None:
@@ -289,3 +293,40 @@ def test_invalid_optional_artifact_is_excluded_without_blocking_core_bundle(
     assert any(
         "optional narrative excluded" in warning for warning in manifest["warnings"]
     )
+
+
+# --- CRLF/LF 正規化: producer(Windows) と consumer(git checkout) の hash 一致 ---
+# 2026-08-17 incident: manifest が working tree の CRLF バイト列を hash していたため、
+# git が LF で保存 -> Vercel が LF で checkout -> loader の hash と永久に不一致になり、
+# 正常な publish でもダッシュボード全体が fail-closed で表示停止した。
+def test_sha256_is_line_ending_agnostic(tmp_path: Path) -> None:
+    from scripts.prepare_dashboard_bundle import _sha256
+
+    crlf = tmp_path / "crlf.json"
+    lf = tmp_path / "lf.json"
+    crlf.write_bytes(b'{\r\n  "a": 1\r\n}\r\n')
+    lf.write_bytes(b'{\n  "a": 1\n}\n')
+    assert _sha256(crlf) == _sha256(lf)
+
+
+def test_sha256_matches_git_stored_lf_bytes(tmp_path: Path) -> None:
+    """manifest の digest は git blob (LF) と一致する = consumer が再現できる。"""
+    import hashlib
+
+    from scripts.prepare_dashboard_bundle import _sha256
+
+    src = tmp_path / "payload.json"
+    src.write_bytes(b'{\r\n  "date": "2026-08-17"\r\n}\r\n')
+    git_stored = b'{\n  "date": "2026-08-17"\n}\n'
+    assert _sha256(src) == hashlib.sha256(git_stored).hexdigest()
+
+
+def test_sha256_still_detects_real_content_change(tmp_path: Path) -> None:
+    """行末正規化しても、実データの差は必ず検出する。"""
+    from scripts.prepare_dashboard_bundle import _sha256
+
+    a = tmp_path / "a.json"
+    b = tmp_path / "b.json"
+    a.write_bytes(b'{\r\n  "count": 1\r\n}\r\n')
+    b.write_bytes(b'{\r\n  "count": 2\r\n}\r\n')
+    assert _sha256(a) != _sha256(b)

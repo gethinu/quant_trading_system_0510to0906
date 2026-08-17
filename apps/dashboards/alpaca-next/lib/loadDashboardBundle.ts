@@ -40,8 +40,27 @@ function latestManifest(dir: string): string | null {
   return files.at(-1) ?? null;
 }
 
+/**
+ * Hash with CRLF normalized to LF, matching prepare_dashboard_bundle.py.
+ * The producer writes these files on Windows (CRLF in its working tree) while
+ * git stores and checks out LF, so a raw-byte digest never matches here and
+ * would fail-close the page on a valid publish.
+ */
+const CR = 0x0d;
+const LF = 0x0a;
+
 function sha256(file: string): string {
-  return createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+  const buf = fs.readFileSync(file);
+  // Drop each CR that immediately precedes an LF, without building strings
+  // (avoids any encoding round-trip on binary-ish content).
+  const out = Buffer.allocUnsafe(buf.length);
+  let n = 0;
+  for (let i = 0; i < buf.length; i += 1) {
+    if (buf[i] === CR && i + 1 < buf.length && buf[i + 1] === LF) continue;
+    out[n] = buf[i];
+    n += 1;
+  }
+  return createHash('sha256').update(out.subarray(0, n)).digest('hex');
 }
 
 function safeArtifactPath(dir: string, name: string): string | null {
