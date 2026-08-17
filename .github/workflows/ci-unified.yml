@@ -53,37 +53,63 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
           pip install ruff black isort
-      - name: List changed Python files
-        id: changed-python
+      - name: Resolve lint scope
+        id: lint-scope
         shell: bash
         run: |
-          base="${{ github.event.before }}"
+          # main/develop/branch0906 は repo 全体を強制する (origin/main は現在
+          # repo-wide clean。その保証を changed-files 縮退で手放さない)。
+          # claude/* 等の運用 branch を base にする PR だけ、既存の lint 債務を
+          # 抱えたままでも新規変更を検証できるよう changed-files へ縮退する。
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            base="${{ github.event.pull_request.base.sha }}"
+            target="${{ github.event.pull_request.base.ref }}"
+          else
+            target="${{ github.ref_name }}"
           fi
-          if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
-            base="$(git rev-parse HEAD^)"
+          case "$target" in
+            main | develop | branch0906) full="true" ;;
+            *) full="false" ;;
+          esac
+          echo "target=$target" >> "$GITHUB_OUTPUT"
+          echo "full=$full" >> "$GITHUB_OUTPUT"
+          echo "lint scope: target=$target full_repo=$full"
+      - name: List lint targets
+        id: lint-targets
+        shell: bash
+        run: |
+          out="$RUNNER_TEMP/lint-targets.txt"
+          if [[ "${{ steps.lint-scope.outputs.full }}" == "true" ]]; then
+            printf '.\n' > "$out"
+          else
+            base="${{ github.event.before }}"
+            if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+              base="${{ github.event.pull_request.base.sha }}"
+            fi
+            if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
+              base="$(git rev-parse HEAD^)"
+            fi
+            git diff --name-only --diff-filter=ACMR "$base" "$GITHUB_SHA" -- '*.py' > "$out"
           fi
-          git diff --name-only --diff-filter=ACMR "$base" "$GITHUB_SHA" -- '*.py' > "$RUNNER_TEMP/changed-python.txt"
-          echo "count=$(wc -l < "$RUNNER_TEMP/changed-python.txt")" >> "$GITHUB_OUTPUT"
-      - name: isort (changed Python files)
-        if: steps.changed-python.outputs.count != '0'
+          echo "count=$(wc -l < "$out")" >> "$GITHUB_OUTPUT"
+          cat "$out"
+      - name: isort (import order check)
+        if: steps.lint-targets.outputs.count != '0'
         shell: bash
         run: |
-          mapfile -t files < "$RUNNER_TEMP/changed-python.txt"
-          isort --check-only "${files[@]}"
-      - name: Ruff (changed Python files)
-        if: steps.changed-python.outputs.count != '0'
+          mapfile -t targets < "$RUNNER_TEMP/lint-targets.txt"
+          isort --check-only "${targets[@]}"
+      - name: Ruff (lint)
+        if: steps.lint-targets.outputs.count != '0'
         shell: bash
         run: |
-          mapfile -t files < "$RUNNER_TEMP/changed-python.txt"
-          ruff check "${files[@]}" --output-format=github
-      - name: Black (changed Python files)
-        if: steps.changed-python.outputs.count != '0'
+          mapfile -t targets < "$RUNNER_TEMP/lint-targets.txt"
+          ruff check "${targets[@]}" --output-format=github
+      - name: Black (format check)
+        if: steps.lint-targets.outputs.count != '0'
         shell: bash
         run: |
-          mapfile -t files < "$RUNNER_TEMP/changed-python.txt"
-          black --check "${files[@]}"
+          mapfile -t targets < "$RUNNER_TEMP/lint-targets.txt"
+          black --check "${targets[@]}"
 
   test-and-coverage:
     name: Test & Coverage
