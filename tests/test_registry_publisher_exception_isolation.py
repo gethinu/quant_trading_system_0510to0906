@@ -39,7 +39,9 @@ class _RaisingPublisher(Publisher):
         self._exc = exc
         self.calls: int = 0
 
-    def send(self, signals_json: dict[str, Any], *, dry_run: bool = False) -> PublishResult:
+    def send(
+        self, signals_json: dict[str, Any], *, dry_run: bool = False
+    ) -> PublishResult:
         self.calls += 1
         raise self._exc
 
@@ -58,7 +60,9 @@ class _RecordingPublisher(Publisher):
         self.last_payload: dict[str, Any] | None = None
         self.last_dry_run: bool | None = None
 
-    def send(self, signals_json: dict[str, Any], *, dry_run: bool = False) -> PublishResult:
+    def send(
+        self, signals_json: dict[str, Any], *, dry_run: bool = False
+    ) -> PublishResult:
         self.calls += 1
         self.last_payload = signals_json
         self.last_dry_run = dry_run
@@ -106,7 +110,7 @@ def test_primary_raise_still_fires_secondary_fallback() -> None:
     assert len(result.results) == 2
     assert result.results[0].ok is False
     assert result.results[0].publisher == "ntfy"
-    assert "publisher_exception" in result.results[0].detail
+    assert result.results[0].detail == "publisher_exception:RuntimeError"
     assert result.results[1].ok is True
 
     # Chain outcome: partial (primary failed, secondary ok) — NOT failed.
@@ -187,13 +191,16 @@ def test_publisher_exception_does_not_expose_internal_secrets() -> None:
     target = publisher.name (a well-known identifier). Nothing more.
     This protects against a chained failure of P0#3 (ntfy topic leak) via P0#4.
     """
+
     class LeakyPublisher(Publisher):
         name = "ntfy"
 
         def __init__(self) -> None:
             self.topic = "super-secret-topic-12345"
 
-        def send(self, signals_json: dict[str, Any], *, dry_run: bool = False) -> PublishResult:
+        def send(
+            self, signals_json: dict[str, Any], *, dry_run: bool = False
+        ) -> PublishResult:
             # Any attempt to embed the topic in the exception must not end up
             # in the persisted PublishResult.
             raise RuntimeError(f"render fail for topic={self.topic}")
@@ -207,12 +214,8 @@ def test_publisher_exception_does_not_expose_internal_secrets() -> None:
 
     dumped = json.dumps(result.as_dict())
     # The registry-synthesized result MUST NOT quote the secret.
-    # The exception text itself is unavoidable if a publisher decides to
-    # embed a secret in str(exc); the *registry* is responsible for keeping
-    # target=publisher.name, not the whole message.
     assert result.results[0].target == "ntfy"
-    # And target itself is what dashboards persist — verify no leak there.
-    assert "super-secret-topic-12345" not in result.results[0].target
+    assert "super-secret-topic-12345" not in dumped
 
 
 # -----------------------------------------------------------------------

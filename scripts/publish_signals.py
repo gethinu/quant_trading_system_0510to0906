@@ -19,12 +19,13 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 import logging
 import os
 from pathlib import Path
 import sys
+from uuid import uuid4
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -32,6 +33,7 @@ from common.publishers import (  # noqa: E402
     EmailPublisher,
     NtfyPublisher,
     PublisherRegistry,
+    RegistryResult,
     SignalMessage,
 )
 
@@ -54,7 +56,9 @@ def _default_narrative_path(signals_path: Path) -> Path:
     return signals_path.with_name(name)
 
 
-def merge_narrative(payload: dict, narrative_path: Path | None, signals_path: Path) -> None:
+def merge_narrative(
+    payload: dict, narrative_path: Path | None, signals_path: Path
+) -> None:
     """narrative JSON を payload['narrative'] に merge (optional, best-effort)。
 
     明示 path が無ければ signals と同じ dir の narrative_YYYYMMDD.json を探す。
@@ -64,9 +68,15 @@ def merge_narrative(payload: dict, narrative_path: Path | None, signals_path: Pa
         return
     try:
         narrative = json.loads(path.read_text(encoding="utf-8"))
-        if isinstance(narrative, dict) and (narrative.get("headline") or narrative.get("summary")):
+        if isinstance(narrative, dict) and (
+            narrative.get("headline") or narrative.get("summary")
+        ):
             payload["narrative"] = narrative
-            logger.info("narrative merged: %s (headline=%r)", path, narrative.get("headline", ""))
+            logger.info(
+                "narrative merged: %s (headline=%r)",
+                path,
+                narrative.get("headline", ""),
+            )
     except Exception as exc:  # noqa: BLE001
         logger.warning("narrative 読み込み失敗 (無視して継続): %s", exc)
 
@@ -113,24 +123,185 @@ def build_registry(kind: str, *, fallback: bool) -> PublisherRegistry:
     )
 
 
-def _write_publish_status(input_path: Path, payload: dict, status: str) -> None:
-    """signals JSON の meta.publish_status を書き戻す (dashboard monitoring 用)。"""
+def _delivery_projection(result: RegistryResult) -> dict:
+    """Build a secret-free, run-local delivery summary for the dashboard.
+
+    Provider response text and addresses are deliberately excluded.  A ntfy
+    HTTP 2xx is recorded as ``accepted`` (server acceptance), never as device
+    delivery.  The aggregate policy state distinguishes an email fallback from
+    successful primary delivery, which the legacy ``partial`` value could not.
+    """
+    channels: dict[str, dict[str, object]] = {}
+    for item in result.results:
+        channels[item.publisher] = {
+            "state": "accepted" if item.ok else "failed",
+            "status_code": item.status_code,
+        }
+
+    if not result.results:
+        policy_state = "unknown"
+    elif result.results[0].ok:
+        policy_state = (
+            "all_accepted" if all(item.ok for item in result.results) else "partial"
+        )
+        if len(result.results) == 1:
+            policy_state = "primary_accepted"
+    elif any(item.ok for item in result.results[1:]):
+        policy_state = "fallback_accepted"
+    else:
+        policy_state = "all_failed"
+
+    return {
+        "state": policy_state,
+        "attempted_at": datetime.now(timezone.utc).isoformat(),
+        "channels": channels,
+    }
+
+
+def _delivery_state(channels: dict[str, dict[str, object]]) -> str:
+    """Derive the aggregate policy outcome from ordered channel states."""
+    states = [str(channel.get("state") or "unknown") for channel in channels.values()]
+    if not states:
+        return "unknown"
+    if all(state == "not_configured" for state in states):
+        return "not_configured"
+    accepted = [state == "accepted" for state in states]
+    if all(accepted):
+        return "primary_accepted" if len(states) == 1 else "all_accepted"
+    if accepted[0]:
+        return "partial"
+    if any(accepted[1:]):
+        return "fallback_accepted"
+    return "all_failed"
+
+
+def _merge_delivery_projection(existing: object, current: dict) -> dict:
+    """Keep accepted channel outcomes monotonic for serialized duplicate sends."""
+    if not isinstance(existing, dict):
+        return current
+    old_channels = existing.get("channels")
+    if not isinstance(old_channels, dict):
+        return current
+    merged = {
+        str(name): dict(value)
+        for name, value in old_channels.items()
+        if isinstance(value, dict)
+    }
+    for name, value in current["channels"].items():
+        previous = merged.get(name, {})
+        if previous.get("state") == "accepted" and value.get("state") != "accepted":
+            continue
+        merged[name] = value
+    attempted_at = (
+        max(
+            str(existing.get("attempted_at") or ""),
+            str(current.get("attempted_at") or ""),
+        )
+        or None
+    )
+    return {
+        "state": _delivery_state(merged),
+        "attempted_at": attempted_at,
+        "channels": merged,
+    }
+
+
+def _legacy_publish_status(delivery_state: str) -> str:
+    if delivery_state in {"primary_accepted", "all_accepted"}:
+        return "ok"
+    if delivery_state in {"fallback_accepted", "partial"}:
+        return "partial"
+    if delivery_state == "not_attempted":
+        return "not_attempted"
+    return "failed"
+
+
+def _write_publish_status(
+    input_path: Path, payload: dict, result: RegistryResult
+) -> bool:
+    """CAS-write delivery state for this exact signals run.
+
+    Publishing performs network I/O.  If another producer replaces the same
+    date file while that request is in flight, writing the old in-memory
+    payload back would roll the new run backwards.  Re-read and compare run_id
+    immediately before replace; a mismatch is recorded only in logs and the
+    newer artifact remains authoritative.
+    """
     try:
-        payload.setdefault("meta", {})["publish_status"] = status
-        # merge した transient な narrative は signals JSON に残さない
-        # (narrative は narrative_YYYYMMDD.json 側が single source of truth)
-        to_write = {k: v for k, v in payload.items() if k != "narrative"}
-        tmp = input_path.with_suffix(input_path.suffix + ".tmp")
-        tmp.write_text(json.dumps(to_write, ensure_ascii=False, indent=2), encoding="utf-8")
+        expected_run_id = str((payload.get("meta") or {}).get("run_id") or "")
+        current = load_payload(input_path)
+        current_run_id = str((current.get("meta") or {}).get("run_id") or "")
+        if not expected_run_id or current_run_id != expected_run_id:
+            logger.warning(
+                "publish_status CAS skip: expected run=%s current run=%s",
+                expected_run_id or "<missing>",
+                current_run_id or "<missing>",
+            )
+            return False
+        meta = current.setdefault("meta", {})
+        projection = _merge_delivery_projection(
+            meta.get("publish_delivery"), _delivery_projection(result)
+        )
+        meta["publish_status"] = _legacy_publish_status(str(projection["state"]))
+        meta["publish_delivery"] = projection
+        tmp = input_path.with_suffix(
+            input_path.suffix + f".{expected_run_id}.{uuid4().hex}.publish.tmp"
+        )
+        tmp.write_text(
+            json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         tmp.replace(input_path)
+        return True
     except Exception as exc:  # noqa: BLE001
         logger.warning("publish_status 書き戻し失敗: %s", exc)
+        return False
+
+
+def _write_unavailable_delivery(
+    input_path: Path, payload: dict, registry: PublisherRegistry
+) -> None:
+    """Persist an explicit failed/not-configured attempt when no channel exists."""
+    result = RegistryResult(
+        status="failed",
+        results=[],
+    )
+    projection = _delivery_projection(result)
+    projection["state"] = "not_configured"
+    channel_names = [registry.primary.name]
+    if registry.secondary is not None and registry.secondary.name not in channel_names:
+        channel_names.append(registry.secondary.name)
+    projection["channels"] = {
+        name: {"state": "not_configured", "status_code": None} for name in channel_names
+    }
+    try:
+        expected_run_id = str((payload.get("meta") or {}).get("run_id") or "")
+        current = load_payload(input_path)
+        if str((current.get("meta") or {}).get("run_id") or "") != expected_run_id:
+            return
+        current.setdefault("meta", {})["publish_status"] = "failed"
+        current["meta"]["publish_delivery"] = projection
+        tmp = input_path.with_suffix(
+            input_path.suffix + f".{expected_run_id}.{uuid4().hex}.publish.tmp"
+        )
+        tmp.write_text(
+            json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        tmp.replace(input_path)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("not_configured delivery 書き戻し失敗: %s", exc)
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    p.add_argument("--date", type=str, default=None, help="対象日 (YYYY-MM-DD)。--input 未指定時に使用。")
-    p.add_argument("--input", type=str, default=None, help="signals JSON path (直接指定)。")
+    p.add_argument(
+        "--date",
+        type=str,
+        default=None,
+        help="対象日 (YYYY-MM-DD)。--input 未指定時に使用。",
+    )
+    p.add_argument(
+        "--input", type=str, default=None, help="signals JSON path (直接指定)。"
+    )
     p.add_argument(
         "--publisher",
         choices=["ntfy", "email", "all"],
@@ -148,7 +319,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=None,
         help="narrative JSON path (未指定なら signals と同じ dir の narrative_YYYYMMDD.json を自動探索)。",
     )
-    p.add_argument("--dry-run", action="store_true", help="送信せず payload を検証・表示。")
+    p.add_argument(
+        "--dry-run", action="store_true", help="送信せず payload を検証・表示。"
+    )
     p.add_argument("--log-level", default="INFO", help="ログレベル。")
     return p
 
@@ -195,20 +368,21 @@ def main(argv: list[str] | None = None) -> int:
                 "配信先が未設定です。.env の NTFY_TOPIC (primary) か "
                 "SENDGRID_* (backup) を設定してください。"
             )
+            _write_unavailable_delivery(input_path, payload, registry)
             return 1
 
     result = registry.publish(payload, dry_run=args.dry_run)
 
     for r in result.results:
         tag = "OK" if r.ok else "FAIL"
-        logger.info("[%s] %s -> %s %s", tag, r.publisher, r.target, "" if r.ok else r.detail)
+        logger.info("[%s] %s -> %s code=%s", tag, r.publisher, r.target, r.status_code)
         if args.dry_run:
             logger.info("  payload: %s", r.detail[:600])
 
     logger.info("配信 status=%s (%d results)", result.status, len(result.results))
 
     if not args.dry_run:
-        _write_publish_status(input_path, payload, result.status)
+        _write_publish_status(input_path, payload, result)
 
     if args.dry_run:
         return 0

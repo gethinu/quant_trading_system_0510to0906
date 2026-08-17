@@ -248,7 +248,8 @@ try {
     else {
         $pubArgs = @(
             (Join-Path $ProjectRoot "scripts\publish_signals.py"),
-            "--input", $SignalsJson
+            "--input", $SignalsJson,
+            "--fallback"
         )
         if ($DryRunPublish) { $pubArgs += @("--dry-run") }
         $p = Invoke-Step -Name "publish" -PyArgs $pubArgs
@@ -327,10 +328,13 @@ try {
     # sig→gen→entry→fill→exit + system別 + drop 内訳 の整列サマリを配信する。
     # Step5 の publish (signal 予告) はそのまま残し、本 step は実発注確定後の結果を別便で送る。
     # AutoSubmitPaper 時のみ実送信、それ以外は dry-run (recon 生成 + 本文表示のみ・送信なし)。
-    if ($SkipPublish) {
-        Write-Log "[exec_summary] SkipPublish 指定によりスキップ"
-    }
-    elseif (-not (Test-Path $SignalsJson)) {
+    #
+    # SkipPublish は「ntfy/email 配信をスキップ」であって dashboard publish の
+    # スキップではない。この step は通知だけでなく **recon 生成と pipeline の
+    # Exit/funnel materialization** も担うので、step ごと飛ばすと Step 6 の
+    # bundle preflight (--require-exit) が recon 不在で必ず fail-closed になる。
+    # SkipPublish 時は step を実行したまま --dry-run で送信だけ抑止する。
+    if (-not (Test-Path $SignalsJson)) {
         Write-Log "[exec_summary] signals JSON が無いためスキップ: $SignalsJson"
     }
     else {
@@ -338,7 +342,12 @@ try {
             (Join-Path $ProjectRoot "scripts\publish_execution_summary.py"),
             "--date", $Date
         )
-        if ((-not $AutoSubmitPaper) -or $DryRunPublish) { $esArgs += @("--dry-run") }
+        if ($SkipPublish -or (-not $AutoSubmitPaper) -or $DryRunPublish) {
+            $esArgs += @("--dry-run")
+        }
+        if ($SkipPublish) {
+            Write-Log "[exec_summary] SkipPublish: 通知のみ抑止し recon/pipeline は生成する"
+        }
         $es = Invoke-Step -Name "exec_summary" -PyArgs $esArgs
         if ($es -eq 1 -or $es -eq 2) { $Failures += "exec_summary(exit=$es)" }
     }

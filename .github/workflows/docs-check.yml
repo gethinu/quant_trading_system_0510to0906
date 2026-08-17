@@ -38,6 +38,7 @@ jobs:
                   file-path: "./README.md, ./CHANGELOG.md, ./CONTRIBUTING.md"
                   max-depth: -1
                   check-modified-files-only: "yes"
+                  base-branch: "main"
 
     markdown-lint:
         runs-on: ubuntu-latest

@@ -24,26 +24,46 @@ from scripts.build_execution_recon import (  # noqa: E402
 )
 
 
-def _pipeline() -> dict:
+def _pipeline(date: str = "2026-07-29") -> dict:
     """Exit=null (未計測) の最小 pipeline (daily_polygon_monitor 出力形)。"""
+
     def sys_block(sysid: str, entry: int | None) -> dict:
         return {
             "system_id": sysid,
             "final_signals": entry,
             "phases": [
-                {"name": "Tgt", "label": "Tgt", "condition": "u", "count": 5000,
-                 "measured": True, "ratio_of_prev": None, "ratio_of_universe": 1.0},
-                {"name": "Entry", "label": "Entry", "condition": "allocation 後エントリ発火",
-                 "count": entry, "measured": False, "ratio_of_prev": None,
-                 "ratio_of_universe": None},
-                {"name": "Exit", "label": "Exit", "condition": "本日手仕舞い発火",
-                 "count": None, "measured": False, "ratio_of_prev": None,
-                 "ratio_of_universe": None},
+                {
+                    "name": "Tgt",
+                    "label": "Tgt",
+                    "condition": "u",
+                    "count": 5000,
+                    "measured": True,
+                    "ratio_of_prev": None,
+                    "ratio_of_universe": 1.0,
+                },
+                {
+                    "name": "Entry",
+                    "label": "Entry",
+                    "condition": "allocation 後エントリ発火",
+                    "count": entry,
+                    "measured": False,
+                    "ratio_of_prev": None,
+                    "ratio_of_universe": None,
+                },
+                {
+                    "name": "Exit",
+                    "label": "Exit",
+                    "condition": "本日手仕舞い発火",
+                    "count": None,
+                    "measured": False,
+                    "ratio_of_prev": None,
+                    "ratio_of_universe": None,
+                },
             ],
         }
 
     return {
-        "date": "2026-07-29",
+        "date": date,
         "schema": "signal_pipeline/v1",
         "systems": {
             "sys1": sys_block("sys1", 2),
@@ -54,8 +74,11 @@ def _pipeline() -> dict:
     }
 
 
-def _exit_orders(rows: list[dict]) -> dict:
-    return {"date": "2026-07-29", "exits": rows}
+def _exit_orders(rows: list[dict], *, run_id: str | None = None) -> dict:
+    payload = {"date": "2026-07-29", "exits": rows}
+    if run_id is not None:
+        payload["source_signals_run_id"] = run_id
+    return payload
 
 
 def _exit_phase(pipeline: dict, sysk: str) -> dict:
@@ -64,27 +87,73 @@ def _exit_phase(pipeline: dict, sysk: str) -> dict:
 
 def test_exit_counts_normalizes_system_to_sys_key() -> None:
     recon = build_recon(
-        None, None,
-        _exit_orders([
-            {"system": "system2", "reason": "protect_stop", "order_id": "o1"},
-            {"system": "system2", "reason": "close_time", "order_id": "o2"},
-        ]),
+        None,
+        None,
+        _exit_orders(
+            [
+                {"system": "system2", "reason": "protect_stop", "order_id": "o1"},
+                {"system": "system2", "reason": "close_time", "order_id": "o2"},
+            ]
+        ),
         date_str="2026-07-29",
     )
     ec = exit_counts_from_recon(recon)
     assert ec["sys2"] == {
-        "submitted": 2, "close": 1, "protect": 1,
-        "armed": 0, "armed_close": 0, "armed_protect": 0,
+        "submitted": 2,
+        "close": 1,
+        "protect": 1,
+        "armed": 0,
+        "armed_close": 0,
+        "armed_protect": 0,
     }
+
+
+def test_recon_records_the_exact_signals_run_id() -> None:
+    """execution input が current run に紐付いている時だけ run_id を stamp する。"""
+    recon = build_recon(
+        {"date": "2026-07-29", "meta": {"run_id": "20260729_223500_exact"}},
+        None,  # entry 段が動いていない = missing (突合対象なし) は許容
+        _exit_orders([], run_id="20260729_223500_exact"),
+        date_str="2026-07-29",
+    )
+    assert recon["source_signals_run_id"] == "20260729_223500_exact"
+    assert recon["execution_lineage_ok"] is True
+
+
+def test_recon_withholds_run_id_when_exit_orders_are_from_another_run() -> None:
+    """同日 rerun で前 run の exit_orders が残っていても current と偽らない。"""
+    recon = build_recon(
+        {"date": "2026-07-29", "meta": {"run_id": "20260729_223500_exact"}},
+        None,
+        _exit_orders([], run_id="20260729_060000_morning"),
+        date_str="2026-07-29",
+    )
+    assert recon["source_signals_run_id"] is None
+    assert recon["execution_lineage"]["exit_orders"] == "stale"
+
+
+def test_recon_withholds_run_id_when_exit_orders_lack_provenance() -> None:
+    """旧 producer 出力 (run_id なし) を推測で current 扱いしない。"""
+    recon = build_recon(
+        {"date": "2026-07-29", "meta": {"run_id": "20260729_223500_exact"}},
+        None,
+        _exit_orders([]),
+        date_str="2026-07-29",
+    )
+    assert recon["source_signals_run_id"] is None
+    assert recon["execution_lineage"]["exit_orders"] == "unverified"
 
 
 def test_patch_fills_exit_and_matches_ntfy_headline() -> None:
     """今夜の実測 `exit 1 (close 0 / protect 1)` が漏斗にも同じ数字で出ること。"""
     recon = build_recon(
-        None, None,
-        _exit_orders([
-            {"system": "system1", "reason": "protect_stop", "order_id": "o1"},
-        ]),
+        None,
+        None,
+        _exit_orders(
+            [
+                {"system": "system1", "reason": "protect_stop", "order_id": "o1"},
+            ]
+        ),
         date_str="2026-07-29",
     )
     # ntfy 本文の見出し exit 行 (新表示: fired を明示、armed 0 なので suffix 無し)
@@ -160,7 +229,7 @@ def _rows(system: str, reason: str, n: int, *, submitted: bool) -> list[dict]:
 def test_regression_20260727_real_fire_day() -> None:
     """07-27: 実発火日。fired 23 = close 20 + protect 3、armed 1 は別枠。"""
     rows = (
-        _rows("system2", "time_based", 20, submitted=True)     # fired close
+        _rows("system2", "time_based", 20, submitted=True)  # fired close
         + _rows("system2", "protect_stop", 3, submitted=True)  # fired protect
         + _rows("system2", "protect_target", 1, submitted=False)  # armed protect
     )
@@ -174,7 +243,7 @@ def test_regression_20260727_real_fire_day() -> None:
     body = build_body(recon)
     assert "exit 23 fired (close 20 / protect 3) · 1 armed" in body
 
-    pipeline = _pipeline()
+    pipeline = _pipeline("2026-07-27")
     _, n_filled, status = patch_pipeline_exit(pipeline, recon)
     assert status == "ok" and n_filled == 3
     ex = _exit_phase(pipeline, "sys2")
@@ -225,7 +294,7 @@ def test_flatten_all_system_null_not_dropped() -> None:
     """system=null の exit (flatten_all 等) を drop せず __unassigned__ に集計する。"""
     rows = [
         {"system": None, "reason": "flatten_all", "order_id": "f1"},  # fired close
-        {"system": None, "reason": "flatten_all"},                    # armed close
+        {"system": None, "reason": "flatten_all"},  # armed close
     ]
     recon = build_recon(None, None, _exit_orders(rows), date_str="2026-07-10")
     p = recon["portfolio"]
@@ -237,8 +306,11 @@ def test_flatten_all_system_null_not_dropped() -> None:
 
 def test_patch_is_idempotent() -> None:
     recon = build_recon(
-        None, None,
-        _exit_orders([{"system": "system1", "reason": "protect_stop", "order_id": "o1"}]),
+        None,
+        None,
+        _exit_orders(
+            [{"system": "system1", "reason": "protect_stop", "order_id": "o1"}]
+        ),
         date_str="2026-07-29",
     )
     pipeline = _pipeline()

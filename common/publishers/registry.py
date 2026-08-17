@@ -61,11 +61,13 @@ def _safe_send(
     try:
         return publisher.send(signals_json, dry_run=dry_run)
     except Exception as exc:  # noqa: BLE001 - chain 継続のため広く捕まえる
-        logger.exception(
-            "publisher %s (%s) raised uncaught exception: %s",
+        # Do not log exception text/traceback: transport exceptions often embed
+        # secret URLs, provider payloads or subscriber addresses.
+        logger.error(
+            "publisher %s (%s) raised uncaught exception: type=%s",
             publisher.name,
             role,
-            exc,
+            type(exc).__name__,
         )
         # target=publisher.name にとどめる: 内部 secret (ntfy topic 等)
         # を含まないよう、識別子のみ露出する。
@@ -73,7 +75,7 @@ def _safe_send(
             publisher=publisher.name,
             ok=False,
             status_code=None,
-            detail=f"publisher_exception: {type(exc).__name__}: {exc}"[:500],
+            detail=f"publisher_exception:{type(exc).__name__}",
             target=publisher.name,
         )
 

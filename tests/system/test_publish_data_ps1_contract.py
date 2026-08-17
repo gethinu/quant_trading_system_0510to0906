@@ -67,40 +67,50 @@ class TestBranchTargetContract20260804:
 
     def test_base_is_branch_tip_via_origin_not_head(self, ps1_code: str):
         """base は origin/$Branch (無ければ local $Branch)。current HEAD は使わない."""
-        assert 'rev-parse --verify -q "refs/remotes/origin/$Branch"' in ps1_code, (
-            "commit base を origin/$Branch tip から解決していない"
-        )
-        assert 'read-tree $BaseCommit' in ps1_code, (
-            "private index を base($Branch tip) の tree から seed していない"
-        )
+        assert (
+            'rev-parse --verify -q "refs/remotes/origin/$Branch"' in ps1_code
+        ), "commit base を origin/$Branch tip から解決していない"
+        assert (
+            "read-tree $BaseCommit" in ps1_code
+        ), "private index を base($Branch tip) の tree から seed していない"
         # ★ 旧バグ: current HEAD から seed して current HEAD に commit していた
-        assert "git read-tree HEAD" not in ps1_code, (
-            "read-tree HEAD が残存 = current worktree の HEAD から seed している (再発)"
-        )
+        assert (
+            "git read-tree HEAD" not in ps1_code
+        ), "read-tree HEAD が残存 = current worktree の HEAD から seed している (再発)"
 
     def test_commit_created_via_commit_tree_on_base(self, ps1_code: str):
         """コミットは commit-tree で base を親に作る (checkout/HEAD 前進をしない)."""
         assert "git commit-tree" in ps1_code, "commit-tree でのコミット生成が欠落"
-        assert "-p $BaseCommit" in ps1_code, "commit-tree の親が base($Branch tip) でない"
+        assert (
+            "-p $BaseCommit" in ps1_code
+        ), "commit-tree の親が base($Branch tip) でない"
 
     def test_does_not_commit_onto_current_head(self, ps1_code: str):
         """current worktree の HEAD を進める `git commit` を使わない."""
-        assert "git commit --no-verify" not in ps1_code, "HEAD を進める git commit が残存"
+        assert (
+            "git commit --no-verify" not in ps1_code
+        ), "HEAD を進める git commit が残存"
         assert "git commit -m" not in ps1_code, "HEAD を進める git commit が残存"
 
     def test_push_targets_new_commit_to_branch_ref(self, ps1_code: str):
         """新コミットを直接 origin の refs/heads/$Branch へ push する."""
         assert "git push origin" in ps1_code
-        assert ':refs/heads/$Branch' in ps1_code, (
+        assert ":refs/heads/$Branch" in ps1_code, (
             "push が <new-commit>:refs/heads/$Branch の explicit refspec でない "
             "(stale な local $Branch を送る旧挙動に戻っている)"
         )
 
     def test_no_working_tree_mutation(self, ps1_code: str):
         """publish は working tree を触らない (執行 worktree/freeze-baseline 非汚染)."""
-        assert "git add -A --" not in ps1_code, "working tree を stage する git add -A が残存"
-        assert "git rm " not in ps1_code, "working tree を触る git rm が残存 (index-only にする)"
-        assert "Copy-Item $src" not in ps1_code, "data/ への物理 copy が残存 (執行 worktree を汚す)"
+        assert (
+            "git add -A --" not in ps1_code
+        ), "working tree を stage する git add -A が残存"
+        assert (
+            "git rm " not in ps1_code
+        ), "working tree を触る git rm が残存 (index-only にする)"
+        assert (
+            "Copy-Item $src" not in ps1_code
+        ), "data/ への物理 copy が残存 (執行 worktree を汚す)"
 
     def test_stage_via_hash_object(self, ps1_code: str):
         """当日 JSON は results_csv から hash-object で直接 index へ stage する."""
@@ -121,7 +131,13 @@ class TestPublishDataContract:
         assert "pruned (source)" in ps1_text
 
     def test_purge_covers_all_four_prefixes(self, ps1_text: str):
-        for p in ("today_signals_", "pipeline_", "polygon_daily_coverage_", "narrative_"):
+        for p in (
+            "today_signals_",
+            "pipeline_",
+            "dashboard_bundle_",
+            "polygon_daily_coverage_",
+            "narrative_",
+        ):
             assert f'"{p}"' in ps1_text, f"prune 対象 prefix `{p}` が欠落"
 
     def test_branch_target_unchanged(self, ps1_text: str):
@@ -133,6 +149,14 @@ class TestPublishDataContract:
     def test_autolatest_picks_newest_today_signals(self, ps1_text: str):
         assert "today_signals_*.json" in ps1_text
         assert "today_signals_(\\d{8})" in ps1_text
+
+    def test_autolatest_does_not_regenerate_volatile_account_snapshot(
+        self, ps1_code: str
+    ):
+        auto_latest = ps1_code.index("if ($AutoLatest)")
+        disable_refresh = ps1_code.index("$RefreshAccount = $false", auto_latest)
+        refresh_block = ps1_code.index("if ($RefreshAccount)", disable_refresh)
+        assert auto_latest < disable_refresh < refresh_block
 
     def test_idempotent_via_tree_compare(self, ps1_code: str):
         """再実行安全: private index の tree == base tree なら commit/push しない."""
@@ -148,7 +172,9 @@ class TestPublishHardening20260730:
 
     def test_uses_private_git_index(self, ps1_text: str):
         assert "GIT_INDEX_FILE" in ps1_text, "専用 index (GIT_INDEX_FILE) が欠落"
-        assert "read-tree $BaseCommit" in ps1_text, "専用 index を base tree から seed していない"
+        assert (
+            "read-tree $BaseCommit" in ps1_text
+        ), "専用 index を base tree から seed していない"
 
     def test_stale_lock_reaped_conditionally(self, ps1_text: str):
         assert "index.lock" in ps1_text
@@ -163,6 +189,21 @@ class TestPublishHardening20260730:
         assert "Test-PublishServed" in ps1_text, "publish 後 verify が欠落"
         assert "Get-NewestSignalDateInRef" in ps1_text, "served(ref) 参照が欠落"
         assert "git ls-tree" in ps1_text
+
+    def test_bundle_preflight_runs_before_private_index_staging(self, ps1_code: str):
+        preflight = ps1_code.index("prepare_dashboard_bundle.py")
+        staging = ps1_code.index("git hash-object -w")
+        assert preflight < staging
+        assert "--require-exit" in ps1_code
+        assert "$bundleExit -ne 0" in ps1_code
+
+    def test_manifest_is_staged_with_the_bundle(self, ps1_text: str):
+        assert '"dashboard_bundle_$DateCompact.json"' in ps1_text
+
+    def test_same_date_publish_uses_exact_blob_verification(self, ps1_code: str):
+        assert "git hash-object -- $localPath" in ps1_code
+        assert "git rev-parse" in ps1_code
+        assert "blob mismatch" in ps1_code
 
     def test_notify_only_on_failure(self, ps1_text: str):
         assert "Send-PublishNtfy" in ps1_text

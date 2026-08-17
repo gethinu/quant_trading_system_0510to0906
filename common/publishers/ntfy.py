@@ -79,10 +79,7 @@ def _to_safe_ascii_title(title: str, message: SignalMessage) -> str:
         parts.append(f"BUY {buy} / SELL {sell}")
 
     notional = float(
-        (message.payload.get("portfolio", {}) or {}).get(
-            "total_notional_usd", 0
-        )
-        or 0
+        (message.payload.get("portfolio", {}) or {}).get("total_notional_usd", 0) or 0
     )
     if notional > 0:
         if notional >= 1_000_000:
@@ -117,6 +114,28 @@ def _sanitize_ascii_title(title: str) -> str:
     if not out:
         return "Execution Summary"
     return out[:_TITLE_LIMIT]
+
+
+def _latin1_safe_headers(headers: dict[str, str]) -> dict[str, str]:
+    """Return headers that ``requests`` can encode without losing the request.
+
+    ``requests``/urllib3 encode HTTP header values as latin-1.  The execution
+    summary title intentionally keeps emoji, so an emoji in ``X-Title`` used to
+    raise before a request reached ntfy and every retry failed identically.
+    Keep already-valid values verbatim; for invalid values retain printable
+    ASCII only.  The visual severity remains available through ``X-Tags``.
+    """
+    safe: dict[str, str] = {}
+    for key, value in headers.items():
+        text = str(value)
+        try:
+            text.encode("latin-1")
+        except UnicodeEncodeError:
+            text = " ".join(
+                "".join(ch for ch in text if 0x20 <= ord(ch) <= 0x7E).split()
+            )
+        safe[key] = text or "notification"
+    return safe
 
 
 def _mask_topic(topic: str | None) -> str:
@@ -250,7 +269,9 @@ class NtfyPublisher(Publisher):
         return self._transport(body, headers, dry_run=dry_run)
 
     # -- transport ------------------------------------------------------
-    def send(self, signals_json: dict[str, Any], *, dry_run: bool = False) -> PublishResult:
+    def send(
+        self, signals_json: dict[str, Any], *, dry_run: bool = False
+    ) -> PublishResult:
         body, headers = self._build(signals_json)
         return self._transport(body, headers, dry_run=dry_run)
 
@@ -268,10 +289,17 @@ class NtfyPublisher(Publisher):
 
         if not self.is_configured():
             return PublishResult(
-                publisher=self.name, ok=False, detail="NTFY_TOPIC 未設定", target="unset"
+                publisher=self.name,
+                ok=False,
+                detail="NTFY_TOPIC 未設定",
+                target="unset",
             )
 
         import requests
+
+        # requests/urllib3 encode HTTP headers as latin-1.  Apply this final
+        # transport guard to both signals and free-form execution summaries.
+        headers = _latin1_safe_headers(headers)
 
         last_detail = ""
         last_status: int | None = None
@@ -289,7 +317,9 @@ class NtfyPublisher(Publisher):
                         publisher=self.name,
                         ok=True,
                         status_code=resp.status_code,
-                        detail="sent",
+                        # A 2xx response means the ntfy server accepted the
+                        # message; it is not a subscriber/device delivery ack.
+                        detail="accepted",
                         target=_mask_topic(self.topic),
                     )
                 if resp.status_code == 429 or resp.status_code >= 500:
@@ -300,21 +330,28 @@ class NtfyPublisher(Publisher):
                         attempt,
                         backoff,
                     )
-                    time.sleep(backoff)
                     last_detail = f"retryable_{resp.status_code}"
+                    if attempt < _MAX_RETRIES:
+                        time.sleep(backoff)
                     continue
-                last_detail = f"http_{resp.status_code}: {resp.text[:200]}"
+                # Response bodies are provider-controlled and can echo a URL
+                # containing the secret topic. Persist only the status class.
+                last_detail = f"http_{resp.status_code}"
                 break
             except Exception as exc:  # noqa: BLE001
                 backoff = min(2 ** (attempt - 1), 8)
-                last_detail = f"exception: {exc}"
+                # requests exceptions commonly include the request URL, whose
+                # final path segment is the ntfy topic/access secret.
+                exc_name = type(exc).__name__
+                last_detail = f"exception:{exc_name}"
                 logger.warning(
-                    "ntfy post 例外 (attempt %d): %s backoff=%ss",
+                    "ntfy post 例外 (attempt %d): type=%s backoff=%ss",
                     attempt,
-                    exc,
+                    exc_name,
                     backoff,
                 )
-                time.sleep(backoff)
+                if attempt < _MAX_RETRIES:
+                    time.sleep(backoff)
 
         return PublishResult(
             publisher=self.name,
@@ -342,9 +379,9 @@ def _dump_dry_run(endpoint: str, headers: dict[str, str], body: str) -> str:
             masked_path = "/" + "/".join(segments)
             endpoint = urlunsplit(parts._replace(path=masked_path))
     except Exception:
-        # Never fail dry-run rendering on an unparseable URL; better to
-        # ship the raw endpoint than crash the publisher.
-        pass
+        # A topic is an access secret.  On parse failure, fail closed instead
+        # of returning the raw endpoint in a persisted dry-run result.
+        endpoint = "<invalid-endpoint>"
     return json.dumps(
         {"endpoint": endpoint, "headers": headers, "body": body}, ensure_ascii=False
     )

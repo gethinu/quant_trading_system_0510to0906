@@ -1,4 +1,4 @@
-import type { Signal, SignalsPayload, SystemSignals } from '@/lib/types';
+import type { Signal, SignalsMeta, SignalsPayload, SystemSignals } from '@/lib/types';
 
 const SYSTEMS = ['sys1', 'sys2', 'sys3', 'sys4', 'sys5', 'sys6', 'sys7'];
 
@@ -18,6 +18,58 @@ function fmtPrice(v: number | null): string {
 
 function fmtWeight(v: number | null): string {
   return v == null ? '—' : `${(v * 100).toFixed(1)}%`;
+}
+
+function deliveryPresentation(meta: SignalsMeta | undefined): {
+  label: string;
+  tone: string;
+} {
+  const delivery = meta?.publish_delivery;
+  const channels = Object.entries(delivery?.channels ?? {});
+  const accepted = channels
+    .filter(([, channel]) => channel.state === 'accepted')
+    .map(([name]) => name);
+  const failed = channels
+    .filter(([, channel]) => channel.state === 'failed')
+    .map(([name]) => name);
+  const configured = channels.map(([name]) => name);
+  const names = (values: string[]) => values.join('+') || 'channel';
+
+  switch (delivery?.state) {
+    case 'primary_accepted':
+    case 'all_accepted':
+      return { label: `${names(accepted)}: accepted`, tone: 'bg-ok/20 text-ok' };
+    case 'fallback_accepted':
+      return {
+        label: `${names(failed)}: failed · ${names(accepted)}: fallback accepted`,
+        tone: 'bg-warn/20 text-warn',
+      };
+    case 'partial':
+      return {
+        label: `${names(accepted)}: accepted · ${names(failed)}: failed`,
+        tone: 'bg-warn/20 text-warn',
+      };
+    case 'all_failed':
+      return {
+        label: `delivery failed: ${names(failed)}`,
+        tone: 'bg-fail/20 text-fail',
+      };
+    case 'not_configured':
+      return {
+        label: `delivery not configured: ${names(configured)}`,
+        tone: 'bg-fail/20 text-fail',
+      };
+    case 'not_attempted':
+      return { label: 'delivery: not attempted', tone: 'bg-white/10 text-muted' };
+    default:
+      return {
+        label:
+          meta?.publish_status === 'ok'
+            ? 'delivery: legacy ok (unverified)'
+            : 'delivery: unknown',
+        tone: 'bg-white/10 text-muted',
+      };
+  }
 }
 
 /** 上位 3 銘柄を chip 形式で 1 行に (mobile 折返し可)。 */
@@ -168,6 +220,7 @@ export function SignalsSection({
   const emptySystems = SYSTEMS.filter(
     (s) => payload.systems[s] && payload.systems[s].signals.length === 0,
   );
+  const delivery = deliveryPresentation(payload.meta);
 
   return (
     <section className="bg-card rounded-xl p-4 shadow-lg">
@@ -176,21 +229,12 @@ export function SignalsSection({
           Today&apos;s Signals
         </h2>
         <span className="flex items-center gap-2">
-          {payload.meta?.publish_status ? (
-            <span
-              className={[
-                'inline-block px-1.5 py-0.5 rounded text-[9px] uppercase',
-                payload.meta.publish_status === 'failed'
-                  ? 'bg-fail/20 text-fail'
-                  : payload.meta.publish_status === 'partial'
-                  ? 'bg-warn/20 text-warn'
-                  : 'bg-ok/20 text-ok',
-              ].join(' ')}
-              title="publish_status (ntfy/email 配信結果)"
-            >
-              publish: {payload.meta.publish_status}
-            </span>
-          ) : null}
+          <span
+            className={`inline-block px-1.5 py-0.5 rounded text-[9px] uppercase ${delivery.tone}`}
+            title="accepted は配信先サーバー受理を表し、端末到達確認ではありません"
+          >
+            {delivery.label}
+          </span>
           <span className="text-[10px] text-muted">{payload.date}</span>
         </span>
       </div>

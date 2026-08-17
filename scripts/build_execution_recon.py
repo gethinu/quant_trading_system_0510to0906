@@ -24,6 +24,7 @@ import argparse
 from datetime import datetime, timezone
 import json
 import logging
+import math
 from pathlib import Path
 from typing import Any
 
@@ -121,6 +122,50 @@ def _load_json(path: Path | None) -> dict[str, Any] | None:
         return None
 
 
+_EXECUTION_INPUTS = ("paper_orders", "exit_orders")
+
+
+def execution_input_lineage(
+    signals: dict[str, Any] | None,
+    paper_orders: dict[str, Any] | None,
+    exit_orders: dict[str, Any] | None,
+) -> dict[str, str]:
+    """各 execution input が *この* signals run 由来かを判定する。
+
+    paper_orders / exit_orders は producer が ``source_signals_run_id`` を
+    書く。同日再生成で Step5b/5c が skip / 失敗して古い JSON が残っている場合、
+    その run_id は現行 signals と一致しないので ``stale`` になる。field 自体が
+    無い旧 producer 出力は ``unverified`` (= 検証不能) とし、**推測で verified に
+    昇格させない**。
+
+    戻り値は input 名 -> "verified" | "stale" | "unverified" | "missing"。
+    """
+    run_id = str(((signals or {}).get("meta") or {}).get("run_id") or "")
+    out: dict[str, str] = {}
+    for name, payload in (("paper_orders", paper_orders), ("exit_orders", exit_orders)):
+        if payload is None:
+            out[name] = "missing"
+            continue
+        stamped = str(payload.get("source_signals_run_id") or "")
+        if not stamped:
+            out[name] = "unverified"
+        elif not run_id or stamped != run_id:
+            out[name] = "stale"
+        else:
+            out[name] = "verified"
+    return out
+
+
+def execution_lineage_ok(lineage: dict[str, str]) -> bool:
+    """存在する execution input が全て current run に紐付いているか。
+
+    ``missing`` は「その段が動かなかった」= 突合対象なしなので許容する。
+    ``stale`` / ``unverified`` が 1 つでも有れば recon 全体を current run の
+    測定値として扱ってはいけない。
+    """
+    return all(state in {"verified", "missing"} for state in lineage.values())
+
+
 def build_recon(
     signals: dict[str, Any] | None,
     paper_orders: dict[str, Any] | None,
@@ -131,6 +176,9 @@ def build_recon(
     generated_at: str | None = None,
 ) -> dict[str, Any]:
     """3 つの JSON payload を突合し recon dict を返す (pure、I/O なし)。"""
+    _signals_run_id = str(((signals or {}).get("meta") or {}).get("run_id") or "")
+    _lineage = execution_input_lineage(signals, paper_orders, exit_orders)
+    _lineage_ok = execution_lineage_ok(_lineage)
     systems: dict[str, dict[str, Any]] = {
         name: _empty_system_bucket() for name in _SYSTEMS
     }
@@ -276,7 +324,19 @@ def build_recon(
     return {
         "version": "1.0",
         "date": date_str or (signals or {}).get("date") or "",
-        "generated_at": generated_at or datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "generated_at": generated_at
+        or datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        # Same-date reruns are common. Bind execution measurements to the
+        # exact signals run so an older recon cannot patch a newer bundle.
+        #
+        # run_id は signals から取るだけでは不十分。paper_orders / exit_orders が
+        # 前 run の残骸だと、古い execution 実績に新しい run_id を貼って「current」
+        # として publish されてしまう。全 execution input が current run 由来と
+        # 確認できた時だけ stamp し、そうでなければ None にして下流 (bundle
+        # preflight) に fail-closed 判断を委ねる。
+        "source_signals_run_id": (_signals_run_id or None) if _lineage_ok else None,
+        "execution_lineage": _lineage,
+        "execution_lineage_ok": _lineage_ok,
         "inputs": {
             "signals": signals is not None,
             "paper_orders": paper_orders is not None,
@@ -363,6 +423,10 @@ def patch_pipeline_exit(
     """
     if not isinstance(recon, dict):
         return pipeline, 0, "no_recon"
+    pipeline_date = str(pipeline.get("date") or "")
+    recon_date = str(recon.get("date") or "")
+    if pipeline_date and recon_date and pipeline_date != recon_date:
+        return pipeline, 0, "date_mismatch"
     # 部分 recon (exit_orders 入力欠損) は「発火 0」ではなく「未計測」。埋めない。
     if not (recon.get("inputs") or {}).get("exit_orders"):
         return pipeline, 0, "exit_orders_input_missing"
@@ -380,16 +444,22 @@ def patch_pipeline_exit(
         for p in phases:
             if p.get("name") == "Exit":
                 ec = exits.get(sysk) or {
-                    "submitted": 0, "close": 0, "protect": 0,
-                    "armed": 0, "armed_close": 0, "armed_protect": 0,
+                    "submitted": 0,
+                    "close": 0,
+                    "protect": 0,
+                    "armed": 0,
+                    "armed_close": 0,
+                    "armed_protect": 0,
                 }
                 cnt = int(ec["submitted"])  # fired
                 armed = int(ec.get("armed") or 0)
-                base = str(p.get("condition") or EXIT_CONDITION_BASE).split(
-                    " (close"
-                )[0]
+                base = str(p.get("condition") or EXIT_CONDITION_BASE).split(" (close")[
+                    0
+                ]
                 p["count"] = cnt
                 p["measured"] = True
+                p["source"] = "execution_recon"
+                p["source_observed_at"] = recon.get("generated_at")
                 p["fired"] = cnt
                 p["exit_close"] = int(ec["close"])
                 p["exit_protect"] = int(ec["protect"])
@@ -429,30 +499,313 @@ def patch_pipeline_exit(
     return pipeline, n_filled, "ok"
 
 
+# ---------------------------------------------------------------------------
+# pipeline funnel の配線 (Tgt/FILpass/STUpass/TRDlist/Entry を today_signals から)
+# ---------------------------------------------------------------------------
+# 背景 (2026-08-12 observability fix):
+#   ダッシュが読む pipeline_YYYYMMDD.json は funnel phase が全 system measured=false。
+#   一方 today_signals_YYYYMMDD.json の per-system ``funnel`` には実測が満載
+#   (target/filter_pass/setup_pass/candidate_count/entry_count)。既知の配線ギャップ
+#   (docs/operations/exit_unmeasured_rootcause_20260730.md) で funnel 配線が prod 生成
+#   経路に未着地なため、pipeline は毎日 measured=false に戻る。
+#   patch_pipeline_exit と同じ思想で、today_signals を single source に funnel phase を
+#   実数 + measured=True で埋める pure 関数 (I/O 無し) を用意する。
+#
+# 正直さ (honesty) の担保:
+#   - signals が無い/不正なら **埋めない** (measured=false を維持。0 で誤魔化さない)。
+#   - funnel に実数 (int) が無い phase は触らない。
+#   - 既に measured=True の phase (grouped-daily 実測など) は **上書きしない**
+#     (Tgt/FILpass の平日連続性を尊重)。
+#   - spy_only (sys7) の Tgt は共通株ユニバース (~6,600) を funnel target に持つが
+#     pipeline 側は 1 に矯正済み。誤って 6,600 に戻さぬよう Tgt を skip する。
+
+# phase 名 -> today_signals funnel key。Exit は recon 由来なので patch_pipeline_exit 側。
+FUNNEL_PHASE_KEY: dict[str, str] = {
+    "Tgt": "target",
+    "FILpass": "filter_pass",
+    "STUpass": "setup_pass",
+    "TRDlist": "candidate_count",
+    "Entry": "entry_count",
+}
+
+# funnel を反映してよい phase の順序 (ratio 計算のため定義順を保持)。
+_FUNNEL_PHASES = ("Tgt", "FILpass", "STUpass", "TRDlist", "Entry")
+
+# spy_only システム (Tgt を funnel target で上書きしない)。
+_SPY_ONLY_SYSTEMS = frozenset({"sys7"})
+_FUNNEL_SOURCE = "today_signals.funnel"
+_SPY_TARGET_REASON = "shared_universe_not_applicable_to_spy_only"
+
+
+def _as_nonnegative_int(value: Any) -> int | None:
+    """Accept only finite, non-negative integral counts.
+
+    Funnel counts are cardinalities.  Silently truncating ``3.8`` to ``3`` or
+    accepting NaN makes a payload look measured when its schema is invalid.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if isinstance(value, float) and (
+        not math.isfinite(value) or not value.is_integer()
+    ):
+        return None
+    parsed = int(value)
+    return parsed if parsed >= 0 else None
+
+
+def funnel_counts_from_signals(
+    signals: dict[str, Any] | None,
+) -> dict[str, dict[str, int]]:
+    """today_signals -> ``{"sys1": {"Tgt": .., "FILpass": .., ...}, ...}`` (sysN key)。
+
+    today_signals の system key は "sys1" / "system1" どちらもあり得るため sysN に正規化。
+    funnel が dict でない/欠損する system は legacy count field
+    (n_candidates_input / n_signals_output) から TRDlist/Entry のみ最小再構成する。
+    """
+    out: dict[str, dict[str, int]] = {}
+    if not isinstance(signals, dict):
+        return out
+    for raw_name, entry in (signals.get("systems") or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        normalized = _norm_system(raw_name)
+        if normalized is None:
+            continue
+        sysk = normalized.replace("system", "sys", 1)
+        fnl = entry.get("funnel")
+        counts: dict[str, int] = {}
+        if isinstance(fnl, dict):
+            for phase, key in FUNNEL_PHASE_KEY.items():
+                v = fnl.get(key)
+                parsed = _as_nonnegative_int(v)
+                if parsed is not None:
+                    counts[phase] = parsed
+        else:
+            # funnel 欠如時: legacy field から TRDlist/Entry のみ。
+            ci = entry.get("n_candidates_input")
+            so = entry.get("n_signals_output")
+            parsed_candidates = _as_nonnegative_int(ci)
+            parsed_signals = _as_nonnegative_int(so)
+            if parsed_candidates is not None:
+                counts["TRDlist"] = parsed_candidates
+            if parsed_signals is not None:
+                counts["Entry"] = parsed_signals
+        if counts:
+            out[sysk] = counts
+    return out
+
+
+def patch_pipeline_funnel(
+    pipeline: dict[str, Any],
+    signals: dict[str, Any] | None,
+    *,
+    spy_only_systems: frozenset[str] = _SPY_ONLY_SYSTEMS,
+) -> tuple[dict[str, Any], int, str]:
+    """pipeline_*.json の funnel phase を today_signals の funnel 実測で埋める (in-place)。
+
+    Exit を除く Tgt/FILpass/STUpass/TRDlist/Entry を対象に、funnel に実数がある phase を
+    ``count`` + ``measured=True`` にし、``ratio_of_prev`` / ``ratio_of_universe`` を
+    その pipeline 内で再計算する (前 phase 数と Tgt に対して)。
+
+    戻り値 ``(pipeline, n_patched, status)``:
+      - ``status="ok"``          : funnel を反映した (n_patched = 反映 phase 総数)
+      - ``status="no_signals"``  : signals が無い/不正 → 未計測を維持 (何もしない)
+      - ``status="empty_funnel"``: signals はあるが funnel 実数ゼロ → 何もしない
+
+    保護規則: grouped-daily 等、別 source の既存実測は上書きしない。同じ
+    ``today_signals.funnel`` source は新しい run_id で上書きし、同日再生成を反映する。
+    spy_only システムで共有 universe 値が来た Tgt は未計測理由を明示して採用しない。
+
+    idempotent: 既に埋めた pipeline を再度渡しても同じ結果。
+    """
+    if not isinstance(signals, dict):
+        return pipeline, 0, "no_signals"
+    if pipeline.get("schema") != "signal_pipeline/v1":
+        return pipeline, 0, "invalid_pipeline_schema"
+    pipeline_date = str(pipeline.get("date") or "")
+    signals_date = str(signals.get("date") or "")
+    if pipeline_date and signals_date and pipeline_date != signals_date:
+        return pipeline, 0, "date_mismatch"
+    counts_by_sys = funnel_counts_from_signals(signals)
+    if not counts_by_sys:
+        return pipeline, 0, "empty_funnel"
+
+    source_run_id = str((signals.get("meta") or {}).get("run_id") or "")
+    source_generated_at = signals.get("generated_at")
+    n_patched = 0
+    for sysk, sysobj in (pipeline.get("systems") or {}).items():
+        if not isinstance(sysobj, dict):
+            continue
+        fcounts = counts_by_sys.get(sysk)
+        if not fcounts:
+            continue
+        phases = sysobj.get("phases") or []
+        is_spy_only = sysk in spy_only_systems
+        for p in phases:
+            name = p.get("name")
+            if name not in _FUNNEL_PHASES:
+                continue
+            new_count = fcounts.get(name)
+            if new_count is None:
+                continue
+
+            existing_source = p.get("source")
+            if (
+                p.get("measured") is True
+                and p.get("count") is not None
+                and existing_source != _FUNNEL_SOURCE
+            ):
+                # grouped-daily / explicit upstream measurement wins.  Its
+                # count also becomes the denominator during the second pass.
+                continue
+
+            if is_spy_only and name == "Tgt" and new_count != 1:
+                before = (
+                    p.get("count"),
+                    p.get("measured"),
+                    p.get("source"),
+                    p.get("source_run_id"),
+                    p.get("unmeasured_reason"),
+                )
+                p["count"] = None
+                p["measured"] = False
+                p["source"] = _FUNNEL_SOURCE
+                p["source_run_id"] = source_run_id or None
+                p["source_observed_at"] = source_generated_at
+                p["unmeasured_reason"] = _SPY_TARGET_REASON
+                after = (
+                    p.get("count"),
+                    p.get("measured"),
+                    p.get("source"),
+                    p.get("source_run_id"),
+                    p.get("unmeasured_reason"),
+                )
+                if after != before:
+                    n_patched += 1
+                continue
+
+            before = (
+                p.get("count"),
+                p.get("measured"),
+                p.get("source"),
+                p.get("source_run_id"),
+                p.get("unmeasured_reason"),
+            )
+            p["count"] = new_count
+            p["measured"] = True
+            p["source"] = _FUNNEL_SOURCE
+            p["source_run_id"] = source_run_id or None
+            p["source_observed_at"] = source_generated_at
+            p.pop("unmeasured_reason", None)
+            after = (
+                p.get("count"),
+                p.get("measured"),
+                p.get("source"),
+                p.get("source_run_id"),
+                p.get("unmeasured_reason"),
+            )
+            if after != before:
+                n_patched += 1
+
+        # Ratios are derived only after source-priority merge.  This avoids
+        # mixing a protected grouped Tgt count with a signal-derived universe.
+        tgt_phase = next((p for p in phases if p.get("name") == "Tgt"), None)
+        universe = (
+            tgt_phase.get("count")
+            if isinstance(tgt_phase, dict) and tgt_phase.get("measured") is True
+            else None
+        )
+        prev_count: int | None = None
+        for phase in phases:
+            count = _as_nonnegative_int(phase.get("count"))
+            measured = phase.get("measured") is True and count is not None
+            phase["ratio_of_prev"] = (
+                round(count / prev_count, 6)
+                if measured and isinstance(prev_count, int) and prev_count
+                else None
+            )
+            phase["ratio_of_universe"] = (
+                round(count / universe, 6)
+                if measured and isinstance(universe, int) and universe
+                else None
+            )
+            if measured:
+                prev_count = count
+
+        # final_signals is a projection of Entry and must move with a newer
+        # signals run.  Unknown legacy source is treated as this projection.
+        entry_count = fcounts.get("Entry")
+        if entry_count is not None and sysobj.get("final_signals_source") in (
+            None,
+            _FUNNEL_SOURCE,
+        ):
+            sysobj["final_signals"] = fcounts["Entry"]
+            sysobj["final_signals_source"] = _FUNNEL_SOURCE
+            sysobj["final_signals_source_run_id"] = source_run_id or None
+
+    pipeline["source_signals_run_id"] = source_run_id or None
+    pipeline["source_signals_generated_at"] = source_generated_at
+
+    if n_patched:
+        notes = pipeline.get("notes")
+        if isinstance(notes, list):
+            marker = (
+                "Funnel (Tgt/FILpass/STUpass/TRDlist/Entry) = signal engine funnel "
+                "(today_signals_YYYYMMDD.json), measured=True。別 source の実測 phase は "
+                "保護し、spy_only Tgt の共有 universe は未計測理由を明示する。"
+            )
+            if marker not in notes:
+                notes.append(marker)
+    return pipeline, n_patched, "ok"
+
+
 def _default_path(results_dir: Path, stem: str, date_str: str) -> Path:
     return results_dir / f"{stem}_{date_str.replace('-', '')}.json"
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--date", help="対象日 (YYYY-MM-DD)。default paths の解決に使う。")
+    parser.add_argument(
+        "--date", help="対象日 (YYYY-MM-DD)。default paths の解決に使う。"
+    )
     parser.add_argument("--signals-json", help="today_signals JSON path。")
     parser.add_argument("--paper-orders-json", help="paper_orders JSON path。")
     parser.add_argument("--exit-orders-json", help="exit_orders JSON path。")
-    parser.add_argument("--output-json", help="recon 出力先 (default: results_csv/recon_YYYYMMDD.json)。")
-    parser.add_argument("--results-dir", default="results_csv", help="default path 解決の基準 dir。")
-    parser.add_argument("--account-equity", type=float, default=None, help="口座残高 (通知表示用)。")
+    parser.add_argument(
+        "--output-json",
+        help="recon 出力先 (default: results_csv/recon_YYYYMMDD.json)。",
+    )
+    parser.add_argument(
+        "--results-dir", default="results_csv", help="default path 解決の基準 dir。"
+    )
+    parser.add_argument(
+        "--account-equity", type=float, default=None, help="口座残高 (通知表示用)。"
+    )
     parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args(argv)
 
-    logging.basicConfig(level=str(args.log_level).upper(), format="%(levelname)s: %(message)s")
+    logging.basicConfig(
+        level=str(args.log_level).upper(), format="%(levelname)s: %(message)s"
+    )
 
     results_dir = Path(args.results_dir)
     date_str = args.date or datetime.now().strftime("%Y-%m-%d")
 
-    signals_path = Path(args.signals_json) if args.signals_json else _default_path(results_dir, "today_signals", date_str)
-    paper_path = Path(args.paper_orders_json) if args.paper_orders_json else _default_path(results_dir, "paper_orders", date_str)
-    exit_path = Path(args.exit_orders_json) if args.exit_orders_json else _default_path(results_dir, "exit_orders", date_str)
+    signals_path = (
+        Path(args.signals_json)
+        if args.signals_json
+        else _default_path(results_dir, "today_signals", date_str)
+    )
+    paper_path = (
+        Path(args.paper_orders_json)
+        if args.paper_orders_json
+        else _default_path(results_dir, "paper_orders", date_str)
+    )
+    exit_path = (
+        Path(args.exit_orders_json)
+        if args.exit_orders_json
+        else _default_path(results_dir, "exit_orders", date_str)
+    )
 
     signals = _load_json(signals_path)
     paper_orders = _load_json(paper_path)
@@ -475,7 +828,11 @@ def main(argv: list[str] | None = None) -> int:
         account_equity=args.account_equity,
     )
 
-    out_path = Path(args.output_json) if args.output_json else _default_path(results_dir, "recon", date_str)
+    out_path = (
+        Path(args.output_json)
+        if args.output_json
+        else _default_path(results_dir, "recon", date_str)
+    )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     tmp = out_path.with_suffix(out_path.suffix + ".tmp")
     tmp.write_text(json.dumps(recon, ensure_ascii=False, indent=2), encoding="utf-8")
