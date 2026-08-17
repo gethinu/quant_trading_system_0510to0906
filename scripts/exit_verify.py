@@ -127,6 +127,8 @@ def verify(
 
     planned_rows: list[dict[str, Any]] = []
     planned_close_symbols: set[str] = set()
+    submitted_close_symbols: set[str] = set()
+    closes_not_submitted: list[dict[str, Any]] = []
     closes_not_filled: list[dict[str, Any]] = []
     rejected: list[dict[str, Any]] = []
 
@@ -138,7 +140,12 @@ def verify(
         st = status_map.get(str(oid)) if oid else None
         if not st:
             st = _norm_status(e.get("status"))
-        submitted = bool(oid) and not e.get("dry_run", True) and not e.get("error")
+        submitted = (
+            bool(oid)
+            and exit_orders.get("mode") != "dry_run"
+            and not e.get("dry_run", True)
+            and not e.get("error")
+        )
         filled = st in _FILLED
         row = {
             "symbol": sym,
@@ -156,6 +163,12 @@ def verify(
         planned_rows.append(row)
         if is_close:
             planned_close_symbols.add(sym)
+            if not submitted:
+                # proposal/dry-run は「計画済み」ではあっても broker へ未送信。
+                # 期限超過を看過しないため WARN 対象として分離する。
+                closes_not_submitted.append(row)
+            else:
+                submitted_close_symbols.add(sym)
             if submitted and not filled:
                 if st in _DEAD:
                     rejected.append(row)
@@ -175,13 +188,19 @@ def verify(
     ]
     discrepancies = {
         "due_not_planned": due_not_planned,
+        "closes_not_submitted": closes_not_submitted,
         "closes_rejected": rejected,
         "closes_unfilled_nonpending": hard_closes_unfilled,
         "closes_pending": [
             r for r in closes_not_filled if (r["status"] or "") in _PENDING
         ],
     }
-    n_warn = len(due_not_planned) + len(rejected) + len(hard_closes_unfilled)
+    n_warn = (
+        len(due_not_planned)
+        + len(closes_not_submitted)
+        + len(rejected)
+        + len(hard_closes_unfilled)
+    )
 
     filled_closes = [r for r in planned_rows if r["is_close"] and r["filled"]]
     return {
@@ -190,6 +209,7 @@ def verify(
         "n_positions": len(positions),
         "n_planned_exits": len(exits),
         "n_planned_closes": len(planned_close_symbols),
+        "n_submitted_closes": len(submitted_close_symbols),
         "n_filled_closes": len(filled_closes),
         "n_expected_time_exits": len(expected),
         "expected_time_exits": expected,
@@ -202,7 +222,8 @@ def verify(
 def _summary_lines(v: dict[str, Any]) -> list[str]:
     lines = [
         f"positions={v['n_positions']} planned_closes={v['n_planned_closes']} "
-        f"filled_closes={v['n_filled_closes']} expected_time_exits={v['n_expected_time_exits']}",
+        f"submitted_closes={v['n_submitted_closes']} filled_closes={v['n_filled_closes']} "
+        f"expected_time_exits={v['n_expected_time_exits']}",
     ]
     d = v["discrepancies"]
     if d["due_not_planned"]:
@@ -211,6 +232,11 @@ def _summary_lines(v: dict[str, Any]) -> list[str]:
             for e in d["due_not_planned"]
         )
         lines.append(f"[WARN] 満期だが未計画: {syms}")
+    if d["closes_not_submitted"]:
+        lines.append(
+            "[WARN] close 未送信(proposal/dry-run): "
+            + ", ".join(r["symbol"] for r in d["closes_not_submitted"])
+        )
     if d["closes_rejected"]:
         lines.append(
             f"[WARN] close reject: {', '.join(r['symbol'] for r in d['closes_rejected'])}"
@@ -224,7 +250,7 @@ def _summary_lines(v: dict[str, Any]) -> list[str]:
             f"[..] close pending(市場休場等): {', '.join(r['symbol'] for r in d['closes_pending'])}"
         )
     if v["n_warn"] == 0:
-        lines.append("[OK] 乖離なし (planned close は fill 済 / 満期漏れなし)")
+        lines.append("[OK] 乖離なし (submitted close は fill 済 / 満期漏れなし)")
     return lines
 
 

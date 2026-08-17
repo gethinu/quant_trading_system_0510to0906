@@ -100,6 +100,29 @@ def test_all_due_planned_and_filled_no_warn():
     assert v["n_warn"] == 0
 
 
+def test_due_dry_run_plan_is_warned_as_not_submitted():
+    """proposal があっても dry-run/order_id無しなら broker 発注済みではない。"""
+    exit_orders = {
+        "mode": "dry_run",
+        "positions": [_pos("AAA", "system3", "2026-07-08")],
+        "exits": [
+            _exit(
+                "AAA",
+                "system3",
+                "time_based",
+                "market",
+                order_id=None,
+                dry_run=True,
+            )
+        ],
+    }
+    v = verify(exit_orders, "2026-07-12", status_map={})
+    assert v["n_planned_closes"] == 1
+    assert v["n_submitted_closes"] == 0
+    assert [r["symbol"] for r in v["discrepancies"]["closes_not_submitted"]] == ["AAA"]
+    assert v["n_warn"] == 1
+
+
 # --- reconcile: close fill classification ---------------------------------
 def test_rejected_close_is_warn():
     exit_orders = {
