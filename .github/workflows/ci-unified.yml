@@ -8,7 +8,8 @@ on:
       - "**/*.md"
       - ".github/ISSUE_TEMPLATE/**"
   pull_request:
-    branches: [main, develop, branch0906]
+    branches:
+      [main, develop, branch0906, "claude/monitor-webapp", "claude/open-auto-run"]
     paths-ignore:
       - "docs/**"
       - "**/*.md"
@@ -35,6 +36,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -50,14 +53,63 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
           pip install ruff black isort
-      - name: isort (import order check)
+      - name: Resolve lint scope
+        id: lint-scope
+        shell: bash
         run: |
-          # Run isort in check mode in CI so PRs fail when import ordering differs
-          isort --check-only .
+          # main/develop/branch0906 は repo 全体を強制する (origin/main は現在
+          # repo-wide clean。その保証を changed-files 縮退で手放さない)。
+          # claude/* 等の運用 branch を base にする PR だけ、既存の lint 債務を
+          # 抱えたままでも新規変更を検証できるよう changed-files へ縮退する。
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            target="${{ github.event.pull_request.base.ref }}"
+          else
+            target="${{ github.ref_name }}"
+          fi
+          case "$target" in
+            main | develop | branch0906) full="true" ;;
+            *) full="false" ;;
+          esac
+          echo "target=$target" >> "$GITHUB_OUTPUT"
+          echo "full=$full" >> "$GITHUB_OUTPUT"
+          echo "lint scope: target=$target full_repo=$full"
+      - name: List lint targets
+        id: lint-targets
+        shell: bash
+        run: |
+          out="$RUNNER_TEMP/lint-targets.txt"
+          if [[ "${{ steps.lint-scope.outputs.full }}" == "true" ]]; then
+            printf '.\n' > "$out"
+          else
+            base="${{ github.event.before }}"
+            if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+              base="${{ github.event.pull_request.base.sha }}"
+            fi
+            if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
+              base="$(git rev-parse HEAD^)"
+            fi
+            git diff --name-only --diff-filter=ACMR "$base" "$GITHUB_SHA" -- '*.py' > "$out"
+          fi
+          echo "count=$(wc -l < "$out")" >> "$GITHUB_OUTPUT"
+          cat "$out"
+      - name: isort (import order check)
+        if: steps.lint-targets.outputs.count != '0'
+        shell: bash
+        run: |
+          mapfile -t targets < "$RUNNER_TEMP/lint-targets.txt"
+          isort --check-only "${targets[@]}"
       - name: Ruff (lint)
-        run: ruff check . --output-format=github
+        if: steps.lint-targets.outputs.count != '0'
+        shell: bash
+        run: |
+          mapfile -t targets < "$RUNNER_TEMP/lint-targets.txt"
+          ruff check "${targets[@]}" --output-format=github
       - name: Black (format check)
-        run: black --check .
+        if: steps.lint-targets.outputs.count != '0'
+        shell: bash
+        run: |
+          mapfile -t targets < "$RUNNER_TEMP/lint-targets.txt"
+          black --check "${targets[@]}"
 
   test-and-coverage:
     name: Test & Coverage

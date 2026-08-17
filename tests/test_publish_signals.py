@@ -19,7 +19,7 @@ from common.publishers import (
     build_publisher,
 )
 from common.publishers.base import Publisher, PublishResult
-from common.signal_export import build_signals_json, generate_run_id
+from common.signal_export import build_signals_json, generate_run_id, write_signals_json
 
 
 def _sample_payload() -> dict:
@@ -120,7 +120,8 @@ def test_ntfy_dry_run_headers_and_action():
     res = pub.send(_sample_payload(), dry_run=True)
     assert res.ok is True
     dump = json.loads(res.detail)
-    assert dump["endpoint"].endswith("/quant-test-abc")
+    assert "quant-test-abc" not in dump["endpoint"]
+    assert dump["endpoint"].endswith("/qua…(14)")
     h = dump["headers"]
     # WARN があるので priority=5 (urgent) + warning tag
     assert h["X-Priority"] == "5"
@@ -267,11 +268,59 @@ def test_build_signals_json_from_dataframe():
     )
     assert payload["version"] == "1.0"
     assert payload["meta"]["run_id"] == "testrun_1"
+    # legacy scalar は publish 試行前には書かない (truthy だと旧 dashboard が
+    # 未試行を成功色で描く)。構造化 field だけが not_attempted を表現する。
+    assert "publish_status" not in payload["meta"]
+    assert payload["meta"]["publish_delivery"] == {
+        "state": "not_attempted",
+        "attempted_at": None,
+        "channels": {},
+    }
     assert payload["systems"]["sys1"]["n_signals_output"] == 1
     assert payload["systems"]["sys1"]["n_candidates_input"] == 3
     assert payload["systems"]["sys1"]["signals"][0]["side"] == "BUY"
     assert payload["systems"]["sys7"]["signals"][0]["side"] == "SELL"
     assert payload["portfolio"]["hedge"]["symbol"] == "SPY"
+
+
+def test_new_run_does_not_inherit_previous_publish_delivery(tmp_path):
+    """同日再生成でも delivery は前runから継承せず not_attempted に戻す。"""
+
+    output = tmp_path / "today_signals_20260701.json"
+    output.write_text(
+        json.dumps(
+            {
+                "meta": {
+                    "run_id": "morning_run",
+                    "publish_status": "ok",
+                    "publish_delivery": {
+                        "state": "primary_accepted",
+                        "attempted_at": "2026-07-01T07:00:00+09:00",
+                        "channels": {"ntfy": {"state": "accepted"}},
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    new_payload = build_signals_json(
+        None,
+        None,
+        date_str="2026-07-01",
+        run_id="night_run",
+    )
+    write_signals_json(new_payload, output)
+
+    stored = json.loads(output.read_text(encoding="utf-8"))
+    assert stored["meta"]["run_id"] == "night_run"
+    # 朝 run の "ok" を引き継がず、legacy scalar ごと消える。
+    assert "publish_status" not in stored["meta"]
+    assert stored["meta"]["publish_delivery"] == {
+        "state": "not_attempted",
+        "attempted_at": None,
+        "channels": {},
+    }
 
 
 def test_generate_run_id_format():

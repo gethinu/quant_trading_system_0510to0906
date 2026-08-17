@@ -15,7 +15,8 @@
     6. [record]  entry fill をポーリング + 最終ポジション snapshot。
     7. [notify]  scripts/publish_execution_summary.py (非 dry-run) で ntfy 実績通知
                  (UTF-8-safe な NtfyPublisher 経由。素の str POST の latin-1 死を回避)。
-    8. [durable] logs/open_run_<date>/ に全成果物を残す。
+    8. [publish] notify が再構成した recon/pipeline を含む当日 data を Vercel へ publish。
+    9. [durable] logs/open_run_<date>/ に全成果物と DONE.lock を残す。
 
 安全ガード:
     - paper 固定 (assert_paper_env)。live/実マネーは一切扱わない。
@@ -74,6 +75,7 @@ sys.path.insert(0, str(ROOT))
 
 # 段の途中で import が失敗しても runner 自体は落とさない (import は遅延)。
 PYEXE = sys.executable
+OBSERVABILITY_DEGRADED_EXIT_CODE = 4
 
 
 def _child_env() -> dict[str, str]:
@@ -395,7 +397,9 @@ class Runner:
         自作バグを避ける)。exit_orders.json は既存 schema (exits[].order_type/
         order_id/dry_run) で書き、wait_exit_fills がそのまま fill 監視できるようにする。
         """
-        self.log("[exit] --flatten-all: 全ポジションを market close + open order cancel (clean reset)")
+        self.log(
+            "[exit] --flatten-all: 全ポジションを market close + open order cancel (clean reset)"
+        )
         # 事前スナップショット (dry-run でも「何を閉じるか」を durable に残す)
         snaps: list = []
         try:
@@ -515,9 +519,17 @@ class Runner:
 
         client = self._client()
         deadline = time.monotonic() + float(self.args.poll_timeout)
-        working = {"new", "accepted", "pending_new", "partially_filled",
-                   "held", "accepted_for_bidding", "pending_replace",
-                   "calculated", "pending_cancel"}
+        working = {
+            "new",
+            "accepted",
+            "pending_new",
+            "partially_filled",
+            "held",
+            "accepted_for_bidding",
+            "pending_replace",
+            "calculated",
+            "pending_cancel",
+        }
         fills: dict[str, str] = {}
         while time.monotonic() < deadline:
             smap = get_orders_status_map(client, order_ids)
@@ -618,7 +630,7 @@ class Runner:
             self.log(f"[equity] 取得失敗 (無視): {exc}")
             return None
 
-    def notify(self, eq: float | None) -> None:
+    def notify(self, eq: float | None) -> int:
         # publish_execution_summary は既存 recon_<date>.json を優先ロードして
         # 再ビルドしない。06:00 daily が薄シグナル(0)状態で書いた stale recon が
         # 残っていると、open-run が実発注しても ntfy が 0 と誤報する。stale を消して
@@ -629,7 +641,14 @@ class Runner:
                 stale.unlink()
                 self.log(f"[notify] stale recon を削除し再ビルド強制: {stale.name}")
             except Exception as exc:  # noqa: BLE001
-                self.log(f"[notify] stale recon 削除失敗 (無視): {exc}")
+                # ここで続行すると publish_execution_summary が残存 recon を優先し、
+                # 今夜の発注結果ではなく古い集計を正常配信してしまう。通知を失敗扱いに
+                # して main の observability degraded (rc=4) へ伝播させる。
+                self.log(f"[notify] stale recon 削除失敗: {exc}")
+                self.record["notify_status"] = "stale_recon_unlink_failed"
+                self.record["notify_stale_recon_error"] = f"{type(exc).__name__}: {exc}"
+                self.record["notify_exit_code"] = 1
+                return 1
         argv = [
             str(ROOT / "scripts" / "publish_execution_summary.py"),
             "--date",
@@ -639,9 +658,15 @@ class Runner:
             argv += ["--account-equity", str(eq)]
         if self.dry_run:
             argv += ["--dry-run"]
-        self.run_step("notify", argv)
+        try:
+            code, _out, _err = self.run_step("notify", argv)
+        except Exception as exc:  # noqa: BLE001 - publish は必ず後続させる
+            self.log(f"[notify] 実行失敗: {exc}")
+            code = 1
+        self.record["notify_exit_code"] = int(code)
+        return int(code)
 
-    def publish(self) -> None:
+    def publish(self) -> int:
         """post-entry の Alpaca snapshot を再生成し、PRIMARY worktree から Vercel
         monitor へ data/ を publish (commit+push claude/monitor-webapp)。
 
@@ -654,22 +679,42 @@ class Runner:
         """
         if self.args.no_publish:
             self.log("[publish] --no-publish: publish stage skip")
-            return
+            self.record["publish"] = "skipped_no_publish"
+            self.record["publish_exit_code"] = 0
+            return 0
         # 1) post-entry snapshot 再生成 (read-only)
-        self.run_step(
-            "snapshot",
-            [str(ROOT / "scripts" / "export_alpaca_snapshot.py"), "--date", self.date],
-        )
+        try:
+            snapshot_code, _out, _err = self.run_step(
+                "snapshot",
+                [
+                    str(ROOT / "scripts" / "export_alpaca_snapshot.py"),
+                    "--date",
+                    self.date,
+                ],
+            )
+        except Exception as exc:  # noqa: BLE001 - Vercel publish は必ず試す
+            self.log(f"[publish] snapshot 実行失敗: {exc}")
+            snapshot_code = 1
+        snapshot_code = int(snapshot_code)
+        self.record["snapshot_exit_code"] = snapshot_code
         if self.dry_run:
-            self.log("[publish] dry-run: Vercel publish (commit/push) skip。snapshot のみ生成")
-            return
+            self.log(
+                "[publish] dry-run: Vercel publish (commit/push) skip。snapshot のみ生成"
+            )
+            self.record["publish"] = "skipped_dry_run"
+            # dry-run では外部 publish 自体を行わないため publish stage は成功扱い。
+            # snapshot の疎通結果は snapshot_exit_code に独立して残す。
+            self.record["publish_exit_code"] = 0
+            return 0
         # 2) PRIMARY worktree から data/ を publish
         primary = Path(self.args.primary_root)
         ps1 = primary / "scripts" / "publish_data_to_vercel.ps1"
         if not ps1.exists():
-            self.log(f"[publish] publish script 不在 (skip): {ps1}")
+            self.log(f"[publish] publish script 不在: {ps1}")
             self.record["publish"] = "script_missing"
-            return
+            code = snapshot_code if snapshot_code != 0 else 1
+            self.record["publish_exit_code"] = code
+            return code
         self.log(f"[publish] {ps1} -Date {self.date} (cwd={primary})")
         try:
             proc = subprocess.run(
@@ -691,9 +736,11 @@ class Runner:
                 errors="replace",
             )
         except Exception as exc:  # noqa: BLE001
-            self.log(f"[publish] publish 実行失敗 (無視): {exc}")
+            self.log(f"[publish] publish 実行失敗: {exc}")
             self.record["publish"] = f"error:{exc}"
-            return
+            code = snapshot_code if snapshot_code != 0 else 1
+            self.record["publish_exit_code"] = code
+            return code
         out = proc.stdout or ""
         err = proc.stderr or ""
         for ln in out.splitlines():
@@ -704,11 +751,36 @@ class Runner:
         (self.out / "publish.log").write_text(
             out + "\n---STDERR---\n" + err, encoding="utf-8"
         )
-        self.log(f"[publish] publish_data_to_vercel exit={proc.returncode}")
-        self.record["publish_exit_code"] = proc.returncode
+        vercel_code = int(proc.returncode)
+        self.log(f"[publish] publish_data_to_vercel exit={vercel_code}")
+        self.record["vercel_publish_exit_code"] = vercel_code
+        # Vercel publish が失敗した場合はその code を優先。publish が成功しても
+        # snapshot が失敗していれば観測段全体は失敗として main へ伝播する。
+        code = vercel_code if vercel_code != 0 else snapshot_code
+        self.record["publish_exit_code"] = code
+        return code
 
     def finalize(self, aborted: bool) -> None:
-        self._dump("completion_recon.json", self.record)
+        def remember_write_error(field: str, path: Path, exc: Exception) -> None:
+            detail = f"{type(exc).__name__}: {exc}"
+            self.record[field] = detail
+            try:
+                self.log(f"[finalize] {path.name} 書き込み失敗: {detail}")
+            except Exception:  # noqa: BLE001 - DONE 作成後の補助ログも best-effort
+                print(f"[finalize] {path.name} 書き込み失敗: {detail}", flush=True)
+
+        # 実発注が完了した run の冪等ロックは、SUMMARY/completion の補助成果物より
+        # 先に durable 化する。後続 I/O が失敗しても rc=4 等で同じ注文を再実行させない。
+        done_path = self.out / "DONE.lock"
+        if not aborted and not self.dry_run:
+            try:
+                done_path.write_text(
+                    datetime.now(timezone.utc).isoformat(), encoding="utf-8"
+                )
+            except Exception as exc:  # noqa: BLE001 - lock failure は成功扱いにできない
+                remember_write_error("done_lock_write_error", done_path, exc)
+                raise RuntimeError(f"DONE.lock を作成できません: {done_path}") from exc
+
         lines = [
             f"# OPEN AUTO RUN {self.date} ({self.record['mode']})",
             "",
@@ -734,16 +806,30 @@ class Runner:
                 f"status={self.record.get('entry_status')}",
                 f"- sizing_equity(used): {self.record.get('sizing_equity')}",
                 f"- final_positions: {self.record.get('final_positions')}",
+                f"- observability: notify_rc={self.record.get('notify_exit_code')} "
+                f"publish_rc={self.record.get('publish_exit_code')}",
             ]
-        (self.out / "SUMMARY.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
-        if not aborted and not self.dry_run:
-            (self.out / "DONE.lock").write_text(
-                datetime.now(timezone.utc).isoformat(), encoding="utf-8"
-            )
+        summary_path = self.out / "SUMMARY.md"
+        try:
+            summary_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        except (
+            Exception
+        ) as exc:  # noqa: BLE001 - DONE 作成済み、補助成果物は best-effort
+            remember_write_error("summary_write_error", summary_path, exc)
+
+        # SUMMARY の失敗情報も completion_recon に残せるよう、最後に dump する。
+        # _dump 自体は I/O 失敗を吸収するが、警告 log 側の例外も念のため封じる。
+        completion_path = self.out / "completion_recon.json"
+        try:
+            self._dump(completion_path.name, self.record)
+        except Exception as exc:  # noqa: BLE001 - DONE 作成後は絶対に再発注させない
+            remember_write_error("completion_recon_write_error", completion_path, exc)
 
     # -- orchestration -----------------------------------------------------
     def main(self) -> int:
-        self.log(f"=== OPEN AUTO RUN start date={self.date} mode={self.record['mode']} ===")
+        self.log(
+            f"=== OPEN AUTO RUN start date={self.date} mode={self.record['mode']} ==="
+        )
         self.log(f"worktree={ROOT}")
 
         # 冪等ロック
@@ -772,16 +858,42 @@ class Runner:
             self.record["entry_status"] = "skipped_thin_signals"
             self.record["entry_submitted"] = 0
         self.record_stage()
-        self.publish()  # post-entry snapshot 再生成 + Vercel monitor へ data/ publish
-        self.notify(eq)
+
+        # notify が recon/pipeline を最新の注文結果から再構成し、その成果物を publish が
+        # dashboard data として配る。この順序が逆だと ntfy は最新でも dashboard は
+        # ひとつ前の pipeline のままになる。片方が失敗しても他方は必ず実行する。
+        try:
+            notify_rc = int(self.notify(eq))
+        except Exception as exc:  # noqa: BLE001 - publish を必ず後続させる
+            self.log(f"[notify] 未処理例外: {exc}")
+            notify_rc = 1
+        self.record["notify_exit_code"] = notify_rc
+
+        try:
+            publish_rc = int(self.publish())
+        except Exception as exc:  # noqa: BLE001 - DONE を必ず durable に残す
+            self.log(f"[publish] 未処理例外: {exc}")
+            publish_rc = 1
+        self.record["publish_exit_code"] = publish_rc
+
+        # 注文段は既に完了しているため、観測段の失敗時も DONE.lock を先に作る。
+        # rc=4 による再試行で発注を重複させないことが最優先。
         self.finalize(aborted=False)
+        if notify_rc != 0 or publish_rc != 0:
+            self.log(
+                "=== OPEN AUTO RUN done with observability failure "
+                f"notify={notify_rc} publish={publish_rc} ==="
+            )
+            return OBSERVABILITY_DEGRADED_EXIT_CODE
         self.log("=== OPEN AUTO RUN done ===")
         return 0
 
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    p.add_argument("--date", default=None, help="対象日 YYYY-MM-DD (default: today local)")
+    p.add_argument(
+        "--date", default=None, help="対象日 YYYY-MM-DD (default: today local)"
+    )
     p.add_argument(
         "--min-signals",
         type=int,
