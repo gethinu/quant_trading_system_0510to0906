@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 PIPELINE = Path(__file__).resolve().parents[2] / "scripts" / "daily_pipeline.ps1"
 
 
@@ -99,5 +98,5 @@ def test_exit_dryrun_is_an_operational_failure_when_time_exit_is_due():
     idx_exit = code.find('Write-Log "[exit_check] SkipExitCheck')
     tail = code[idx_exit:]
     assert '"--fail-on-unsubmitted-time-exit"' in tail
-    assert 'exit_check(unsubmitted_time_exit)' in tail
+    assert "exit_check(unsubmitted_time_exit)" in tail
     assert "if ($ec -ne 0)" in tail
