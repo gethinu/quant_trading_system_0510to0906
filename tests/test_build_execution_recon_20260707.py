@@ -45,6 +45,9 @@ def _signals() -> dict:
 
 def _paper_orders() -> dict:
     return {
+        # producer が書く provenance。これが current signals と一致した時だけ
+        # recon は run_id を stamp する。
+        "source_signals_run_id": "night-20260708-open",
         "orders": [
             # sys1 long: 1 submitted (filled), 1 skipped(min_notional)
             {"system": "system1", "side": "buy", "order_id": "o1", "status": "filled"},
@@ -55,12 +58,13 @@ def _paper_orders() -> dict:
             },
             # sys2 short: 1 failed
             {"system": "system2", "side": "sell", "error": "insufficient buying power"},
-        ]
+        ],
     }
 
 
 def _exit_orders() -> dict:
     return {
+        "source_signals_run_id": "night-20260708-open",
         "exits": [
             {
                 "system": "system1",
@@ -80,7 +84,7 @@ def _exit_orders() -> dict:
                 "reason": "protect_trailing",
                 "order_id": "e3",
             },
-        ]
+        ],
     }
 
 
@@ -102,7 +106,9 @@ def test_full_join():
     assert p["exit_close"] == 1
     assert p["exit_protect"] == 2
     assert p["account_equity"] == 10120.0
+    # execution input が両方 current run 由来なので stamp される
     assert recon["source_signals_run_id"] == "night-20260708-open"
+    assert recon["execution_lineage_ok"] is True
     # drop 内訳: min_notional 1, fail 1
     assert recon["portfolio"]["drop_breakdown"]["below_min_notional"] == 1
     assert recon["portfolio"]["drop_breakdown"]["fail"] == 1

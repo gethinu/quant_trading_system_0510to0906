@@ -121,6 +121,47 @@ def _load_json(path: Path | None) -> dict[str, Any] | None:
         return None
 
 
+def execution_input_lineage(
+    signals: dict[str, Any] | None,
+    paper_orders: dict[str, Any] | None,
+    exit_orders: dict[str, Any] | None,
+) -> dict[str, str]:
+    """各 execution input が *この* signals run 由来かを判定する。
+
+    paper_orders / exit_orders は producer が ``source_signals_run_id`` を
+    書く。同日再生成で Step5b/5c が skip / 失敗して古い JSON が残っている場合、
+    その run_id は現行 signals と一致しないので ``stale`` になる。field 自体が
+    無い旧 producer 出力は ``unverified`` (= 検証不能) とし、**推測で verified に
+    昇格させない**。
+
+    戻り値は input 名 -> "verified" | "stale" | "unverified" | "missing"。
+    """
+    run_id = str(((signals or {}).get("meta") or {}).get("run_id") or "")
+    out: dict[str, str] = {}
+    for name, payload in (("paper_orders", paper_orders), ("exit_orders", exit_orders)):
+        if payload is None:
+            out[name] = "missing"
+            continue
+        stamped = str(payload.get("source_signals_run_id") or "")
+        if not stamped:
+            out[name] = "unverified"
+        elif not run_id or stamped != run_id:
+            out[name] = "stale"
+        else:
+            out[name] = "verified"
+    return out
+
+
+def execution_lineage_ok(lineage: dict[str, str]) -> bool:
+    """存在する execution input が全て current run に紐付いているか。
+
+    ``missing`` は「その段が動かなかった」= 突合対象なしなので許容する。
+    ``stale`` / ``unverified`` が 1 つでも有れば recon 全体を current run の
+    測定値として扱ってはいけない。
+    """
+    return all(state in {"verified", "missing"} for state in lineage.values())
+
+
 def build_recon(
     signals: dict[str, Any] | None,
     paper_orders: dict[str, Any] | None,
@@ -135,6 +176,14 @@ def build_recon(
     source_signals_run_id = (
         signals_meta.get("run_id") if isinstance(signals_meta, dict) else None
     )
+    # run_id を signals から取るだけでは不十分。paper_orders / exit_orders が前 run の
+    # 残骸だと、古い execution 実績に新しい run_id を貼って「current」として publish
+    # されてしまう。全 execution input が current run 由来と確認できた時だけ stamp し、
+    # そうでなければ None にして下流 (bundle preflight) に fail-closed 判断を委ねる。
+    _lineage = execution_input_lineage(signals, paper_orders, exit_orders)
+    _lineage_ok = execution_lineage_ok(_lineage)
+    if not _lineage_ok:
+        source_signals_run_id = None
     systems: dict[str, dict[str, Any]] = {
         name: _empty_system_bucket() for name in _SYSTEMS
     }
@@ -283,6 +332,8 @@ def build_recon(
         "generated_at": generated_at
         or datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "source_signals_run_id": source_signals_run_id,
+        "execution_lineage": _lineage,
+        "execution_lineage_ok": _lineage_ok,
         "inputs": {
             "signals": signals is not None,
             "paper_orders": paper_orders is not None,

@@ -27,8 +27,8 @@
 from __future__ import annotations
 
 import argparse
-import json
 from datetime import datetime
+import json
 from pathlib import Path
 import sys
 
@@ -43,6 +43,7 @@ from common.alpaca_trading import (  # noqa: E402
     signals_to_orders,
     submit_paper_order,
 )
+
 # durable なタグ台帳 (position_tracker / symbol_system_map / position_entry_dates) を
 # entry 成功後に更新するための正準ライター群。**記録追加のみ・発注挙動は変えない**。
 from common.position_age import load_entry_dates, save_entry_dates  # noqa: E402
@@ -205,6 +206,12 @@ def _submit_from_json(args: argparse.Namespace) -> int:
             out_path,
             {
                 "date": str(json_data.get("date") or ""),
+                # どの signals run から生成された発注かを durable に残す。
+                # recon がこれを見て「同日だが別 run の残骸」を弾く。
+                "source_signals_run_id": str(
+                    (json_data.get("meta") or {}).get("run_id") or ""
+                )
+                or None,
                 "tier": args.tier,
                 "min_notional_usd": args.min_notional,
                 "prefer_fractional": (not args.no_fractional),
@@ -282,7 +289,9 @@ def _persist_entry_tags(successful: list, date_str: str) -> None:
         save_entry_dates(entry_map)
         dump_symbol_system_map(sys_map_store)
     except Exception as exc:  # noqa: BLE001
-        print(f"[persist] symbol_system_map/entry_dates 更新失敗 (記録のみ・継続): {exc}")
+        print(
+            f"[persist] symbol_system_map/entry_dates 更新失敗 (記録のみ・継続): {exc}"
+        )
 
     # (b) position_tracker.json (trailing/profit 用。既存 writer の契約に従う)
     try:
@@ -442,7 +451,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.confirm and successful_orders:
         _date = getattr(args, "date", None) or datetime.now().strftime("%Y-%m-%d")
         _persist_entry_tags(successful_orders, str(_date))
-        print(f"[persist] durable タグ台帳を更新: {len(successful_orders)} 件 (tracker/map/entry_dates)")
+        print(
+            f"[persist] durable タグ台帳を更新: {len(successful_orders)} 件 (tracker/map/entry_dates)"
+        )
 
     print(f"\n完了: 送信={submitted} スキップ={skipped} 失敗={failed}")
     print("結果は Alpaca Paper dashboard と logs/alpaca_orders_*.log で確認できます。")

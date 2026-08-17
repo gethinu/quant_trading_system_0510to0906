@@ -129,9 +129,8 @@ def _hydrate_from_alpaca_coids(snapshots: list[PositionSnapshot], client: Any) -
             # 次ページ = これより古い注文。submitted_at/created_at を境界にする。
             oldest = None
             for o in reversed(batch):
-                oldest = (
-                    getattr(o, "submitted_at", None)
-                    or getattr(o, "created_at", None)
+                oldest = getattr(o, "submitted_at", None) or getattr(
+                    o, "created_at", None
                 )
                 if oldest is not None:
                     break
@@ -272,6 +271,23 @@ def _load_price_by_symbol(symbols: list[str]) -> dict[str, float]:
 
 def _today_str() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def _signals_run_id(results_dir: Path, date_str: str) -> str | None:
+    """同日 today_signals の run_id を読む (exit 判断には一切使わない)。
+
+    exit は建玉とルールから決まるので signals に依存しないが、「どの pipeline
+    run の最中に作られた exit か」を recon 側が突合できるよう provenance だけ
+    残す。読めなくても exit 処理は継続する (None = 検証不能)。
+    """
+    path = results_dir / f"today_signals_{date_str.replace('-', '')}.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 - provenance は best-effort
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return str((payload.get("meta") or {}).get("run_id") or "") or None
 
 
 def _write_output(
@@ -478,6 +494,9 @@ def main(argv: list[str] | None = None) -> int:
         snapshots,
         {
             "date": date_str,
+            # provenance のみ (exit 判断には未使用)。recon が「同日だが別 run の
+            # 残骸」を弾くために使う。
+            "source_signals_run_id": _signals_run_id(results_dir, date_str),
             "mode": mode,
             "count": len(exits),
             "submitted": submitted_ok,
