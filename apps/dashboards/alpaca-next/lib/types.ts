@@ -272,10 +272,28 @@ export interface AlpacaPosition {
   exit_type: string;
   /** now エグジット条件成立時のみ "time_based" 等。 */
   exit_expected: string | null;
+  /** 当日 exit_orders と exact-date join した broker 送信状態。 */
+  exit_execution_state?:
+    | 'dry_run'
+    | 'submitted'
+    | 'failed'
+    | 'not_submitted'
+    | 'not_planned'
+    | 'unmeasured'
+    | null;
   stop_price_est: number | null;
   target_price_est: number | null;
   distance_to_stop_pct: number | null;
   distance_to_target_pct: number | null;
+}
+
+export interface AlpacaExitExecution {
+  measured: boolean;
+  date: string;
+  mode: string | null;
+  time_exit_due: number | null;
+  time_exit_unsubmitted: number | null;
+  execution_health: string;
 }
 
 /** 期間切替 1 レンジ分。points が空 = その期間はデータ無し (0 で埋めない)。 */
@@ -526,6 +544,8 @@ export interface AlpacaSnapshot {
   realized?: RealizedBlock | null;
   exposure: AlpacaExposure;
   summary: AlpacaSummary;
+  /** 当日の期限 exit が提案止まりか、broker 送信済みか。 */
+  exit_execution?: AlpacaExitExecution | null;
   positions: AlpacaPosition[];
   reconciliation: AlpacaReconciliation;
 }

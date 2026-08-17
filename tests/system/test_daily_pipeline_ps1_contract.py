@@ -90,7 +90,10 @@ class TestDailyPipelineCliContract:
         # exec_summary step が SkipPublish で丸ごと skip されない
         assert "[exec_summary] SkipPublish 指定によりスキップ" not in body
         # SkipPublish 時は --dry-run を足して送信のみ抑止する
-        assert "$SkipPublish -or (-not $AutoSubmitPaper) -or $DryRunPublish" in body
+        assert (
+            "$SkipPublish -or (-not ($AutoSubmitPaper -or $AutoSubmitPaperExits)) "
+            "-or $DryRunPublish"
+        ) in body
         assert "通知のみ抑止" in body
 
     def test_exit_code_contract_documented(self, ps1_text: str):

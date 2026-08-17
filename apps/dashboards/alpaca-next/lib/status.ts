@@ -33,8 +33,8 @@ export interface OverdueRow {
   /** 何日超過しているか (正の数)。 */
   daysOver: number;
   unrealizedPl: number;
-  /** 台帳側で「本日 exit 予定」に入っているか。 */
-  pendingExit: boolean;
+  /** 当日 exit_orders と突合した broker 送信状態。旧 snapshot は unmeasured。 */
+  executionState: NonNullable<AlpacaPosition['exit_execution_state']>;
 }
 
 export interface DashboardStatus {
@@ -42,8 +42,8 @@ export interface DashboardStatus {
   maxDaysOver: number | null;
   /** 期限超過建玉の含み損益合計。 */
   overduePl: number;
-  /** 期限超過のうち本日の exit 発注に入っている件数。 */
-  overduePendingExit: number;
+  /** 期限超過のうち broker へ送信済みの件数。 */
+  overdueSubmitted: number;
   /** 本日満期 (days_remaining === 0)。まだ超過ではない。 */
   dueToday: number;
   /** 上場廃止などで API から決済できない建玉。 */
@@ -62,7 +62,7 @@ const EMPTY: DashboardStatus = {
   overdue: [],
   maxDaysOver: null,
   overduePl: 0,
-  overduePendingExit: 0,
+  overdueSubmitted: 0,
   dueToday: 0,
   delisted: 0,
   orphan: 0,
@@ -103,7 +103,6 @@ export function computeStatus(snap: AlpacaSnapshot | null): DashboardStatus {
   if (!snap) return EMPTY;
 
   const recon = snap.realized?.exit_intent_reconciliation ?? null;
-  const pendingSet = new Set((recon?.intended_pending ?? []).map((x) => x.symbol));
 
   const overdue: OverdueRow[] = snap.positions
     .filter(isOverdue)
@@ -112,13 +111,13 @@ export function computeStatus(snap: AlpacaSnapshot | null): DashboardStatus {
       system: p.system,
       daysOver: -(p.days_remaining as number),
       unrealizedPl: p.unrealized_pl,
-      pendingExit: pendingSet.has(p.symbol),
+      executionState: p.exit_execution_state ?? 'unmeasured',
     }))
     .sort((a, b) => b.daysOver - a.daysOver || a.unrealizedPl - b.unrealizedPl);
 
   const maxDaysOver = overdue.length > 0 ? overdue[0].daysOver : null;
   const overduePl = overdue.reduce((n, r) => n + r.unrealizedPl, 0);
-  const overduePendingExit = overdue.filter((r) => r.pendingExit).length;
+  const overdueSubmitted = overdue.filter((r) => r.executionState === 'submitted').length;
   const dueToday = snap.positions.filter((p) => p.days_remaining === 0).length;
   const delisted = snap.positions.filter(isDelistedPos).length;
   const orphan = snap.positions.filter(isOrphanPos).length;
@@ -134,16 +133,27 @@ export function computeStatus(snap: AlpacaSnapshot | null): DashboardStatus {
   }
 
   if (overdue.length > 0) {
-    // 「本日の exit 発注に入っているか」まで出す。全部 pending なら詰まりではなく
-    // 執行待ちで、そこを混ぜて煽らない。
-    const pendNote =
-      overduePendingExit === overdue.length
-        ? '全件が本日の exit 発注に入っています (執行待ち)'
-        : `うち ${overduePendingExit} 件のみ本日の exit 発注に入っています`;
+    // intent/recon に載っただけでは「発注済」ではない。exact-date exit_orders の
+    // order_id/dry_run/error から broker 送信状態を表示する。
+    const nDryRun = overdue.filter((r) => r.executionState === 'dry_run').length;
+    const nFailed = overdue.filter((r) => r.executionState === 'failed').length;
+    const nNotPlanned = overdue.filter((r) => r.executionState === 'not_planned').length;
+    const nNotSubmitted = overdue.filter((r) => r.executionState === 'not_submitted').length;
+    const nUnmeasured = overdue.filter((r) => r.executionState === 'unmeasured').length;
+    const executionNote = [
+      `送信済 ${overdueSubmitted}`,
+      nDryRun > 0 ? `dry-run未送信 ${nDryRun}` : null,
+      nFailed > 0 ? `送信失敗 ${nFailed}` : null,
+      nNotPlanned > 0 ? `未計画 ${nNotPlanned}` : null,
+      nNotSubmitted > 0 ? `未送信 ${nNotSubmitted}` : null,
+      nUnmeasured > 0 ? `未計測 ${nUnmeasured}` : null,
+    ]
+      .filter(Boolean)
+      .join(' · ');
     red(
       'overdue',
       `期限超過の建玉 ${overdue.length} 件`,
-      `最長 ${maxDaysOver}d 超過 · ${pendNote}`,
+      `最長 ${maxDaysOver}d 超過 · ${executionNote}`,
     );
   }
 
@@ -229,7 +239,7 @@ export function computeStatus(snap: AlpacaSnapshot | null): DashboardStatus {
     overdue,
     maxDaysOver,
     overduePl,
-    overduePendingExit,
+    overdueSubmitted,
     dueToday,
     delisted,
     orphan,

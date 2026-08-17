@@ -12,7 +12,8 @@
       5. [publish]     scripts/publish_signals.py --input {json}
       5b.[paper_orders] scripts/paper_trading_dryrun.py --signals-json ... (default)
                          もしくは paper_trading_submit.py --confirm --yes (AutoSubmitPaper 時)
-      5c.[exit_check]  scripts/paper_exit_check.py (default dry-run, --confirm で本発注)
+      5c.[exit_check]  scripts/paper_exit_check.py (default dry-run,
+                         AutoSubmitPaperExits / AutoSubmitPaper で本発注)
                          現 position と SYSTEM_TRADE_RULES の照合で exit order 案を生成 / 発注
       6. [vercel]      scripts/publish_data_to_vercel.ps1
 
@@ -49,6 +50,13 @@
     Task Scheduler の Action に含めない限り絶対に発注しない。
     **live 口座 (実マネー) は本 pipeline では扱わない。**
 
+.PARAMETER AutoSubmitPaperExits
+    exit_check だけを Paper 口座へ実発注する。entry は従来どおり dry-run。
+    期限超過を解消するために entry と exit の権限を分離した opt-in。
+    AutoSubmitPaper は後方互換のため entry + exit の両方を引き続き有効化する。
+    CLI switch のほか AUTO_SUBMIT_PAPER_EXITS=1 でも有効化できるため、既存の
+    Task Scheduler wrapper を変更せず primary .env で明示 opt-in 可能。
+
 .PARAMETER Tier
     paper_orders の tier。small=$1k / medium=$10k / large=$100k。
     未指定なら env ALPACA_TIER、無ければ "small"。
@@ -58,6 +66,7 @@
     .\scripts\daily_pipeline.ps1 -Date 2026-07-01 -SkipCache
     # paper 実発注 (user が明示 opt-in):
     .\scripts\daily_pipeline.ps1 -Date 2026-07-01 -SkipCache -AutoSubmitPaper -Tier small
+    .\scripts\daily_pipeline.ps1 -Date 2026-07-01 -SkipCache -AutoSubmitPaperExits
 
 .NOTES
     Exit codes: 0=全 OK, 2=一部 step 失敗 (WARN 送信済), 1=致命的エラー
@@ -74,6 +83,7 @@ param(
     [switch]$SkipPaperOrders = $false,
     [switch]$SkipExitCheck = $false,
     [switch]$AutoSubmitPaper = $false,
+    [switch]$AutoSubmitPaperExits = $false,
     [string]$Tier = ""
 )
 
@@ -120,6 +130,12 @@ $ExitOrdersJson = Join-Path $ProjectRoot "results_csv\exit_orders_$DateCompact.j
 if (-not $Tier) {
     if ($env:ALPACA_TIER) { $Tier = $env:ALPACA_TIER } else { $Tier = "small" }
 }
+if (-not $AutoSubmitPaperExits -and
+    $env:AUTO_SUBMIT_PAPER_EXITS -match '^(1|true|yes|y|on)$') {
+    $AutoSubmitPaperExits = $true
+    Write-Host "[config] AUTO_SUBMIT_PAPER_EXITS=ON (paper exit only)"
+}
+$ExitSubmitEnabled = $AutoSubmitPaper -or $AutoSubmitPaperExits
 
 if (-not (Test-Path $LogDir)) {
     New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
@@ -295,39 +311,45 @@ try {
     # 現 position を Alpaca から pull し、SYSTEM_TRADE_RULES と照合して
     # (a) protection (stop / trailing / take_profit) が未発注なら発注
     # (b) time-based (S2/S3/S5/S6) / SPY breakout (S7) 判定で成行 close order 生成
-    # を実行する。default = dry-run (JSON 出力のみ)、-AutoSubmitPaper で実発注。
-    # entry step (5b) と同じ opt-in flag をシェアする (両方 dry-run か両方本発注)。
+    # を実行する。default = dry-run (JSON 出力のみ)。-AutoSubmitPaperExits なら
+    # exit だけ、-AutoSubmitPaper なら後方互換で entry + exit を実発注する。
     if ($SkipExitCheck) {
         Write-Log "[exit_check] SkipExitCheck 指定によりスキップ"
     }
     else {
-        if ($AutoSubmitPaper) {
-            Write-Log "[exit_check] AutoSubmitPaper=ON  → paper 口座へ exit 発注を試行します"
+        if ($ExitSubmitEnabled) {
+            Write-Log "[exit_check] exit submit=ON  → paper 口座へ exit 発注を試行します"
             $ecArgs = @(
                 (Join-Path $ProjectRoot "scripts\paper_exit_check.py"),
                 "--date", $Date,
                 "--output-json", $ExitOrdersJson,
-                "--confirm", "--yes"
+                "--confirm", "--yes",
+                "--fail-on-unsubmitted-time-exit"
             )
         }
         else {
-            Write-Log "[exit_check] dry-run (submit skipped: autosubmit not enabled)"
+            Write-Log "[exit_check] dry-run (submit skipped: exit autosubmit not enabled)"
             $ecArgs = @(
                 (Join-Path $ProjectRoot "scripts\paper_exit_check.py"),
                 "--date", $Date,
-                "--output-json", $ExitOrdersJson
+                "--output-json", $ExitOrdersJson,
+                "--fail-on-unsubmitted-time-exit"
             )
         }
         $ec = Invoke-Step -Name "exit_check" -PyArgs $ecArgs
-        if ($ec -eq 1) { $Failures += "exit_check(exit=1)" }
-        elseif ($ec -eq 2) { $Failures += "exit_check(safety_abort)" }
+        if ($ec -ne 0) {
+            if ($ec -eq 2) { $Failures += "exit_check(safety_abort)" }
+            elseif ($ec -eq 3) { $Failures += "exit_check(unsubmitted_time_exit)" }
+            else { $Failures += "exit_check(exit=$ec)" }
+        }
     }
 
     # --- Step 5d: execution summary (submit 後の実発注サマリを recon 化 + 通知) ---
     # entry(5b)/exit(5c) の結果を today_signals/paper_orders/exit_orders から recon 化し、
     # sig→gen→entry→fill→exit + system別 + drop 内訳 の整列サマリを配信する。
     # Step5 の publish (signal 予告) はそのまま残し、本 step は実発注確定後の結果を別便で送る。
-    # AutoSubmitPaper 時のみ実送信、それ以外は dry-run (recon 生成 + 本文表示のみ・送信なし)。
+    # entry または exit を実発注した時のみ実送信。それ以外は dry-run
+    # (recon 生成 + 本文表示のみ・送信なし)。
     #
     # SkipPublish は「ntfy/email 配信をスキップ」であって dashboard publish の
     # スキップではない。この step は通知だけでなく **recon 生成と pipeline の
@@ -342,7 +364,7 @@ try {
             (Join-Path $ProjectRoot "scripts\publish_execution_summary.py"),
             "--date", $Date
         )
-        if ($SkipPublish -or (-not $AutoSubmitPaper) -or $DryRunPublish) {
+        if ($SkipPublish -or (-not ($AutoSubmitPaper -or $AutoSubmitPaperExits)) -or $DryRunPublish) {
             $esArgs += @("--dry-run")
         }
         if ($SkipPublish) {

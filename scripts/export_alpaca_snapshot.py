@@ -859,6 +859,79 @@ def _latest_json(results_dir: Path, prefix: str) -> Path | None:
     return best[1] if best else None
 
 
+def _load_exit_execution(
+    results_dir: Path, date_str: str
+) -> tuple[dict[str, Any], dict[str, str]]:
+    """当日 exit artifact を読み、公開可能な health と symbol 別執行状態を返す。
+
+    期限判定そのものは position + rules から独立計算する。ここでは、その判定に対して
+    ``paper_exit_check`` が実際に broker へ送ったかだけを join する。exact-date の
+    artifact 以外は使わず、古い dry-run/submitted を当日の事実として混ぜない。
+    """
+    compact = date_str.replace("-", "")
+    path = results_dir / f"exit_orders_{compact}.json"
+    unavailable = {
+        "measured": False,
+        "date": date_str,
+        "mode": None,
+        "time_exit_due": None,
+        "time_exit_unsubmitted": None,
+        "execution_health": "unmeasured",
+    }
+    if not path.exists():
+        return unavailable, {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return unavailable, {}
+    if not isinstance(payload, dict) or payload.get("date") != date_str:
+        return unavailable, {}
+
+    mode = str(payload.get("mode") or "unknown")
+    by_symbol: dict[str, str] = {}
+    time_rows = [
+        e
+        for e in (payload.get("exits") or [])
+        if isinstance(e, dict) and e.get("reason") == "time_based"
+    ]
+    failed_statuses = {"rejected", "canceled", "cancelled", "expired", "done_for_day"}
+    for row in time_rows:
+        sym = str(row.get("symbol") or "").upper()
+        if not sym:
+            continue
+        status = str(row.get("status") or "").lower().split(".")[-1]
+        if row.get("error") or status in failed_statuses:
+            state = "failed"
+        elif row.get("dry_run", mode == "dry_run") or mode == "dry_run":
+            state = "dry_run"
+        elif row.get("order_id"):
+            state = "submitted"
+        else:
+            state = "not_submitted"
+        by_symbol[sym] = state
+
+    due = payload.get("time_exit_due")
+    unsubmitted = payload.get("time_exit_unsubmitted")
+    if due is None:
+        due = len(time_rows)
+    if unsubmitted is None:
+        unsubmitted = sum(1 for state in by_symbol.values() if state != "submitted")
+    health = payload.get("execution_health")
+    if not health:
+        health = "blocked_unsubmitted_time_exit" if unsubmitted else "ok"
+    return (
+        {
+            "measured": True,
+            "date": date_str,
+            "mode": mode,
+            "time_exit_due": due,
+            "time_exit_unsubmitted": unsubmitted,
+            "execution_health": str(health),
+        },
+        by_symbol,
+    )
+
+
 def _build_reconciliation(results_dir: Path, held_symbols: set[str]) -> dict[str, Any]:
     rec: dict[str, Any] = {
         "signals_date": None,
@@ -978,6 +1051,9 @@ def build_snapshot(
         is None
     ]
     inactive_symbols = _fetch_inactive_assets(client, untagged_symbols)
+    exit_execution, exit_execution_by_symbol = _load_exit_execution(
+        results_dir, date_str
+    )
 
     positions: list[dict[str, Any]] = []
     long_usd = short_usd = 0.0
@@ -1048,6 +1124,14 @@ def build_snapshot(
         if max_hold > 0 and holding_days is not None and holding_days >= max_hold:
             exit_expected = "time_based"
 
+        exit_execution_state = None
+        if exit_expected == "time_based":
+            exit_execution_state = exit_execution_by_symbol.get(sym)
+            if exit_execution_state is None:
+                exit_execution_state = (
+                    "not_planned" if exit_execution["measured"] else "unmeasured"
+                )
+
         row = {
             "symbol": sym,
             "system": sys_label or "unknown",
@@ -1072,6 +1156,9 @@ def build_snapshot(
             "exit_date": exit_date,
             "exit_type": _exit_type(sys_label, rules),
             "exit_expected": exit_expected,
+            # 期限到来の事実と、broker 送信の事実を分離する。
+            # dry_run を「本日の exit 発注に入った」と表示しないための join 結果。
+            "exit_execution_state": exit_execution_state,
             "stop_price_est": stop_est,
             "target_price_est": target_est,
             "distance_to_stop_pct": dist_stop,
@@ -1247,6 +1334,7 @@ def build_snapshot(
             "biggest_winner": biggest_win,
             "biggest_loser": biggest_loss,
         },
+        "exit_execution": exit_execution,
         "positions": positions,
         "reconciliation": _build_reconciliation(results_dir, held_symbols),
     }

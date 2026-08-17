@@ -158,6 +158,77 @@ def test_latest_json_numeric_ordering(tmp_path):
     assert latest.name == "alpaca_snapshot_20260709.json"
 
 
+def test_exit_execution_distinguishes_dry_run_from_submitted(tmp_path):
+    """exit 案が存在しても dry-run は broker 送信済みと表示しない。"""
+    payload = {
+        "date": "2026-08-17",
+        "mode": "dry_run",
+        "exits": [
+            {
+                "symbol": "DUE",
+                "reason": "time_based",
+                "dry_run": True,
+                "order_id": None,
+                "error": None,
+            }
+        ],
+    }
+    (tmp_path / "exit_orders_20260817.json").write_text(
+        json.dumps(payload), encoding="utf-8"
+    )
+    health, by_symbol = ex._load_exit_execution(tmp_path, "2026-08-17")
+    assert health == {
+        "measured": True,
+        "date": "2026-08-17",
+        "mode": "dry_run",
+        "time_exit_due": 1,
+        "time_exit_unsubmitted": 1,
+        "execution_health": "blocked_unsubmitted_time_exit",
+    }
+    assert by_symbol == {"DUE": "dry_run"}
+
+
+def test_exit_execution_classifies_submitted_and_failed(tmp_path):
+    payload = {
+        "date": "2026-08-17",
+        "mode": "submitted",
+        "exits": [
+            {
+                "symbol": "SENT",
+                "reason": "time_based",
+                "dry_run": False,
+                "order_id": "order-1",
+                "status": "OrderStatus.PENDING_NEW",
+            },
+            {
+                "symbol": "FAIL",
+                "reason": "time_based",
+                "dry_run": False,
+                "order_id": None,
+                "error": "rejected",
+            },
+        ],
+    }
+    (tmp_path / "exit_orders_20260817.json").write_text(
+        json.dumps(payload), encoding="utf-8"
+    )
+    health, by_symbol = ex._load_exit_execution(tmp_path, "2026-08-17")
+    assert health["time_exit_due"] == 2
+    assert health["time_exit_unsubmitted"] == 1
+    assert by_symbol == {"SENT": "submitted", "FAIL": "failed"}
+
+
+def test_exit_execution_never_uses_stale_day(tmp_path):
+    (tmp_path / "exit_orders_20260816.json").write_text(
+        json.dumps({"date": "2026-08-16", "mode": "submitted", "exits": []}),
+        encoding="utf-8",
+    )
+    health, by_symbol = ex._load_exit_execution(tmp_path, "2026-08-17")
+    assert health["measured"] is False
+    assert health["execution_health"] == "unmeasured"
+    assert by_symbol == {}
+
+
 # --- 当日損益 / 期間切替 / 実現損益 ---------------------------------------
 def test_last_equity_is_never_used_for_today_pnl():
     """``equity - last_equity`` は基準違いの引き算。二度と書かない (source guard)。

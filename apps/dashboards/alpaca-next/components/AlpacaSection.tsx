@@ -513,10 +513,32 @@ function exitBadge(p: AlpacaPosition): { text: string; cls: string; sub?: string
     // exit_expected='time_based' は days_remaining<=0 で必ず立つため、以前は
     // 超過分を区別できず全部「本日手仕舞い」に潰れていた (超過 Nd が dead code)。
     const d = p.days_remaining;
+    const state = p.exit_execution_state ?? 'unmeasured';
+    const execution =
+      state === 'submitted'
+        ? { text: '送信済', sub: 'broker へ exit order を送信済み' }
+        : state === 'dry_run'
+          ? { text: '未送信', sub: 'dry-run: exit 案のみで broker へ未送信' }
+          : state === 'failed'
+            ? { text: '送信失敗', sub: 'broker への exit 送信が失敗' }
+            : state === 'not_planned'
+              ? { text: '未計画', sub: '期限到来だが当日の exit_orders に存在しない' }
+              : state === 'not_submitted'
+                ? { text: '未送信', sub: 'exit_orders にあるが order_id が無い' }
+                : { text: '未計測', sub: '当日の exit_orders が無く送信状態不明' };
+    const sub = [p.exit_date, execution.sub].filter(Boolean).join(' · ');
     if (d != null && d < 0) {
-      return { text: `超過 ${-d}d`, cls: 'bg-fail/30 text-fail', sub: p.exit_date ?? undefined };
+      return {
+        text: `超過 ${-d}d · ${execution.text}`,
+        cls: state === 'submitted' ? 'bg-warn/25 text-warn' : 'bg-fail/30 text-fail',
+        sub,
+      };
     }
-    return { text: '本日手仕舞い', cls: 'bg-fail/20 text-fail', sub: p.exit_date ?? undefined };
+    return {
+      text: `本日手仕舞い · ${execution.text}`,
+      cls: state === 'submitted' ? 'bg-warn/20 text-warn' : 'bg-fail/20 text-fail',
+      sub,
+    };
   }
   if (p.exit_type === 'time' && p.days_remaining != null) {
     const d = p.days_remaining;
@@ -1590,6 +1612,9 @@ export function AlpacaSection({ payload }: { payload: AlpacaSnapshot | null }) {
   const a = payload.account;
   const s = payload.summary;
   const st = computeStatus(payload);
+  const overdueUnsubmitted = st.overdue.filter(
+    (r) => r.executionState !== 'submitted',
+  ).length;
   const realized = payload.realized ?? null;
   const eqRange = payload.equity_ranges?.['1M'] ?? null;
 
@@ -1754,7 +1779,10 @@ export function AlpacaSection({ payload }: { payload: AlpacaSnapshot | null }) {
         title="保有ポジション"
         badge={
           st.overdue.length > 0
-            ? { text: `期限超過 ${st.overdue.length}`, tone: 'fail' }
+            ? {
+                text: `期限超過 ${st.overdue.length} · 未送信/不明 ${overdueUnsubmitted}`,
+                tone: 'fail',
+              }
             : undefined
         }
         meta={

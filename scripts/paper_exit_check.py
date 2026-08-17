@@ -2,7 +2,8 @@
 
 daily_pipeline.ps1 の [exit_check] step (5c) から呼ばれる:
     default:                dry-run (JSON 出力のみ、実発注なし)
-    -AutoSubmitPaper 付き:  Paper 口座へ実発注 (成行 close / stop / trail / target)
+    -AutoSubmitPaperExits:  exit だけ Paper 口座へ実発注
+    -AutoSubmitPaper:       entry + exit を Paper 口座へ実発注 (後方互換)
 
 安全設計:
     - ALPACA_PAPER=true 強制 (live 口座禁止、assert_paper_env)
@@ -18,9 +19,15 @@ daily_pipeline.ps1 の [exit_check] step (5c) から呼ばれる:
       "count": <int>,
       "submitted": <int>,
       "failed": <int>,
+      "time_exit_due": <int>,
+      "time_exit_unsubmitted": <int>,
+      "execution_health": "ok" | "blocked_unsubmitted_time_exit",
       "positions": [ ... snapshot dicts ... ],
       "exits": [ ... PreparedExit rows ... ]
     }
+
+Exit codes: 0=正常, 1=送信失敗, 2=paper safety abort,
+            3=期限到来 time exit が未送信 (--fail-on-unsubmitted-time-exit 時)
 """
 
 from __future__ import annotations
@@ -286,6 +293,14 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Alpaca API を叩かず tracker のみで動く (test / offline 用)。",
     )
+    parser.add_argument(
+        "--fail-on-unsubmitted-time-exit",
+        action="store_true",
+        help=(
+            "time-based exit が期限到来しているのに未送信なら exit=3。"
+            "日次運用で dry-run を成功扱いしないための監視ゲート。"
+        ),
+    )
     args = parser.parse_args(argv)
 
     date_str = args.date or _today_str()
@@ -363,6 +378,10 @@ def main(argv: list[str] | None = None) -> int:
                 submit_failed += 1
 
     mode = "submitted" if not dry_run else "dry_run"
+    time_exits = [e for e in exits if e.reason == "time_based"]
+    unsubmitted_time_cnt = sum(
+        1 for e in time_exits if e.dry_run or not e.order_id or bool(e.error)
+    )
 
     _write_output(
         exits,
@@ -376,6 +395,13 @@ def main(argv: list[str] | None = None) -> int:
             "count": len(exits),
             "submitted": submitted_ok,
             "failed": submit_failed,
+            # 「exit 案を作った」と「broker へ送った」を混同しないための運用 health。
+            # dashboard / verifier はこの値で dry-run の期限超過を赤く出せる。
+            "time_exit_due": len(time_exits),
+            "time_exit_unsubmitted": unsubmitted_time_cnt,
+            "execution_health": (
+                "blocked_unsubmitted_time_exit" if unsubmitted_time_cnt > 0 else "ok"
+            ),
             "spy_high": spy_high,
             "spy_max70": spy_max70,
             "systems": {
@@ -392,7 +418,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     # summary
-    time_cnt = sum(1 for e in exits if e.reason == "time_based")
+    time_cnt = len(time_exits)
     breakout_cnt = sum(1 for e in exits if e.reason == "spy_breakout")
     protect_cnt = sum(1 for e in exits if e.reason.startswith("protect_"))
     print(
@@ -401,6 +427,12 @@ def main(argv: list[str] | None = None) -> int:
         f"mode={mode} submitted={submitted_ok} failed={submit_failed}"
     )
     print(f"[write] {output_path}")
+    if args.fail_on_unsubmitted_time_exit and unsubmitted_time_cnt > 0:
+        print(
+            "[CRIT] time-based exit が期限到来していますが broker へ未送信です: "
+            f"{unsubmitted_time_cnt}件 (mode={mode})"
+        )
+        return 3
     return 0 if submit_failed == 0 else 1
 
 

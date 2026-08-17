@@ -249,10 +249,12 @@ class TestOverdueDerivation:
     def test_due_today_counted_separately(self, status_lib_text: str):
         assert "days_remaining === 0" in status_lib_text
 
-    def test_pending_exit_distinguished(self, status_lib_text: str):
-        """本日の exit 発注に入っている分は「詰まり」と混ぜないこと。"""
-        assert "intended_pending" in status_lib_text
-        assert "執行待ち" in status_lib_text
+    def test_broker_submission_distinguished_from_intent(self, status_lib_text: str):
+        """dry-run intent を発注済みと呼ばず、broker 送信状態で区別する。"""
+        assert "exit_execution_state" in status_lib_text
+        assert "dry-run未送信" in status_lib_text
+        assert "送信済" in status_lib_text
+        assert "intended_pending" not in status_lib_text
 
     def test_unmeasured_is_amber_not_zero(self, status_lib_text: str):
         """出せないものは 0 ではなく amber で「不明」と出すこと。"""

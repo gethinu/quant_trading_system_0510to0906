@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import type { AlpacaSnapshot } from '@/lib/types';
+import type { AlpacaPosition, AlpacaSnapshot } from '@/lib/types';
 import { computeStatus, type StatusAlert } from '@/lib/status';
 import { fmtPct, fmtSignedUsd, pnlText, sysColor, sysShort } from '@/lib/format';
 import { fmtGenerated, useFreshness } from '@/lib/freshness';
@@ -57,6 +57,23 @@ function Tile({
 }
 
 const SUB = 'text-[10px] leading-snug text-muted tabular-nums';
+
+function executionLabel(state: NonNullable<AlpacaPosition['exit_execution_state']>) {
+  switch (state) {
+    case 'submitted':
+      return { text: '送信済', cls: 'text-warn/90', title: 'broker へ exit order を送信済み' };
+    case 'dry_run':
+      return { text: '未送信(dry)', cls: 'text-fail', title: 'exit 案のみ。broker へ未送信' };
+    case 'failed':
+      return { text: '送信失敗', cls: 'text-fail', title: 'broker への exit 送信が失敗' };
+    case 'not_planned':
+      return { text: '未計画', cls: 'text-fail', title: '期限到来だが exit_orders に存在しない' };
+    case 'not_submitted':
+      return { text: '未送信', cls: 'text-fail', title: 'exit_orders にあるが order_id が無い' };
+    default:
+      return { text: '未計測', cls: 'text-fail/80', title: '当日の exit_orders が無く送信状態不明' };
+  }
+}
 
 /** 当日損益タイル。measured=false なら数字を出さず「未計測」と言い切る。 */
 function TodayTile({ snap }: { snap: AlpacaSnapshot | null }) {
@@ -255,11 +272,13 @@ export function StatusSummary({ snapshot, signalsDate, runId, generatedAt }: Pro
                 onToggle={() => setShowOverdue((v) => !v)}
               >
                 <ul className="mt-1 mb-1 ml-3 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-0.5">
-                  {status.overdue.map((r) => (
-                    <li
-                      key={r.symbol}
-                      className="flex items-center gap-1.5 text-[10px] tabular-nums"
-                    >
+                  {status.overdue.map((r) => {
+                    const execution = executionLabel(r.executionState);
+                    return (
+                      <li
+                        key={r.symbol}
+                        className="flex items-center gap-1.5 text-[10px] tabular-nums"
+                      >
                       <span
                         className="rounded px-1 text-[9px] font-semibold shrink-0"
                         style={{ color: sysColor(r.system), background: `${sysColor(r.system)}22` }}
@@ -271,20 +290,15 @@ export function StatusSummary({ snapshot, signalsDate, runId, generatedAt }: Pro
                       <span className={`ml-auto ${pnlText(r.unrealizedPl)}`}>
                         {fmtSignedUsd(r.unrealizedPl)}
                       </span>
-                      <span
-                        className={`shrink-0 text-[9px] ${
-                          r.pendingExit ? 'text-muted/60' : 'text-fail/80'
-                        }`}
-                        title={
-                          r.pendingExit
-                            ? '本日の exit 発注に入っています (執行待ち)'
-                            : '本日の exit 発注に入っていません'
-                        }
-                      >
-                        {r.pendingExit ? '発注済' : '未発注'}
-                      </span>
-                    </li>
-                  ))}
+                        <span
+                          className={`shrink-0 text-[9px] ${execution.cls}`}
+                          title={execution.title}
+                        >
+                          {execution.text}
+                        </span>
+                      </li>
+                    );
+                  })}
                 </ul>
                 <div className="ml-3 mb-1 text-[10px] text-muted/60 tabular-nums">
                   期限超過分の含み損益 合計{' '}
