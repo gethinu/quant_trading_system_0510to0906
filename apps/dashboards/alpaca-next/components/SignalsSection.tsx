@@ -1,4 +1,10 @@
-import type { Signal, SignalsMeta, SignalsPayload, SystemSignals } from '@/lib/types';
+import type {
+  NotifyDelivery,
+  Signal,
+  SignalsMeta,
+  SignalsPayload,
+  SystemSignals,
+} from '@/lib/types';
 
 const SYSTEMS = ['sys1', 'sys2', 'sys3', 'sys4', 'sys5', 'sys6', 'sys7'];
 
@@ -192,10 +198,30 @@ function SystemAccordion({ sys, data }: { sys: string; data: SystemSignals }) {
   );
 }
 
+function execNotifyPresentation(
+  d: NotifyDelivery | null | undefined,
+): { label: string; tone: string } | null {
+  if (!d) return null;
+  switch (d.state) {
+    case 'accepted':
+      return { label: 'exec ntfy: accepted', tone: 'bg-ok/20 text-ok' };
+    case 'failed':
+      return { label: 'exec ntfy: failed', tone: 'bg-fail/20 text-fail' };
+    case 'not_configured':
+      return { label: 'exec ntfy: not configured', tone: 'bg-fail/20 text-fail' };
+    case 'not_attempted':
+      return { label: 'exec ntfy: not attempted', tone: 'bg-white/10 text-muted' };
+    default:
+      return { label: 'exec ntfy: unknown', tone: 'bg-white/10 text-muted' };
+  }
+}
+
 export function SignalsSection({
   payload,
+  notifyDelivery,
 }: {
   payload: SignalsPayload | null;
+  notifyDelivery?: NotifyDelivery | null;
 }) {
   if (!payload) {
     return (
@@ -221,6 +247,7 @@ export function SignalsSection({
     (s) => payload.systems[s] && payload.systems[s].signals.length === 0,
   );
   const delivery = deliveryPresentation(payload.meta);
+  const execNotify = execNotifyPresentation(notifyDelivery);
 
   return (
     <section className="bg-card rounded-xl p-4 shadow-lg">
@@ -235,6 +262,14 @@ export function SignalsSection({
           >
             {delivery.label}
           </span>
+          {execNotify ? (
+            <span
+              className={`inline-block px-1.5 py-0.5 rounded text-[9px] uppercase ${execNotify.tone}`}
+              title="夜の実績通知 (execution summary) の ntfy 配信状態。accepted はサーバー受理であり端末到達ではありません"
+            >
+              {execNotify.label}
+            </span>
+          ) : null}
           <span className="text-[10px] text-muted">{payload.date}</span>
         </span>
       </div>

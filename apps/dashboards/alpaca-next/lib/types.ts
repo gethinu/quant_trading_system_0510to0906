@@ -127,6 +127,22 @@ export interface SignalsMeta {
   };
 }
 
+/**
+ * execution summary (夜の実績通知) の ntfy 配信状態。
+ * signals の meta.publish_delivery は朝の予告便専用で、open run は publish_signals を
+ * 呼ばないため、実績通知の成否はこの sidecar にしか残らない。
+ * accepted は ntfy server が受理した意味であり、端末到達の保証ではない。
+ */
+export interface NotifyDelivery {
+  schema: 'notify_delivery/v1';
+  kind: string;
+  date: string;
+  source_signals_run_id: string | null;
+  state: 'accepted' | 'failed' | 'not_configured' | 'not_attempted';
+  attempted_at: string | null;
+  channels: Record<string, { state: string; status_code: number | null }>;
+}
+
 export interface DashboardBundleManifest {
   schema: 'dashboard_bundle/v1';
   date: string;

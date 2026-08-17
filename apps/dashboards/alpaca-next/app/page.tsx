@@ -11,6 +11,7 @@ import type {
   Narrative,
   AlpacaSnapshot,
   DashboardBundleManifest,
+  NotifyDelivery,
 } from '@/lib/types';
 
 export const dynamic = 'force-static';
@@ -56,10 +57,12 @@ function SignalsView({
   signals,
   pipeline,
   narrative,
+  notifyDelivery,
 }: {
   signals: SignalsPayload | null;
   pipeline: PipelinePayload | null;
   narrative: Narrative | null;
+  notifyDelivery: NotifyDelivery | null;
 }) {
   const universe = universeOf(pipeline);
   const total = signals?.portfolio.total_signals ?? 0;
@@ -110,7 +113,7 @@ function SignalsView({
 
       <div className="grid grid-cols-1 gap-4 items-start">
         {/* signals first (subscriber pitch: 実データが見出しの直下) */}
-        <SignalsSection payload={signals} />
+        <SignalsSection payload={signals} notifyDelivery={notifyDelivery} />
         {/* pipeline は詳細 (default collapsed via <details>) */}
         <PipelineSection
           payload={pipeline}
@@ -211,6 +214,7 @@ export default function Home() {
             signals={signals}
             pipeline={pipeline}
             narrative={narrative}
+            notifyDelivery={bundle.notifyDelivery}
           />
         }
         alpacaView={<AlpacaSection payload={alpaca} />}

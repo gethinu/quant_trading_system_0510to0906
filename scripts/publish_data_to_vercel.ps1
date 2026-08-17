@@ -306,6 +306,9 @@ $patterns = @(
     "dashboard_bundle_$DateCompact.json",
     "polygon_daily_coverage_$DateCompact.json",
     "narrative_$DateCompact.json",
+    # execution summary (夜の実績通知) の ntfy 配信状態。signals 側の
+    # publish_delivery は朝の予告便専用で、実績通知の成否はここにしか残らない。
+    "notify_delivery_$DateCompact.json",
     # Alpaca paper 口座の read-only スナップショット (scripts/export_alpaca_snapshot.py)。
     # monitor の Alpaca タブがこれを読む。無い日は skip される (copy loop で握り潰し)。
     "alpaca_snapshot_$DateCompact.json"

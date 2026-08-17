@@ -409,6 +409,8 @@ def materialize_dashboard_bundle(
     for key, stem in (
         ("narrative", "narrative"),
         ("alpaca_snapshot", "alpaca_snapshot"),
+        # execution summary の ntfy 配信状態 (夜の実績通知)。無い日もあるので optional。
+        ("notify_delivery", "notify_delivery"),
     ):
         optional_path = results_dir / f"{stem}_{compact}.json"
         if optional_path.exists():
@@ -420,6 +422,22 @@ def materialize_dashboard_bundle(
                     optional.get("headline") or optional.get("summary")
                 ):
                     raise BundleContractError("headline/summary missing")
+                if key == "notify_delivery":
+                    # run を跨いだ混入を防ぐ: 別 run の配信状態を今日の bundle に
+                    # 載せない。state の語彙も signals 側と揃っていることを要求する。
+                    stamped = optional.get("source_signals_run_id")
+                    current = str((signals.get("meta") or {}).get("run_id") or "")
+                    if stamped and current and str(stamped) != current:
+                        raise BundleContractError("run_id mismatch")
+                    if optional.get("state") not in {
+                        "accepted",
+                        "failed",
+                        "not_configured",
+                        "not_attempted",
+                    }:
+                        raise BundleContractError(
+                            f"unknown delivery state {optional.get('state')!r}"
+                        )
                 if key == "alpaca_snapshot":
                     equity = (optional.get("account") or {}).get("equity")
                     if (

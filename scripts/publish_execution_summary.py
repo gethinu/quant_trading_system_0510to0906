@@ -22,7 +22,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 import logging
 import os
@@ -42,6 +42,61 @@ from scripts.build_execution_recon import (  # noqa: E402
 )
 
 logger = logging.getLogger(__name__)
+
+# execution summary の ntfy 結果を残す sidecar。
+#
+# signals JSON の ``meta.publish_delivery`` は **publish_signals.py (朝の予告便)**
+# 専用で、夜の open run が送る execution summary は別チャネル。open_auto_run は
+# publish_signals を呼ばないため、実績通知が届いたかどうかがどこにも残らず、
+# 「ntfy が不調でも観測できない」状態だった。signals JSON を書き換えると run を
+# またいで状態が混ざるので、run_id を持つ独立ファイルとして書く。
+_NOTIFY_DELIVERY_SCHEMA = "notify_delivery/v1"
+
+
+def notify_delivery_path(results_dir: Path, date_str: str) -> Path:
+    return results_dir / f"notify_delivery_{date_str.replace('-', '')}.json"
+
+
+def build_notify_delivery(
+    *,
+    date_str: str,
+    run_id: str | None,
+    channel: str,
+    state: str,
+    status_code: int | None = None,
+    attempted_at: str | None = None,
+) -> dict:
+    """ntfy 実績通知の配信状態を、secret を含まない形で組み立てる。
+
+    ``state`` の語彙は signals 側 (``publish_delivery``) と揃える:
+      accepted / failed / not_configured / not_attempted
+    ntfy の 2xx は **server が受理** した意味であり、端末到達ではない。
+    """
+    return {
+        "schema": _NOTIFY_DELIVERY_SCHEMA,
+        "kind": "execution_summary",
+        "date": date_str,
+        "source_signals_run_id": run_id or None,
+        "state": state,
+        "attempted_at": attempted_at,
+        "channels": {channel: {"state": state, "status_code": status_code}},
+    }
+
+
+def write_notify_delivery(results_dir: Path, payload: dict) -> Path | None:
+    """sidecar を atomic に書く。失敗しても通知処理自体は落とさない。"""
+    path = notify_delivery_path(results_dir, str(payload.get("date") or ""))
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        tmp.replace(path)
+        return path
+    except Exception as exc:  # noqa: BLE001 - 観測用の副産物
+        logger.warning("notify_delivery 書き込み失敗: %s", exc)
+        return None
 
 
 def _wire_pipeline_exit(results_dir: Path, date_str: str, recon: dict) -> None:
@@ -257,13 +312,38 @@ def main(argv: list[str] | None = None) -> int:
         _load_signals_for_funnel(args, str(date_str)),
     )
 
+    # sidecar は **全経路で** 書く。書かない経路があると「送っていない」と
+    # 「記録し忘れた」を dashboard が区別できなくなる。
+    run_id = str(recon.get("source_signals_run_id") or "") or None
+    results_dir = Path(args.results_dir)
+    now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
     if args.dry_run:
         print(f"X-Title: {title}\n---\n{body}")
+        write_notify_delivery(
+            results_dir,
+            build_notify_delivery(
+                date_str=str(date_str),
+                run_id=run_id,
+                channel="ntfy",
+                state="not_attempted",
+            ),
+        )
         return 0
 
     pub = NtfyPublisher()
     if not pub.is_configured():
         logger.error("NTFY_TOPIC 未設定のため配信できません (--dry-run で本文確認可)。")
+        write_notify_delivery(
+            results_dir,
+            build_notify_delivery(
+                date_str=str(date_str),
+                run_id=run_id,
+                channel="ntfy",
+                state="not_configured",
+                attempted_at=now_iso,
+            ),
+        )
         return 1
 
     # entry_failed があれば urgent(5)、それ以外は既定 priority
@@ -275,6 +355,19 @@ def main(argv: list[str] | None = None) -> int:
     tags = "bar_chart" + (",warning" if urgent else "")
     result = pub.send_text(title, body, tags=tags, priority=(5 if urgent else None))
     logger.info("execution summary 配信: ok=%s detail=%s", result.ok, result.detail)
+
+    write_notify_delivery(
+        results_dir,
+        build_notify_delivery(
+            date_str=str(date_str),
+            run_id=run_id,
+            channel="ntfy",
+            # 2xx = server が受理。端末到達の保証ではないので "accepted"。
+            state="accepted" if result.ok else "failed",
+            status_code=getattr(result, "status_code", None),
+            attempted_at=now_iso,
+        ),
+    )
 
     return 0 if result.ok else 2
 

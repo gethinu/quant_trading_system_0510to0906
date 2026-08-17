@@ -9,6 +9,7 @@ import type {
   AlpacaSnapshot,
   DashboardBundleManifest,
   Narrative,
+  NotifyDelivery,
   PipelinePayload,
   SignalsPayload,
 } from './types';
@@ -19,6 +20,7 @@ export interface DashboardBundleLoad {
   signals: SignalsPayload | null;
   pipeline: PipelinePayload | null;
   narrative: Narrative | null;
+  notifyDelivery: NotifyDelivery | null;
   alpaca: AlpacaSnapshot | null;
   manifest: DashboardBundleManifest | null;
   issues: string[];
@@ -100,6 +102,7 @@ export function loadDashboardBundle(): DashboardBundleLoad {
         signals: null,
         pipeline: null,
         narrative: null,
+        notifyDelivery: null,
         alpaca: null,
         manifest: null,
         issues: ['bundle manifest のJSON/schemaが不正です。表示を停止しました。'],
@@ -116,6 +119,7 @@ export function loadDashboardBundle(): DashboardBundleLoad {
         signals: null,
         pipeline: null,
         narrative: null,
+        notifyDelivery: null,
         alpaca: null,
         manifest,
         issues: ['bundle manifest に必須ファイルがありません。表示を停止しました。'],
@@ -126,6 +130,7 @@ export function loadDashboardBundle(): DashboardBundleLoad {
         signals: null,
         pipeline: null,
         narrative: null,
+        notifyDelivery: null,
         alpaca: null,
         manifest,
         issues: ['bundle manifest の参照ファイルがありません。表示を停止しました。'],
@@ -136,13 +141,14 @@ export function loadDashboardBundle(): DashboardBundleLoad {
         signals: null,
         pipeline: null,
         narrative: null,
+        notifyDelivery: null,
         alpaca: null,
         manifest,
         issues: ['bundle のcontent hashが不一致です。stale/partial publishとして表示を停止しました。'],
       };
     }
     const optionalPaths: Record<string, string> = {};
-    for (const key of ['narrative', 'alpaca_snapshot']) {
+    for (const key of ['narrative', 'alpaca_snapshot', 'notify_delivery']) {
       const spec = manifest.files?.[key];
       if (!spec) continue;
       const artifact = safeArtifactPath(dir, spec.name);
@@ -169,6 +175,7 @@ export function loadDashboardBundle(): DashboardBundleLoad {
           signals: null,
           pipeline: null,
           narrative: null,
+          notifyDelivery: null,
           alpaca: null,
           manifest,
           issues: ['bundle のdate/run_id lineageが不一致です。表示を停止しました。'],
@@ -187,6 +194,24 @@ export function loadDashboardBundle(): DashboardBundleLoad {
       }
       let narrative: Narrative | null = null;
       let alpaca: AlpacaSnapshot | null = null;
+      let notifyDelivery: NotifyDelivery | null = null;
+      if (optionalPaths.notify_delivery) {
+        try {
+          const parsed = JSON.parse(
+            fs.readFileSync(optionalPaths.notify_delivery, 'utf-8'),
+          ) as NotifyDelivery;
+          // 別 run の配信状態を今日の表示に混ぜない。
+          const sameRun =
+            !parsed.source_signals_run_id || parsed.source_signals_run_id === runId;
+          if (parsed.date === manifest.date && sameRun) {
+            notifyDelivery = parsed;
+          } else {
+            issues.push('実績通知のdate/runがbundle契約と不一致です。');
+          }
+        } catch {
+          issues.push('実績通知の配信状態をparseできませんでした。');
+        }
+      }
       if (optionalPaths.narrative) {
         try {
           const parsed = JSON.parse(
@@ -215,12 +240,13 @@ export function loadDashboardBundle(): DashboardBundleLoad {
           issues.push('alpaca snapshotをparseできないため、このcardだけ非表示にしました。');
         }
       }
-      return { signals, pipeline, narrative, alpaca, manifest, issues };
+      return { signals, pipeline, narrative, notifyDelivery, alpaca, manifest, issues };
     } catch {
       return {
         signals: null,
         pipeline: null,
         narrative: null,
+        notifyDelivery: null,
         alpaca: null,
         manifest,
         issues: ['bundle payloadをparseできません。表示を停止しました。'],
@@ -246,6 +272,9 @@ export function loadDashboardBundle(): DashboardBundleLoad {
     signals,
     pipeline,
     narrative: loadNarrative(),
+    // legacy 経路 (manifest 無し) には実績通知の sidecar が無い。
+    // 「未取得」を「未送信」と偽らないため null のままにする。
+    notifyDelivery: null,
     alpaca: loadAlpaca(),
     manifest: null,
     issues,
