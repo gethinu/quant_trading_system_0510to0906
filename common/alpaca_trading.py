@@ -1677,6 +1677,7 @@ def hydrate_system_tags(
     tracker: dict[str, Any] | None = None,
     entry_orders_index: dict[str, dict[str, Any]] | None = None,
     symbol_map: Mapping[str, str] | None = None,
+    symbol_aliases: Mapping[str, str] | None = None,
 ) -> list[PositionSnapshot]:
     """system / entry_date を tracker or entry order index から埋める。
 
@@ -1685,15 +1686,40 @@ def hydrate_system_tags(
          (paper_orders_*.json や fetch_entry_orders から)
       2. tracker[symbol] = {"system": ..., "entry_date": ...}
          (data/position_tracker.json、common/position_tracker.py 由来)
+      3. symbol_aliases[symbol] の旧 symbol を 1, 2 で再照合
+         (ticker rename/corporate action 後も broker の現 symbol で exit する)
+
+    ``symbol_aliases`` は **検証済みの対だけ** を渡すこと。ここでは真偽を判定せず
+    そのまま信用する (採否の判断は config を持つ呼び出し側の責務。
+    scripts/paper_exit_check.py は保有株数と config の qty 一致を条件にしている)。
 
     どちらも無い symbol は system=None のまま返す (exit_check 側で skip される)。
     """
     idx = entry_orders_index or {}
     tr = tracker or {}
     smap = symbol_map or {}
+    aliases = {
+        str(alias).strip().upper(): str(canonical).strip().upper()
+        for alias, canonical in (symbol_aliases or {}).items()
+        if str(alias).strip() and str(canonical).strip()
+    }
+
+    def _info_for(symbol: str) -> dict[str, Any] | None:
+        return idx.get(symbol) or tr.get(symbol)
+
     for snap in snapshots:
-        info = idx.get(snap.symbol) or tr.get(snap.symbol)
-        if isinstance(info, dict):
+        observed_symbol = str(snap.symbol).strip().upper()
+        # 現 symbol の情報を常に優先し、rename は未解決項目だけを補う。
+        # これにより stale な手動 alias が新しい broker/entry 情報を上書きしない。
+        lookup_symbols = [observed_symbol]
+        canonical = aliases.get(observed_symbol)
+        if canonical and canonical != observed_symbol:
+            lookup_symbols.append(canonical)
+
+        for lookup_symbol in lookup_symbols:
+            info = _info_for(lookup_symbol)
+            if not isinstance(info, dict):
+                continue
             sys_tag = info.get("system")
             if sys_tag and not snap.system:
                 snap.system = str(sys_tag).lower()
@@ -1704,13 +1730,15 @@ def hydrate_system_tags(
         # 3rd source: symbol_system_map (system のみ / entry_date は持たない)。
         # tracker/entry_index が空でも durable マップから system を拾えるようにする。
         if not snap.system:
-            m = (
-                smap.get(snap.symbol)
-                or smap.get(str(snap.symbol).lower())
-                or smap.get(str(snap.symbol).upper())
-            )
-            if m:
-                snap.system = str(m).lower()
+            for lookup_symbol in lookup_symbols:
+                m = (
+                    smap.get(lookup_symbol)
+                    or smap.get(lookup_symbol.lower())
+                    or smap.get(lookup_symbol.upper())
+                )
+                if m:
+                    snap.system = str(m).lower()
+                    break
     return snapshots
 
 
@@ -2060,6 +2088,7 @@ def build_exit_orders_from_positions(
     unassigned_out: list[dict[str, Any]] | None = None,
     tracker: dict[str, Any] | None = None,
     symbol_map: Mapping[str, str] | None = None,
+    symbol_aliases: Mapping[str, str] | None = None,
     entry_orders_index: dict[str, dict[str, Any]] | None = None,
     existing_protect_coids: set[str] | None = None,
     existing_exit_coids: set[str] | None = None,
@@ -2089,6 +2118,7 @@ def build_exit_orders_from_positions(
         tracker=tracker,
         entry_orders_index=entry_orders_index,
         symbol_map=symbol_map,
+        symbol_aliases=symbol_aliases,
     )
     existing_coids = existing_protect_coids or set()
     existing_exit = existing_exit_coids or set()
