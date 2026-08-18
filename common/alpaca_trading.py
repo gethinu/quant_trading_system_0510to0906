@@ -2381,6 +2381,18 @@ def _build_synthetic_protection_orders(
 _ORPHAN_SYSTEM_TAG = "orphan"
 _ORPHAN_STOP_ATR_PERIOD = 20
 _ORPHAN_STOP_ATR_MULTIPLIER = 5.0
+# orphan の母集団は「上場廃止/取引停止で価格が凍っている」銘柄に偏る。凍った
+# 気配では ATR がほぼ 0 に潰れ、5*ATR stop が entry のすぐ下に張り付く。
+# 実測 (2026-08-18): FOLD は entry $14.26 に対し ATR20=0.03 (0.21%) で、
+# 5*ATR stop は $14.11 = entry の 1% 下。これは「保護」ではなく **ハエ叩き** で、
+# 最初の実約定で不本意な成行手仕舞いを誘発する (= ユーザーが明示的に避けたい
+# 「方向判断の自動化」に等しい)。
+# そこで ATR/price がこの閾値を下回る場合は ATR を **使用不能** とみなし、
+# entry からの % フロア (PROTECT_STOP_FLOOR_PCT / 既定 50%) に退避する。
+# 0.5% の根拠: 通常の株式の日次 ATR は概ね 1〜3%。0.5% 未満は halt/stale の
+# 気配とみなすのが妥当で、健全な低ボラ銘柄を巻き込みにくい。
+# ORPHAN_MIN_ATR_PCT で調整可。
+_ORPHAN_MIN_ATR_PCT_DEFAULT = 0.005
 
 
 class _OrphanRules:
@@ -2411,14 +2423,51 @@ def _orphan_protection_enabled() -> bool:
     return raw in _TRUTHY
 
 
+def _orphan_min_atr_pct() -> float:
+    """ATR を信用する下限 (ATR/price)。未設定 / 不正値は既定へフォールバック。"""
+    raw = os.getenv("ORPHAN_MIN_ATR_PCT", "").strip()
+    if not raw:
+        return _ORPHAN_MIN_ATR_PCT_DEFAULT
+    try:
+        pct = float(raw)
+    except ValueError:
+        return _ORPHAN_MIN_ATR_PCT_DEFAULT
+    if not 0.0 <= pct < 1.0:
+        return _ORPHAN_MIN_ATR_PCT_DEFAULT
+    return pct
+
+
+def _orphan_atr_is_usable(snap: PositionSnapshot, atr_value: float | None) -> bool:
+    """ATR が stale (価格が凍っている) 気配でないか。"""
+    if atr_value is None or atr_value <= 0 or snap.avg_entry_price <= 0:
+        return False
+    return (float(atr_value) / float(snap.avg_entry_price)) >= _orphan_min_atr_pct()
+
+
 def _orphan_stop_price(
     snap: PositionSnapshot, atr_value: float | None
 ) -> float | None:
-    """orphan 用 protective stop 価格。ATR があれば ATR ベース、無ければ % フロア。"""
-    px = _stop_price_for(snap, _ORPHAN_RULES, atr_value)
-    if px is not None:
-        return px
-    # ATR 無し (rolling データ欠損) でも「無保護」にはしない。
+    """orphan 用 protective stop 価格。
+
+    ATR が使える (stale でない) なら ATR ベース、そうでなければ entry からの
+    % フロアに退避する。ATR が 0 付近に潰れた銘柄で entry 直下に stop を張ると
+    不本意な手仕舞いを誘発するため。
+    """
+    if _orphan_atr_is_usable(snap, atr_value):
+        px = _stop_price_for(snap, _ORPHAN_RULES, atr_value)
+        if px is not None:
+            return px
+    elif atr_value is not None and atr_value > 0 and snap.avg_entry_price > 0:
+        logger.warning(
+            "orphan stop: %s の ATR20=%.4f は entry=%.4f の %.2f%% しかなく"
+            " stale (halt/上場廃止) の疑い → ATR stop を使わず %.0f%% フロアへ退避。",
+            snap.symbol,
+            float(atr_value),
+            snap.avg_entry_price,
+            100.0 * float(atr_value) / float(snap.avg_entry_price),
+            100.0 * _stop_floor_pct(),
+        )
+    # ATR 無し / stale でも「無保護」にはしない。
     if snap.avg_entry_price <= 0:
         return None
     pct = _stop_floor_pct()

@@ -105,6 +105,30 @@ stop を置くと、残りの端数が無保護のまま残り、かつ「保護
 `default_stop` / `none:fractional_native_unsupported` / `none:disabled_by_flag` /
 `none:already_open_or_no_price`。
 
+### 3.1 stale ATR ガード (価格が凍った銘柄でハエ叩き stop を張らない)
+
+orphan の母集団は「上場廃止 / 取引停止で価格が凍っている」銘柄に偏る。凍った気配
+では ATR がほぼ 0 に潰れ、`5*ATR` stop が entry のすぐ下に張り付く。
+
+実測 (2026-08-18, runner tree の rolling cache):
+
+| symbol | entry | ATR20 | ATR/price | 素の 5*ATR stop | 判定 |
+|---|---|---|---|---|---|
+| FOLD | $14.26 | 0.03 | **0.21%** | $14.11 (entry の 1% 下) | **stale → フロアへ退避** |
+| CDTX | $221.17 | 2.50 | 1.13% | $208.67 (5.7% 下) | 健全 → ATR stop を使用 |
+
+FOLD の $14.11 は「保護」ではなく **ハエ叩き** で、最初の実約定で不本意な成行
+手仕舞いを誘発する。これはユーザーが明示的に避けたい「方向判断の自動化」に等しい。
+そこで `ATR / entry_price < ORPHAN_MIN_ATR_PCT` (既定 **0.5%**) の場合は ATR を
+**使用不能** とみなし、`PROTECT_STOP_FLOOR_PCT` (既定 50%) のフロアに退避して
+**WARNING** を出す。
+
+0.5% の根拠: 通常の株式の日次 ATR は概ね 1〜3%。0.5% 未満は halt / 上場廃止の
+気配とみなすのが妥当で、健全な低ボラ銘柄を巻き込みにくい。
+
+このガードは **orphan 専用**。system タグ付きの建玉は universe の鮮度管理下にあり、
+ATR stop は strategy の意図なので従来どおり素の値を使う。
+
 ---
 
 ## 4. protective stop の `$0.01` クランプ
@@ -156,6 +180,7 @@ exit_rejected  12   (新バケット)
 | `ORPHAN_DEFAULT_PROTECTION` | **ON** | orphan に既定 protective stop を張る。`=0` で従来どおり完全 skip |
 | `PROTECT_STOP_FLOOR_ENABLED` | **ON** | long stop が 0 以下になるとき % フロアを使う。`=0` で旧 `$0.01` クランプ |
 | `PROTECT_STOP_FLOOR_PCT` | `0.50` | フロア割合。`(0,1)` 範囲外 / 不正値は既定へフォールバック (WARN) |
+| `ORPHAN_MIN_ATR_PCT` | `0.005` | orphan で ATR を信用する下限 (ATR/price)。下回ると stale とみなしフロアへ退避 |
 | `PROTECT_USE_OCO` | **OFF** | `stop`+`target` を 1 本の OCO で同時常駐。有効化前に paper 検証が必要 |
 
 既定 ON の 2 つはいずれも「無保護を保護に変える」方向であり、回帰テストを付けてある
@@ -173,7 +198,7 @@ exit_rejected  12   (新バケット)
 
 ## 8. テスト
 
-- `tests/test_protection_hardening_20260819.py` … 36 tests (新規)
+- `tests/test_protection_hardening_20260819.py` … 42 tests (新規)
 - 契約が変わった既存テストを更新 (orphan が stop を得るようになったため):
   `test_alpaca_exit_orders.py` / `test_unmanaged_positions_surface.py` /
   `test_exit_tag_resolution_local.py` / `test_pipeline_exit_wiring_20260729.py`
@@ -181,3 +206,21 @@ exit_rejected  12   (新バケット)
   戻ることも固定した。
 - 全体スイープ: base commit `64ae9b1` と失敗 ID 集合を `comm` で突合し
   **新規失敗ゼロ** を確認 (既存の 251 件は本件と無関係な legacy failure)。
+
+---
+
+## 9. 次サイクルで arm される見込み (FOLD / CDTX)
+
+実 position データ (`logs/open_run_20260818/final_positions.json`) を planner に
+流した結果、runner tree を更新すれば次の exit サイクルで以下が **native GTC stop**
+として発注される:
+
+| symbol | qty | side | entry | ATR20 | stop | coid |
+|---|---|---|---|---|---|---|
+| FOLD | 143 | long | $14.26 | 0.03 (stale) | **$7.13** (50% フロア) | `protect-orphan-FOLD-noentry-protect-stop` |
+| CDTX | 10 | long | $221.17 | 2.50 | **$208.67** (5*ATR) | `protect-orphan-CDTX-noentry-protect-stop` |
+
+両建玉とも **整数株** なので native stop を張れる (端株なら張れない)。両者とも
+`orphan_no_system_origin` 分類で `untradable_no_exit_possible` ではないため
+broker 側の受理が見込める。**close はしない** ので方向判断はユーザーに残る。
+coid は日跨ぎ安定なので翌日以降に積み上がらない。

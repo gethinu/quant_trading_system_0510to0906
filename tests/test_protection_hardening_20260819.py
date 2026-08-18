@@ -493,5 +493,61 @@ class TestFractionalVisibility:
         assert summary["daily_evaluation_date"] == "2026-08-19"
 
 
+# =====================================================================
+# #1b orphan: 価格が凍った銘柄の ATR≈0 で stop がハエ叩きになるのを防ぐ
+# =====================================================================
+
+
+class TestOrphanStaleAtrGuard:
+    def test_stale_atr_falls_back_to_pct_floor(self, monkeypatch):
+        """実測ケース: FOLD entry=14.26 / ATR20=0.03 (0.21%) は stale。
+
+        5*ATR stop なら $14.11 = entry の 1% 下 (最初の実約定で発火する
+        ハエ叩き) になる。% フロアに退避して $7.13 になること。
+        """
+        monkeypatch.delenv("ORPHAN_MIN_ATR_PCT", raising=False)
+        monkeypatch.delenv("PROTECT_STOP_FLOOR_PCT", raising=False)
+        snap = _snap(symbol="FOLD", system=None, qty=143.0, entry=14.26)
+        assert at._orphan_stop_price(snap, atr_value=0.03) == pytest.approx(7.13)
+
+    def test_stale_atr_warns(self, monkeypatch, caplog):
+        monkeypatch.delenv("ORPHAN_MIN_ATR_PCT", raising=False)
+        snap = _snap(symbol="FOLD", system=None, qty=143.0, entry=14.26)
+        with caplog.at_level(logging.WARNING, logger=at.logger.name):
+            at._orphan_stop_price(snap, atr_value=0.03)
+        assert any("stale" in r.getMessage() for r in caplog.records)
+
+    def test_healthy_atr_is_still_used(self, monkeypatch):
+        """CDTX entry=221.17 / ATR20=2.5 (1.13%) は健全 → ATR stop を使う。"""
+        monkeypatch.delenv("ORPHAN_MIN_ATR_PCT", raising=False)
+        snap = _snap(symbol="CDTX", system=None, qty=10.0, entry=221.17)
+        assert at._orphan_stop_price(snap, atr_value=2.5) == pytest.approx(208.67)
+
+    def test_threshold_is_configurable(self, monkeypatch):
+        monkeypatch.setenv("ORPHAN_MIN_ATR_PCT", "0.02")
+        monkeypatch.delenv("PROTECT_STOP_FLOOR_PCT", raising=False)
+        snap = _snap(symbol="CDTX", system=None, qty=10.0, entry=221.17)
+        # 1.13% < 2% -> stale 扱いになりフロアへ退避
+        assert at._orphan_stop_price(snap, atr_value=2.5) == pytest.approx(110.585)
+
+    def test_guard_only_applies_to_orphans(self):
+        """system 付きは従来どおり ATR stop (strategy の意図を尊重する)。"""
+        snap = _snap(symbol="FOLD", system="system1", entry=14.26)
+        rules = SYSTEM_TRADE_RULES["system1"]
+        assert at._stop_price_for(snap, rules, atr_value=0.03) == pytest.approx(14.11)
+
+    def test_end_to_end_fold_stop_is_not_hair_trigger(self, monkeypatch):
+        """planner 経由でも FOLD に entry 直下の stop を張らないこと。"""
+        monkeypatch.delenv("ORPHAN_DEFAULT_PROTECTION", raising=False)
+        monkeypatch.delenv("ORPHAN_MIN_ATR_PCT", raising=False)
+        snap = _snap(symbol="FOLD", system=None, qty=143.0, entry=14.26,
+                     entry_date=None)
+        exits = build_exit_orders_from_positions(
+            [snap], today="2026-08-19", atr_by_symbol={"FOLD": {20: 0.03}}
+        )
+        assert len(exits) == 1
+        assert exits[0].stop_price == pytest.approx(7.13)
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
