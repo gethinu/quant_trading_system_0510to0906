@@ -33,7 +33,13 @@ logger = logging.getLogger(__name__)
 # fill は非同期。ここに載るのは既に約定確認できた分のみ = best-effort)。
 _FILLED_STATUSES = {"filled", "partially_filled"}
 # exit protection の reason_code (それ以外の exit は close 扱い)
-_PROTECT_REASONS = {"protect_stop", "protect_trailing", "protect_target"}
+_PROTECT_REASONS = {
+    "protect_stop",
+    "protect_trailing",
+    "protect_target",
+    # stop+target を 1 本に束ねた OCO (PROTECT_USE_OCO=1) も protect 扱い。
+    "protect_oco",
+}
 
 _SYSTEMS = tuple(f"system{i}" for i in range(1, 8))
 
@@ -80,12 +86,19 @@ def _empty_side_bucket() -> dict[str, int]:
 
 
 def _empty_exit_bucket() -> dict[str, int]:
-    """exit 集計。fired(submitted) と armed(未発火) を分けて持つ。
+    """exit 集計。送信できた / 拒否された / 送らなかった を **別々に** 持つ。
 
     - ``submitted`` = fired = broker へ送信できた手仕舞い (order_id あり & error なし)。
     - ``close`` / ``protect`` = **submitted 分だけ**の内訳 (N=close+protect が常に成立)。
-    - ``armed`` = リスト計上されたが未送信 (order_id なし) = 保護注文が張られただけ。
-      ``armed_close`` / ``armed_protect`` はその内訳。
+    - ``rejected`` = broker が拒否した (error あり)。**armed には数えない**。
+    - ``suppressed`` = 送れば確実に拒否されるので送らなかった (skip_reason あり。
+      例 qty_reserved:* / already_protected:*)。これも armed ではない。
+    - ``armed`` = 純粋に未送信のまま残った提案 (order_id も error も skip_reason も
+      無い = dry_run 等)。
+
+    2026-08-19 修正の背景: 旧実装は「submitted でない」全件を armed に計上して
+    いたため、**ブローカー拒否が armed (=保護が張れた) として表示されていた**。
+    2026-08-18 の run では armed 12 件が実際には拒否 12 件だった。
     """
     return {
         "submitted": 0,
@@ -94,6 +107,12 @@ def _empty_exit_bucket() -> dict[str, int]:
         "armed": 0,
         "armed_close": 0,
         "armed_protect": 0,
+        "rejected": 0,
+        "rejected_close": 0,
+        "rejected_protect": 0,
+        "suppressed": 0,
+        "suppressed_close": 0,
+        "suppressed_protect": 0,
     }
 
 
@@ -255,20 +274,24 @@ def build_recon(
             ex = bucket["exit"]
             is_submitted = bool(e.get("order_id")) and not e.get("error")
             is_protect = str(e.get("reason") or "").lower() in _PROTECT_REASONS
+            suffix = "protect" if is_protect else "close"
             if is_submitted:
                 # fired: 送信できた手仕舞い。close/protect 内訳は fired 分だけ。
                 ex["submitted"] += 1
-                if is_protect:
-                    ex["protect"] += 1
-                else:
-                    ex["close"] += 1
+                ex[suffix] += 1
+            elif e.get("error"):
+                # broker が拒否した。**armed に混ぜない** (armed は「保護が
+                # 張れている」と読まれるため、拒否を混ぜると失敗が成功に化ける)。
+                ex["rejected"] += 1
+                ex[f"rejected_{suffix}"] += 1
+            elif e.get("skip_reason"):
+                # 送れば確実に拒否されるので送らなかった (qty_reserved 等)。
+                ex["suppressed"] += 1
+                ex[f"suppressed_{suffix}"] += 1
             else:
-                # armed: 計算されたが未送信 (保護注文が張られただけ)。
+                # armed: 純粋に未送信 (dry_run 等)。
                 ex["armed"] += 1
-                if is_protect:
-                    ex["armed_protect"] += 1
-                else:
-                    ex["armed_close"] += 1
+                ex[f"armed_{suffix}"] += 1
 
     # --- portfolio aggregate --------------------------------------------
     def _agg(field: str) -> int:
@@ -284,6 +307,18 @@ def build_recon(
     exit_armed = sum(b["exit"]["armed"] for b in systems.values())
     exit_armed_close = sum(b["exit"]["armed_close"] for b in systems.values())
     exit_armed_protect = sum(b["exit"]["armed_protect"] for b in systems.values())
+    exit_rejected = sum(b["exit"]["rejected"] for b in systems.values())
+    exit_rejected_close = sum(b["exit"]["rejected_close"] for b in systems.values())
+    exit_rejected_protect = sum(
+        b["exit"]["rejected_protect"] for b in systems.values()
+    )
+    exit_suppressed = sum(b["exit"]["suppressed"] for b in systems.values())
+    exit_suppressed_close = sum(
+        b["exit"]["suppressed_close"] for b in systems.values()
+    )
+    exit_suppressed_protect = sum(
+        b["exit"]["suppressed_protect"] for b in systems.values()
+    )
 
     portfolio_out = {
         "universe_target": universe_target,
@@ -307,6 +342,12 @@ def build_recon(
         "exit_armed": exit_armed,
         "exit_armed_close": exit_armed_close,
         "exit_armed_protect": exit_armed_protect,
+        "exit_rejected": exit_rejected,
+        "exit_rejected_close": exit_rejected_close,
+        "exit_rejected_protect": exit_rejected_protect,
+        "exit_suppressed": exit_suppressed,
+        "exit_suppressed_close": exit_suppressed_close,
+        "exit_suppressed_protect": exit_suppressed_protect,
         "drop_breakdown": drop_breakdown,
         "account_equity": account_equity,
     }
@@ -322,6 +363,8 @@ def build_recon(
             or data["short"]["generated"]
             or data["exit"]["submitted"]
             or data["exit"]["armed"]
+            or data["exit"]["rejected"]
+            or data["exit"]["suppressed"]
             or data["funnel"] is not None
         )
     }
@@ -394,6 +437,12 @@ def exit_counts_from_recon(recon: dict[str, Any] | None) -> dict[str, dict[str, 
             "armed": _i(ex.get("armed")),
             "armed_close": _i(ex.get("armed_close")),
             "armed_protect": _i(ex.get("armed_protect")),
+            "rejected": _i(ex.get("rejected")),
+            "rejected_close": _i(ex.get("rejected_close")),
+            "rejected_protect": _i(ex.get("rejected_protect")),
+            "suppressed": _i(ex.get("suppressed")),
+            "suppressed_close": _i(ex.get("suppressed_close")),
+            "suppressed_protect": _i(ex.get("suppressed_protect")),
         }
     return out
 
@@ -443,6 +492,12 @@ def patch_pipeline_exit(
                     "armed": 0,
                     "armed_close": 0,
                     "armed_protect": 0,
+                    "rejected": 0,
+                    "rejected_close": 0,
+                    "rejected_protect": 0,
+                    "suppressed": 0,
+                    "suppressed_close": 0,
+                    "suppressed_protect": 0,
                 }
                 cnt = int(ec["submitted"])  # fired
                 armed = int(ec.get("armed") or 0)
@@ -457,10 +512,22 @@ def patch_pipeline_exit(
                 p["armed"] = armed
                 p["armed_close"] = int(ec.get("armed_close") or 0)
                 p["armed_protect"] = int(ec.get("armed_protect") or 0)
+                # 拒否 / 抑止は armed とは別枠。armed に混ぜると「保護が張れた」と
+                # 誤読される (2026-08-18: armed 12 の実体は broker 拒否 12 件)。
+                rejected = int(ec.get("rejected") or 0)
+                suppressed = int(ec.get("suppressed") or 0)
+                p["rejected"] = rejected
+                p["rejected_close"] = int(ec.get("rejected_close") or 0)
+                p["rejected_protect"] = int(ec.get("rejected_protect") or 0)
+                p["suppressed"] = suppressed
+                p["suppressed_close"] = int(ec.get("suppressed_close") or 0)
+                p["suppressed_protect"] = int(ec.get("suppressed_protect") or 0)
                 armed_suffix = f" · {armed} armed" if armed else ""
+                rejected_suffix = f" · {rejected} rejected" if rejected else ""
+                suppressed_suffix = f" · {suppressed} suppressed" if suppressed else ""
                 p["condition"] = (
                     f"{base} (close {int(ec['close'])} / protect {int(ec['protect'])})"
-                    f"{armed_suffix}"
+                    f"{armed_suffix}{rejected_suffix}{suppressed_suffix}"
                 )
                 p["ratio_of_prev"] = (
                     round(cnt / prev_count, 6)
@@ -483,7 +550,8 @@ def patch_pipeline_exit(
             marker = (
                 "Exit = execution recon (recon_YYYYMMDD.json, ntfy と同一 source): "
                 "count=fired(exit_submitted), close/protect は fired 分のみ, "
-                "armed=未発火の保護注文 (別枠)。"
+                "armed=未送信の提案 / rejected=broker 拒否 / "
+                "suppressed=送れば確実に拒否されるため未送信 (いずれも別枠)。"
             )
             if marker not in notes:
                 notes.append(marker)

@@ -422,6 +422,34 @@ def _signals_run_id(results_dir: Path, date_str: str) -> str | None:
     return str((payload.get("meta") or {}).get("run_id") or "") or None
 
 
+def _protection_summary(
+    coverage: list[dict[str, Any]], evaluated_at: str
+) -> dict[str, Any]:
+    """保護カバレッジの集計。「常駐注文が無い建玉が何玉あるか」を一目で出す。
+
+    端株は Alpaca が stop/limit/trailing を受け付けないためブローカー常駐注文を
+    張れず、日次 synthetic 判定 (この run の時刻) でしか stop/target を評価
+    できない。これは **ブローカー制約であって不具合ではない** が、silent にすると
+    「保護されている」と誤読されるので件数と評価時刻を必ず残す。
+    """
+    modes: dict[str, int] = {}
+    for row in coverage:
+        mode = str(row.get("mode") or "unknown")
+        modes[mode] = modes.get(mode, 0) + 1
+    no_resident = [r for r in coverage if not r.get("resident_order")]
+    return {
+        "positions": len(coverage),
+        "by_mode": modes,
+        # 常駐注文が無い = ザラ場中は無防備で日次判定に依存している玉。
+        "no_resident_order": len(no_resident),
+        "no_resident_symbols": sorted(
+            str(r.get("symbol") or "") for r in no_resident
+        ),
+        # 日次判定はこの run の時点でしか行われない (連続監視ではない)。
+        "daily_evaluation_date": evaluated_at,
+    }
+
+
 def _write_output(
     exits: list[PreparedExit],
     snapshots: list[PositionSnapshot],
@@ -573,10 +601,14 @@ def main(argv: list[str] | None = None) -> int:
 
     # --- 4) build exit proposals ----------------------------------------
     unassigned: list[dict[str, Any]] = []
+    # 建玉ごとの「保護がどう掛かっているか」。端株は broker 常駐注文を張れず日次
+    # synthetic 判定に振替になるため、silent にせず artifact に残す (2026-08-19)。
+    protection_coverage: list[dict[str, Any]] = []
     exits = build_exit_orders_from_positions(
         snapshots,
         today=date_str,
         unassigned_out=unassigned,
+        protection_coverage_out=protection_coverage,
         tracker=tracker,
         symbol_map=symbol_map,
         symbol_aliases=rename_aliases,
@@ -673,6 +705,13 @@ def main(argv: list[str] | None = None) -> int:
             "spy_max70": spy_max70,
             "unassigned_count": len(unassigned),
             "unassigned_positions": unassigned,
+            # --- 保護カバレッジ (2026-08-19) ---------------------------------
+            # mode: native_resident = broker に常駐注文あり
+            #       synthetic_daily = 端株。常駐不可 → この run の日次判定のみ
+            #       orphan_default  = system 不明だが既定 stop を張った
+            #       unprotected     = 保護なし (要手当)
+            "protection_coverage": protection_coverage,
+            "protection_summary": _protection_summary(protection_coverage, date_str),
             # exit を発注できない (上場廃止等) 建玉の件数。帰属欠落とは別問題。
             "untradable_count": sum(
                 1
