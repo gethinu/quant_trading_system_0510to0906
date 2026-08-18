@@ -469,6 +469,27 @@ def _classify_error(exc: Exception) -> OrderSubmitError:
     return OrderSubmitError(f"{reason}: {exc}")
 
 
+def probe_asset_tradable(symbol: str, client: Any | None = None) -> bool | None:
+    """銘柄が現在 broker で取引可能かを read-only で確認する。
+
+    戻り値: True=取引可 / False=取引不可 / None=確認できず (誤断定しない)。
+    発注は行わない (get_asset の GET のみ)。
+    """
+    try:
+        if client is None:
+            from common import broker_alpaca as _ba
+
+            client = _ba.get_client()
+        cli = client
+        asset = cli.get_asset(symbol)
+    except Exception:  # noqa: BLE001 - 確認できないことを False と混同しない
+        return None
+    tradable = getattr(asset, "tradable", None)
+    if tradable is None:
+        return None
+    return bool(tradable)
+
+
 def classify_exit_submit_error(error: str | None) -> str | None:
     """exit 発注エラーが「既に保護済み」かを判定する (pure)。
 
@@ -2197,6 +2218,10 @@ def build_exit_orders_from_positions(
                         "holding_days": compute_holding_days(snap.entry_date, today),
                         # system 由来がどのソースにも無い = orphan。今後の orphan が
                         # 黙って溜まらないよう分類を明示する。
+                        #
+                        # NOTE: この関数は pure (broker I/O 無し)。「そもそも exit を
+                        # 出せない銘柄か」の判定は client を持つ呼び出し側で付与する
+                        # (paper_exit_check の refine_orphan_classifications)。
                         "classification": "orphan_no_system_origin",
                     }
                 )

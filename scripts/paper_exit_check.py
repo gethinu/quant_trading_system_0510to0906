@@ -52,6 +52,7 @@ from common.alpaca_trading import (  # noqa: E402
     fetch_position_snapshots,
     parse_entry_date_from_client_order_id,
     parse_system_from_client_order_id,
+    probe_asset_tradable,
     submit_paper_exit_order,
 )
 from common.position_tracker import load_tracker  # noqa: E402
@@ -369,6 +370,37 @@ def _load_price_by_symbol(symbols: list[str]) -> dict[str, float]:
 # -------------------------------------------------------------------------
 
 
+def refine_orphan_classifications(
+    unassigned: list[dict], client: object | None = None
+) -> dict[str, int]:
+    """orphan を「帰属欠落」と「exit 不能」に分ける (broker へ read-only 問い合わせ)。
+
+    ``build_exit_orders_from_positions`` は pure function なので broker を見ない。
+    そこで client を持つここで tradability を付与する。
+
+    区別が要る理由: 「帰属が無い」と「そもそも exit を出せない」は別問題である。
+    上場廃止等で ``tradable=False`` の銘柄は、system 帰属を直しても保護注文は
+    **API では永久に発注できない** (手動対応が必要)。同じ orphan として括ると
+    「直せば守れる」と誤読され、放置される。確認できない時は断定しない。
+    """
+    counts = {"untradable": 0, "tradable": 0, "unknown": 0}
+    for row in unassigned:
+        symbol = str(row.get("symbol") or "")
+        if not symbol:
+            continue
+        tradable = probe_asset_tradable(symbol, client)
+        row["tradable"] = tradable
+        if tradable is False:
+            row["classification"] = "untradable_no_exit_possible"
+            counts["untradable"] += 1
+        elif tradable is None:
+            row["classification"] = "orphan_no_system_origin_tradability_unknown"
+            counts["unknown"] += 1
+        else:
+            counts["tradable"] += 1
+    return counts
+
+
 def _today_str() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
@@ -557,6 +589,11 @@ def main(argv: list[str] | None = None) -> int:
         price_by_symbol=price_by_symbol,
     )
 
+    # orphan を「帰属欠落 (直せば守れる)」と「exit 発注不能 (手動対応が要る)」に
+    # 分ける。build_exit_orders_from_positions は pure なのでここで broker を見る。
+    if unassigned:
+        refine_orphan_classifications(unassigned, client)
+
     dry_run = not args.confirm
     submitted_ok = 0
     submit_failed = 0
@@ -636,6 +673,12 @@ def main(argv: list[str] | None = None) -> int:
             "spy_max70": spy_max70,
             "unassigned_count": len(unassigned),
             "unassigned_positions": unassigned,
+            # exit を発注できない (上場廃止等) 建玉の件数。帰属欠落とは別問題。
+            "untradable_count": sum(
+                1
+                for u in unassigned
+                if u.get("classification") == "untradable_no_exit_possible"
+            ),
             "systems": {
                 sys: {
                     "max_holding_days": rule.max_holding_days,
@@ -661,12 +704,31 @@ def main(argv: list[str] | None = None) -> int:
     )
     print(f"[write] {output_path}")
     if unassigned:
-        syms = ", ".join(str(u.get("symbol")) for u in unassigned)
-        print(
-            f"[WARN] ORPHAN/UNMANAGED positions (system 由来なし = exit 未生成): "
-            f"{len(unassigned)} 件 [{syms}]. position_tracker/symbol_system_map/"
-            f"entry-coid のいずれにも無く、time/protection が一切張られていません。"
-        )
+        untradable = [
+            u
+            for u in unassigned
+            if u.get("classification") == "untradable_no_exit_possible"
+        ]
+        others = [u for u in unassigned if u not in untradable]
+        if others:
+            syms = ", ".join(str(u.get("symbol")) for u in others)
+            print(
+                f"[WARN] ORPHAN/UNMANAGED positions (system 由来なし = exit 未生成): "
+                f"{len(others)} 件 [{syms}]. position_tracker/symbol_system_map/"
+                f"entry-coid のいずれにも無く、time/protection が一切張られていません。"
+            )
+        if untradable:
+            detail = ", ".join(
+                f"{u.get('symbol')}({u.get('market_value')})" for u in untradable
+            )
+            exposure = sum(float(u.get("market_value") or 0) for u in untradable)
+            # 帰属を直しても救えない class。手動対応が要ることを明示する。
+            print(
+                f"[WARN] UNTRADABLE positions (broker が tradable=False = exit 発注"
+                f"不能): {len(untradable)} 件 [{detail}] 合計 ${exposure:,.2f}. "
+                "system 帰属を直しても API では保護注文を出せません。手動での"
+                "対応が必要です。"
+            )
     # broker 到達不能で positions を確認できなかった場合、exit が 0 件でも「成功
     # (flat book)」と誤認させない。distinct code 3 で daily_pipeline に surface
     # する (entry 側の no_orders_generated=3 と同じ観測性方針)。市場が閉じた後の
