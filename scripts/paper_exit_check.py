@@ -43,6 +43,7 @@ from common.alpaca_trading import (  # noqa: E402
     PreparedExit,
     assert_paper_env,
     build_exit_orders_from_positions,
+    classify_exit_submit_error,
     fetch_existing_protect_coids,
     fetch_position_snapshots,
     parse_entry_date_from_client_order_id,
@@ -345,6 +346,9 @@ def main(argv: list[str] | None = None) -> int:
     dry_run = not args.confirm
     submitted_ok = 0
     submit_failed = 0
+    # 「既に保護済み」は失敗ではない。素の failed に混ぜると本当の exit 失敗が
+    # 埋もれる (2026-08-18: 23 件中 12 件が failed と表示されたが全件これだった)。
+    already_protected = 0
 
     if dry_run:
         for po in exits:
@@ -355,12 +359,26 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 result = submit_paper_exit_order(po, dry_run=False, client=client)
                 if result.error:
-                    submit_failed += 1
+                    kind = classify_exit_submit_error(result.error)
+                    if kind == "already_protected":
+                        # 建玉が既存注文で全量予約済み = 保護は掛かっている。
+                        # 監査用に broker の生文言は skip_reason へ移し、error は
+                        # 落として下流が「失敗」と数えないようにする。
+                        result.skip_reason = f"already_protected:{result.error}"
+                        result.error = None
+                        already_protected += 1
+                    else:
+                        submit_failed += 1
                 elif result.order_id:
                     submitted_ok += 1
             except Exception as exc:
-                po.error = str(exc)
-                submit_failed += 1
+                kind = classify_exit_submit_error(str(exc))
+                if kind == "already_protected":
+                    po.skip_reason = f"already_protected:{exc}"
+                    already_protected += 1
+                else:
+                    po.error = str(exc)
+                    submit_failed += 1
 
     mode = "submitted" if not dry_run else "dry_run"
 
@@ -376,6 +394,8 @@ def main(argv: list[str] | None = None) -> int:
             "count": len(exits),
             "submitted": submitted_ok,
             "failed": submit_failed,
+            # 既存の保護注文で建玉が全量予約済みだった件数 (危険ではない)。
+            "already_protected": already_protected,
             "spy_high": spy_high,
             "spy_max70": spy_max70,
             "systems": {
@@ -398,7 +418,8 @@ def main(argv: list[str] | None = None) -> int:
     print(
         f"[exit_check] positions={len(snapshots)} exits={len(exits)} "
         f"(time={time_cnt}, breakout={breakout_cnt}, protect={protect_cnt}) "
-        f"mode={mode} submitted={submitted_ok} failed={submit_failed}"
+        f"mode={mode} submitted={submitted_ok} failed={submit_failed} "
+        f"already_protected={already_protected}"
     )
     print(f"[write] {output_path}")
     return 0 if submit_failed == 0 else 1
