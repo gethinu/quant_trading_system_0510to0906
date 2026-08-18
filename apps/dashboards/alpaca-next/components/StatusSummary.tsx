@@ -3,7 +3,14 @@
 import { useState } from 'react';
 import type { AlpacaSnapshot } from '@/lib/types';
 import { computeStatus, type StatusAlert } from '@/lib/status';
-import { fmtPct, fmtSignedUsd, pnlText, sysColor, sysShort } from '@/lib/format';
+import {
+  executionLabel,
+  fmtPct,
+  fmtSignedUsd,
+  pnlText,
+  sysColor,
+  sysShort,
+} from '@/lib/format';
 import { fmtGenerated, useFreshness } from '@/lib/freshness';
 import { FreshnessBanner } from '@/components/FreshnessBanner';
 
@@ -272,16 +279,10 @@ export function StatusSummary({ snapshot, signalsDate, runId, generatedAt }: Pro
                         {fmtSignedUsd(r.unrealizedPl)}
                       </span>
                       <span
-                        className={`shrink-0 text-[9px] ${
-                          r.pendingExit ? 'text-muted/60' : 'text-fail/80'
-                        }`}
-                        title={
-                          r.pendingExit
-                            ? '本日の exit 発注に入っています (執行待ち)'
-                            : '本日の exit 発注に入っていません'
-                        }
+                        className={`shrink-0 text-[9px] ${executionLabel(r.executionState).cls}`}
+                        title={executionLabel(r.executionState).title}
                       >
-                        {r.pendingExit ? '発注済' : '未発注'}
+                        {executionLabel(r.executionState).short}
                       </span>
                     </li>
                   ))}

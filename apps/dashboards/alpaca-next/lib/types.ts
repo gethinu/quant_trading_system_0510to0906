@@ -219,10 +219,37 @@ export interface AlpacaPosition {
   exit_type: string;
   /** now エグジット条件成立時のみ "time_based" 等。 */
   exit_expected: string | null;
+  /**
+   * 当日 exit artifact と exact-date で突合した broker 送信状態。
+   * pending_execution = 計画済みだが夜の実発注 run がまだ = 失敗ではない。
+   */
+  exit_execution_state?: ExitExecutionState | null;
   stop_price_est: number | null;
   target_price_est: number | null;
   distance_to_stop_pct: number | null;
   distance_to_target_pct: number | null;
+}
+
+export type ExitExecutionState =
+  | 'submitted'
+  | 'failed'
+  | 'not_submitted'
+  | 'pending_execution'
+  | 'not_planned'
+  | 'unmeasured';
+
+export interface AlpacaExitExecution {
+  measured: boolean;
+  date: string;
+  /** 当日 artifact の役割。proposal = 夜の実発注前。 */
+  role: 'proposal' | 'execution' | null;
+  time_exit_due: number | null;
+  time_exit_unsubmitted: number | null;
+  execution_health:
+    | 'ok'
+    | 'awaiting_execution'
+    | 'blocked_unsubmitted_time_exit'
+    | 'unmeasured';
 }
 
 /** 期間切替 1 レンジ分。points が空 = その期間はデータ無し (0 で埋めない)。 */
@@ -473,6 +500,8 @@ export interface AlpacaSnapshot {
   realized?: RealizedBlock | null;
   exposure: AlpacaExposure;
   summary: AlpacaSummary;
+  /** 当日の期限 exit が提案どまりか、broker 送信済みか。 */
+  exit_execution?: AlpacaExitExecution | null;
   positions: AlpacaPosition[];
   reconciliation: AlpacaReconciliation;
 }
