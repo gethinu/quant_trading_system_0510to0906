@@ -85,6 +85,45 @@ def test_due_not_planned_flagged():
     assert v["n_warn"] >= 1
 
 
+def test_planned_close_without_submission_is_warned():
+    """execution run でも、送れなかった close は「計画済み」で済ませない。
+
+    従来は submitted=False の close が分類から丸ごと外れ、期限超過が滞留しても
+    「乖離なし」に見えた。
+    """
+    exit_orders = {
+        "mode": "submitted",
+        "role": "execution",
+        "positions": [_pos("AAA", "system3", "2026-07-08")],
+        "exits": [
+            _exit("AAA", "system3", "time_based", "market", order_id=None)
+            | {"error": "insufficient buying power"}
+        ],
+    }
+    v = verify(exit_orders, "2026-07-12", status_map={})
+    assert v["n_planned_closes"] == 1
+    assert v["n_submitted_closes"] == 0
+    assert [r["symbol"] for r in v["discrepancies"]["closes_not_submitted"]] == ["AAA"]
+    assert v["n_warn"] == 1
+
+
+def test_proposal_artifact_counts_every_close_as_unsubmitted():
+    """提案を明示指定して検証した時は、行に order_id があっても未送信と言い切る。"""
+    exit_orders = {
+        "mode": "dry_run",
+        "role": "proposal",
+        "positions": [_pos("AAA", "system3", "2026-07-08")],
+        "exits": [
+            _exit(
+                "AAA", "system3", "time_based", "market", order_id="o1", dry_run=False
+            )
+        ],
+    }
+    v = verify(exit_orders, "2026-07-12", status_map={"o1": "filled"})
+    assert v["n_submitted_closes"] == 0
+    assert v["n_warn"] == 1
+
+
 def test_all_due_planned_and_filled_no_warn():
     exit_orders = {
         "mode": "submitted",
@@ -185,6 +224,7 @@ def test_missing_execution_artifact_is_distinct_from_a_clean_run(tmp_path: Path)
 # --- reconcile: close fill classification ---------------------------------
 def test_rejected_close_is_warn():
     exit_orders = {
+        "mode": "submitted",
         "positions": [],
         "exits": [
             _exit(
@@ -200,6 +240,7 @@ def test_rejected_close_is_warn():
 def test_pending_close_is_info_not_warn():
     # 市場休場中の成行は accepted のまま = pending (失敗ではない)
     exit_orders = {
+        "mode": "submitted",
         "positions": [],
         "exits": [
             _exit(
