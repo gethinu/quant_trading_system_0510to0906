@@ -72,9 +72,12 @@ def test_exit_counts_normalizes_system_to_sys_key() -> None:
         date_str="2026-07-29",
     )
     ec = exit_counts_from_recon(recon)
+    # 2026-08-19: rejected / suppressed を armed から分離したため schema が増えた。
     assert ec["sys2"] == {
         "submitted": 2, "close": 1, "protect": 1,
         "armed": 0, "armed_close": 0, "armed_protect": 0,
+        "rejected": 0, "rejected_close": 0, "rejected_protect": 0,
+        "suppressed": 0, "suppressed_close": 0, "suppressed_protect": 0,
     }
 
 

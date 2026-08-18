@@ -341,7 +341,21 @@ class TestBuildExitOrders:
         assert any(e.reason == ExitReasonCode.TIME for e in exits)
         assert not any(e.reason.startswith("protect_") for e in exits)
 
-    def test_position_without_system_tag_is_skipped(self):
+    def test_position_without_system_tag_gets_only_default_stop(self):
+        """system 不明ポジは strategy exit を作らない。
+
+        2026-08-19 変更: 「無管理」と「無保護」は別問題なので、下方保護の
+        protective stop **だけ** は既定値で張る (ORPHAN_DEFAULT_PROTECTION)。
+        time/close exit を捏造しない契約は従来どおり。
+        """
+        snap = PositionSnapshot(symbol="XXX", qty=1, side="long", avg_entry_price=1.0)
+        exits = build_exit_orders_from_positions([snap], today="2026-07-02")
+        assert [e.reason for e in exits] == [ExitReasonCode.PROTECT_STOP]
+        assert all(e.order_type == "stop" for e in exits)
+
+    def test_position_without_system_tag_is_skipped_when_flag_off(self, monkeypatch):
+        """可逆性: ORPHAN_DEFAULT_PROTECTION=0 で従来どおり完全 skip。"""
+        monkeypatch.setenv("ORPHAN_DEFAULT_PROTECTION", "0")
         snap = PositionSnapshot(symbol="XXX", qty=1, side="long", avg_entry_price=1.0)
         exits = build_exit_orders_from_positions([snap], today="2026-07-02")
         assert exits == []

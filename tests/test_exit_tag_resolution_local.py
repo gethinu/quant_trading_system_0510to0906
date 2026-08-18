@@ -54,7 +54,8 @@ def test_unknown_symbol_still_unmanaged_and_surfaced():
     exits = build_exit_orders_from_positions(
         [_snap("ZZZ")], today="2026-07-30", symbol_map={"MF": "system3"}, unassigned_out=out
     )
-    assert all(getattr(e, "symbol", "") != "ZZZ" for e in exits)
+    # 2026-08-19: 帰属不能でも下方保護の stop だけは張る (time/close は作らない)。
+    assert all(e.reason == "protect_stop" for e in exits)
     assert out and out[0]["symbol"] == "ZZZ"
 
 

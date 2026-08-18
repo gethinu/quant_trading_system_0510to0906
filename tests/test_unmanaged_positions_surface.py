@@ -6,8 +6,12 @@
     protection も生成されないまま黙って落ちていた (旧 debug ログのみ)。同じ未解決ポジは
     overdue カウンタからも外れ、「無管理なのに不可視」だった。
 
-本テストが固定する契約:
-    1. 未解決 (system=None) ポジは exit を 1 件も生まないが、``unassigned_out`` に必ず載る。
+本テストが固定する契約 (1 は 2026-08-19 に更新):
+    1. 未解決 (system=None) ポジは **time/close exit を生まない** (既定 max_hold を
+       当てない = 捏造しない) が、``unassigned_out`` に必ず載る。
+       2026-08-19 追加: 「無管理」と「無保護」は別問題なので、下方保護の
+       protective stop だけは既定値で張る (ORPHAN_DEFAULT_PROTECTION、既定 ON)。
+       FOLD/CDTX が丸裸で放置されていた穴を塞ぐための変更。
     2. タグ付きポジの exit 生成挙動は不変 (回帰なし)。
     3. ``unassigned_out`` 未指定でも従来どおり動く (後方互換)。
     4. build_e2e_ledger の overdue_unassigned は未解決ポジを別枠で数え、
@@ -42,14 +46,17 @@ def _mk(symbol, system, *, qty=100.0, side="long"):
     )
 
 
-def test_unmanaged_position_surfaced_and_no_exit():
+def test_unmanaged_position_surfaced_and_only_default_stop():
     unmanaged = _mk("MF", None)
     out: list[dict] = []
     exits = build_exit_orders_from_positions(
         [unmanaged], today="2026-07-30", unassigned_out=out
     )
-    # 未解決ポジは exit を生まない
-    assert all(getattr(e, "symbol", "") != "MF" for e in exits)
+    # 未解決ポジは time/close exit を生まない (捏造しない)
+    assert all(e.reason != "time_based" for e in exits)
+    assert all(e.order_type != "market" for e in exits)
+    # 下方保護の stop だけは張る (2026-08-19)
+    assert [e.reason for e in exits] == ["protect_stop"]
     # ただし必ず surface される
     assert len(out) == 1
     assert out[0]["symbol"] == "MF"
@@ -57,11 +64,23 @@ def test_unmanaged_position_surfaced_and_no_exit():
     assert out[0]["qty"] == 100.0
 
 
+def test_unmanaged_position_no_exit_when_protection_disabled(monkeypatch):
+    """可逆性: 既定保護を切れば従来どおり exit 0 件。"""
+    monkeypatch.setenv("ORPHAN_DEFAULT_PROTECTION", "0")
+    out: list[dict] = []
+    exits = build_exit_orders_from_positions(
+        [_mk("MF", None)], today="2026-07-30", unassigned_out=out
+    )
+    assert exits == []
+    assert len(out) == 1
+
+
 def test_unassigned_out_optional_backward_compat():
     # unassigned_out 未指定でも従来どおり (例外なく list を返す)
     exits = build_exit_orders_from_positions([_mk("FOLD", None)], today="2026-07-30")
     assert isinstance(exits, list)
-    assert all(getattr(e, "symbol", "") != "FOLD" for e in exits)
+    # 生成されるのは既定の protective stop だけ (close は作らない)
+    assert all(e.reason == "protect_stop" for e in exits)
 
 
 def test_tagged_position_behavior_unchanged():
