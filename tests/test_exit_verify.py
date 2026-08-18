@@ -8,6 +8,7 @@ status_map を注入できる純関数なので Alpaca 無しで検証できる�
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import sys
 
@@ -98,6 +99,87 @@ def test_all_due_planned_and_filled_no_warn():
     v = verify(exit_orders, "2026-07-12", status_map={"o1": "filled"})
     assert v["n_filled_closes"] == 1
     assert v["n_warn"] == 0
+
+
+# --- artifact 選択: 朝の提案ではなく前営業日夜の実発注を検証する -------------
+def _artifact(tmp_path: Path, date: str, role: str, **extra):
+    from common.exit_artifacts import write_with_sidecar
+
+    payload = {
+        "date": date,
+        "mode": "submitted" if role == "execution" else "dry_run",
+        "positions": [_pos("AAA", "system3", "2026-07-08")],
+        "exits": [],
+        **extra,
+    }
+    compact = date.replace("-", "")
+    write_with_sidecar(tmp_path / f"exit_orders_{compact}.json", payload, role)
+
+
+def test_morning_run_verifies_last_nights_execution_not_todays_proposal(
+    tmp_path: Path, capsys
+):
+    """07:20 の定例 run が 06:00 の提案を実発注として検証する回帰を防ぐ。
+
+    提案を掴むと planned close が毎日「未送信」に見え、警報が常時赤になる。
+    """
+    from scripts.exit_verify import main
+
+    _artifact(
+        tmp_path,
+        "2026-07-11",
+        "execution",
+        exits=[
+            _exit(
+                "AAA", "system3", "time_based", "market", order_id="o1", dry_run=False
+            )
+        ],
+    )
+    _artifact(tmp_path, "2026-07-12", "proposal")
+
+    rc = main(
+        [
+            "--date",
+            "2026-07-12",
+            "--results-dir",
+            str(tmp_path),
+            "--log-dir",
+            str(tmp_path / "logs"),
+            "--no-alpaca",
+            "--no-notify",
+        ]
+    )
+    out = capsys.readouterr().out
+    assert "role=execution" in out
+    assert "date=2026-07-11" in out
+    # 満期判定は artifact 自身の日付基準 (07-11 なら 3d でちょうど満期)
+    record = json.loads(
+        (tmp_path / "logs" / "exit_verify_20260711.json").read_text(encoding="utf-8")
+    )
+    assert record["requested_date"] == "2026-07-12"
+    assert record["exit_orders_role"] == "execution"
+    assert record["date"] == "2026-07-11"
+    assert rc in (0, 2)
+
+
+def test_missing_execution_artifact_is_distinct_from_a_clean_run(tmp_path: Path):
+    """提案しか無い状態を「乖離なし」と言わない。"""
+    from scripts.exit_verify import main
+
+    _artifact(tmp_path, "2026-07-12", "proposal")
+    rc = main(
+        [
+            "--date",
+            "2026-07-12",
+            "--results-dir",
+            str(tmp_path),
+            "--log-dir",
+            str(tmp_path / "logs"),
+            "--no-alpaca",
+            "--no-notify",
+        ]
+    )
+    assert rc == 1
 
 
 # --- reconcile: close fill classification ---------------------------------
