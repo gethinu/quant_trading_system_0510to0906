@@ -21,6 +21,7 @@ import logging
 import math
 import os
 from pathlib import Path
+import re
 from typing import Any
 
 import pandas as pd
@@ -466,6 +467,47 @@ def _classify_error(exc: Exception) -> OrderSubmitError:
     else:
         reason = "発注失敗"
     return OrderSubmitError(f"{reason}: {exc}")
+
+
+def classify_exit_submit_error(error: str | None) -> str | None:
+    """exit 発注エラーが「既に保護済み」かを判定する (pure)。
+
+    保護注文を張り直そうとすると、その建玉の株数が **既存の未約定注文で全量
+    予約済み** の場合に Alpaca が buying-power 拒否 (code 40310000) を返す:
+
+        {"available":"0","code":40310000,"existing_qty":"105","held_for_orders":"105"}
+
+    これは「保護が既に掛かっている」ことの裏返しで、危険な失敗ではない。だが
+    従来は素の failed として数えていたため、2026-08-18 の run では 23 件中 12 件が
+    failed と表示され、**本当の exit 失敗がノイズに埋もれていた**。
+
+    over-claim を避けるため、判定は保守的に:
+      code 40310000 かつ existing_qty > 0 かつ held_for_orders >= existing_qty
+    の時だけ ``"already_protected"`` を返す。部分的な予約や他の資金不足は
+    None (= 通常の失敗) のまま扱う。
+    """
+    if not error:
+        return None
+    text = str(error)
+    if "40310000" not in text:
+        return None
+
+    def _num(key: str) -> float | None:
+        m = re.search(rf'"{key}"\s*:\s*"?(-?[\d.]+)"?', text)
+        if not m:
+            return None
+        try:
+            return abs(float(m.group(1)))
+        except ValueError:
+            return None
+
+    existing = _num("existing_qty")
+    held = _num("held_for_orders")
+    if existing is None or held is None:
+        return None
+    if existing <= 0 or held < existing:
+        return None
+    return "already_protected"
 
 
 def submit_paper_order(
@@ -1564,6 +1606,9 @@ class PreparedExit:
     order_id: str | None = None
     status: str | None = None
     error: str | None = None
+    # 失敗ではないが発注しなかった理由 (例: already_protected)。error と分けることで
+    # 「本当に失敗した exit」を集計から埋もれさせない。
+    skip_reason: str | None = None
     dry_run: bool = True
     time_in_force: str = "day"
 
