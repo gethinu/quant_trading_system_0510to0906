@@ -89,6 +89,11 @@ from common.alpaca_trading import (  # noqa: E402
     parse_entry_date_from_client_order_id,
     parse_system_from_client_order_id,
 )
+from common.exit_artifacts import (  # noqa: E402
+    ROLE_EXECUTION,
+    artifact_role,
+    load_artifact,
+)
 from common.exit_ledger import resolve_session_pnl  # noqa: E402
 from common.position_tracker import load_tracker  # noqa: E402
 from common.trade_management import SYSTEM_TRADE_RULES  # noqa: E402
@@ -887,6 +892,81 @@ def _latest_json(results_dir: Path, prefix: str) -> Path | None:
     return best[1] if best else None
 
 
+def _load_exit_execution(
+    results_dir: Path, date_str: str
+) -> tuple[dict[str, Any], dict[str, str]]:
+    """当日 exit artifact を読み、公開可能な health と symbol 別の執行状態を返す。
+
+    期限判定そのものは position + rules から独立計算する。ここで join するのは
+    「その判定に対して実際に broker へ送ったか」だけ。exact-date の artifact しか
+    使わず、前日の submitted を当日の事実として混ぜない。
+
+    重要なのは **提案しか無い時間帯を「未送信」と赤くしない** こと。exit の実発注は
+    夜 (open_auto_run) なので、朝の publish 時点では当日 artifact は proposal で
+    あるのが正常。これを failure として出すと毎朝全件赤になり警報が死ぬ。
+    """
+    compact = date_str.replace("-", "")
+    unavailable = {
+        "measured": False,
+        "date": date_str,
+        "role": None,
+        "time_exit_due": None,
+        "time_exit_unsubmitted": None,
+        "execution_health": "unmeasured",
+    }
+    path = results_dir / f"exit_orders_{compact}.json"
+    payload = load_artifact(path)
+    if payload is None or payload.get("date") != date_str:
+        return unavailable, {}
+
+    role = artifact_role(payload)
+    is_execution = role == ROLE_EXECUTION
+    time_rows = [
+        e
+        for e in (payload.get("exits") or [])
+        if isinstance(e, dict) and e.get("reason") == "time_based"
+    ]
+    failed_statuses = {"rejected", "canceled", "cancelled", "expired", "done_for_day"}
+
+    by_symbol: dict[str, str] = {}
+    for row in time_rows:
+        sym = str(row.get("symbol") or "").upper()
+        if not sym:
+            continue
+        if not is_execution:
+            # 実発注 run はまだ走っていない。計画済みだが「送信待ち」。
+            by_symbol[sym] = "pending_execution"
+            continue
+        status = str(row.get("status") or "").lower().split(".")[-1]
+        if row.get("error") or status in failed_statuses:
+            by_symbol[sym] = "failed"
+        elif row.get("dry_run"):
+            by_symbol[sym] = "not_submitted"
+        elif row.get("order_id"):
+            by_symbol[sym] = "submitted"
+        else:
+            by_symbol[sym] = "not_submitted"
+
+    unsubmitted = sum(1 for st in by_symbol.values() if st != "submitted")
+    if not is_execution:
+        health = "awaiting_execution"
+    elif unsubmitted:
+        health = "blocked_unsubmitted_time_exit"
+    else:
+        health = "ok"
+    return (
+        {
+            "measured": True,
+            "date": date_str,
+            "role": role,
+            "time_exit_due": len(time_rows),
+            "time_exit_unsubmitted": unsubmitted,
+            "execution_health": health,
+        },
+        by_symbol,
+    )
+
+
 def _build_reconciliation(results_dir: Path, held_symbols: set[str]) -> dict[str, Any]:
     rec: dict[str, Any] = {
         "signals_date": None,
@@ -1124,6 +1204,9 @@ def build_snapshot(
         is None
     ]
     inactive_symbols = _fetch_inactive_assets(client, untagged_symbols)
+    exit_execution, exit_execution_by_symbol = _load_exit_execution(
+        results_dir, date_str
+    )
 
     positions: list[dict[str, Any]] = []
     long_usd = short_usd = 0.0
@@ -1197,6 +1280,16 @@ def build_snapshot(
         if max_hold > 0 and holding_days is not None and holding_days >= max_hold:
             exit_expected = "time_based"
 
+        exit_execution_state = None
+        if exit_expected == "time_based":
+            # 期限到来の事実と broker 送信の事実を分離する。当日 artifact が
+            # 提案どまり (= 夜の実発注前) なら pending_execution であって失敗ではない。
+            exit_execution_state = exit_execution_by_symbol.get(sym)
+            if exit_execution_state is None:
+                exit_execution_state = (
+                    "not_planned" if exit_execution["measured"] else "unmeasured"
+                )
+
         row = {
             "symbol": sym,
             "system": sys_label or "unknown",
@@ -1225,6 +1318,7 @@ def build_snapshot(
             "exit_date": exit_date,
             "exit_type": _exit_type(sys_label, rules),
             "exit_expected": exit_expected,
+            "exit_execution_state": exit_execution_state,
             "stop_price_est": stop_est,
             "target_price_est": target_est,
             "distance_to_stop_pct": dist_stop,
@@ -1400,6 +1494,7 @@ def build_snapshot(
             "biggest_winner": biggest_win,
             "biggest_loser": biggest_loss,
         },
+        "exit_execution": exit_execution,
         "positions": positions,
         "reconciliation": _build_reconciliation(results_dir, held_symbols),
         "ledger_reconciliation": _build_ledger_reconciliation(

@@ -414,3 +414,71 @@ def test_ledger_recon_unavailable_when_empty():
     assert rec["available"] is False
     assert rec["desync_free"] is None
     assert rec["n_desync"] is None
+
+
+# --- exit の「期限到来」と「broker 送信」の分離 -----------------------------
+def _exit_artifact(tmp_path, date, role, exits):
+    from common.exit_artifacts import write_with_sidecar
+
+    compact = date.replace("-", "")
+    write_with_sidecar(
+        tmp_path / f"exit_orders_{compact}.json",
+        {
+            "date": date,
+            "mode": "submitted" if role == "execution" else "dry_run",
+            "exits": exits,
+        },
+        role,
+    )
+
+
+def test_morning_proposal_is_pending_not_a_failure(tmp_path):
+    """exit の実発注は夜。朝の提案どまりを「未送信」と赤くしない。"""
+    _exit_artifact(
+        tmp_path,
+        "2026-08-18",
+        "proposal",
+        [{"symbol": "DUE", "reason": "time_based", "dry_run": True, "order_id": None}],
+    )
+    health, by_symbol = ex._load_exit_execution(tmp_path, "2026-08-18")
+    assert by_symbol == {"DUE": "pending_execution"}
+    assert health["role"] == "proposal"
+    assert health["execution_health"] == "awaiting_execution"
+
+
+def test_execution_artifact_classifies_submitted_and_failed(tmp_path):
+    _exit_artifact(
+        tmp_path,
+        "2026-08-17",
+        "execution",
+        [
+            {
+                "symbol": "SENT",
+                "reason": "time_based",
+                "dry_run": False,
+                "order_id": "o1",
+                "status": "OrderStatus.PENDING_NEW",
+            },
+            {
+                "symbol": "FAIL",
+                "reason": "time_based",
+                "dry_run": False,
+                "order_id": None,
+                "error": "insufficient buying power",
+            },
+        ],
+    )
+    health, by_symbol = ex._load_exit_execution(tmp_path, "2026-08-17")
+    assert by_symbol == {"SENT": "submitted", "FAIL": "failed"}
+    assert health["time_exit_due"] == 2
+    assert health["time_exit_unsubmitted"] == 1
+    assert health["execution_health"] == "blocked_unsubmitted_time_exit"
+
+
+def test_exit_execution_never_uses_a_stale_day(tmp_path):
+    """前日の submitted を当日の事実として混ぜない。"""
+    _exit_artifact(tmp_path, "2026-08-17", "execution", [])
+    health, by_symbol = ex._load_exit_execution(tmp_path, "2026-08-18")
+    assert health["measured"] is False
+    assert health["execution_health"] == "unmeasured"
+    assert by_symbol == {}

@@ -10,11 +10,17 @@ daily_pipeline.ps1 の [exit_check] step (5c) から呼ばれる:
     - Alpaca API が使えない/SDK 未導入環境では position を空 list として扱い skip
     - protection 発注は client_order_id で idempotent (再実行で重複しない)
 
-出力: results_csv/exit_orders_YYYYMMDD.json
+出力: results_csv/exit_orders_YYYYMMDD.json (最後に走った run) と、
+      results_csv/exit_orders_YYYYMMDD_<role>.json (role 別 sidecar)。
+      同じ日に朝の提案 run と夜の実発注 run が走るため、canonical path だけだと
+      後から走った方が勝つ。実発注記録を提案で消さないよう role sidecar を併記する
+      (common/exit_artifacts 参照)。
     {
       "version": "1.0",
       "date": "2026-07-03",
       "mode": "dry_run" | "submitted",
+      "role": "proposal" | "execution",
+      "written_at": "2026-07-03T13:35:02+00:00",
       "count": <int>,
       "submitted": <int>,
       "failed": <int>,
@@ -52,6 +58,11 @@ from common.alpaca_trading import (  # noqa: E402
     parse_entry_date_from_client_order_id,
     parse_system_from_client_order_id,
     submit_paper_exit_order,
+)
+from common.exit_artifacts import (  # noqa: E402
+    ROLE_PROPOSAL,
+    role_for,
+    write_with_sidecar,
 )
 from common.position_tracker import load_tracker  # noqa: E402
 from common.symbol_map import load_symbol_system_map  # noqa: E402
@@ -129,9 +140,8 @@ def _hydrate_from_alpaca_coids(snapshots: list[PositionSnapshot], client: Any) -
             # 次ページ = これより古い注文。submitted_at/created_at を境界にする。
             oldest = None
             for o in reversed(batch):
-                oldest = (
-                    getattr(o, "submitted_at", None)
-                    or getattr(o, "created_at", None)
+                oldest = getattr(o, "submitted_at", None) or getattr(
+                    o, "created_at", None
                 )
                 if oldest is not None:
                     break
@@ -279,8 +289,14 @@ def _write_output(
     snapshots: list[PositionSnapshot],
     meta: dict,
     output_path: Path,
-) -> None:
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    role: str = ROLE_PROPOSAL,
+) -> Path:
+    """canonical path と role sidecar へ書き、sidecar path を返す。
+
+    canonical path は「最後に走った run」なので、朝の提案 run が夜の実発注記録を
+    上書きする。role sidecar は同じ role の run しか触らないため、実発注記録は
+    提案で消えない (詳細は common/exit_artifacts の docstring)。
+    """
     payload = {
         "version": "1.0",
         **meta,
@@ -299,8 +315,7 @@ def _write_output(
         ],
         "exits": [e.to_row() for e in exits],
     }
-    with output_path.open("w", encoding="utf-8") as fh:
-        json.dump(payload, fh, ensure_ascii=False, indent=2, default=str)
+    return write_with_sidecar(output_path, payload, role)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -472,8 +487,9 @@ def main(argv: list[str] | None = None) -> int:
                 submit_failed += 1
 
     mode = "submitted" if not dry_run else "dry_run"
+    role = role_for(dry_run)
 
-    _write_output(
+    sidecar = _write_output(
         exits,
         snapshots,
         {
@@ -498,6 +514,7 @@ def main(argv: list[str] | None = None) -> int:
             },
         },
         output_path,
+        role=role,
     )
 
     # summary
@@ -509,7 +526,8 @@ def main(argv: list[str] | None = None) -> int:
         f"(time={time_cnt}, breakout={breakout_cnt}, protect={protect_cnt}) "
         f"mode={mode} submitted={submitted_ok} failed={submit_failed}"
     )
-    print(f"[write] {output_path}")
+    print(f"[write] {output_path} (role={role})")
+    print(f"[write] {sidecar}")
     if unassigned:
         syms = ", ".join(str(u.get("symbol")) for u in unassigned)
         print(

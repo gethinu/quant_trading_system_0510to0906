@@ -72,6 +72,12 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from common.exit_artifacts import (  # noqa: E402
+    ROLE_EXECUTION,
+    ROLE_PROPOSAL,
+    write_with_sidecar,
+)
+
 # 段の途中で import が失敗しても runner 自体は落とさない (import は遅延)。
 PYEXE = sys.executable
 
@@ -445,10 +451,7 @@ class Runner:
                 "count": len(exits_rows),
                 "exits": exits_rows,
             }
-            self.exit_json.write_text(
-                json.dumps(payload, ensure_ascii=False, indent=2, default=str),
-                encoding="utf-8",
-            )
+            write_with_sidecar(self.exit_json, payload, ROLE_PROPOSAL)
             self._dump("exit_orders.json", payload)
             self.log(
                 f"[exit] dry-run: {len(exits_rows)} ポジションを close する予定 (未発注)"
@@ -498,10 +501,7 @@ class Runner:
             "failed": failed,
             "exits": exits_rows,
         }
-        self.exit_json.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2, default=str),
-            encoding="utf-8",
-        )
+        write_with_sidecar(self.exit_json, payload, ROLE_EXECUTION)
         self._dump("exit_orders.json", payload)
         self.log(
             f"[exit] flatten-all 発注: ok={ok} failed={failed} -> "

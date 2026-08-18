@@ -12,7 +12,7 @@
  *   - red = 今すぐ人間が見るべき / amber = 把握しておくべき、で分ける。
  */
 
-import type { AlpacaPosition, AlpacaSnapshot } from './types';
+import type { AlpacaPosition, AlpacaSnapshot, ExitExecutionState } from './types';
 
 export type AlertLevel = 'red' | 'amber';
 
@@ -32,8 +32,8 @@ export interface OverdueRow {
   /** 何日超過しているか (正の数)。 */
   daysOver: number;
   unrealizedPl: number;
-  /** 台帳側で「本日 exit 予定」に入っているか。 */
-  pendingExit: boolean;
+  /** 当日 exit artifact と突合した broker 送信状態。旧 snapshot は unmeasured。 */
+  executionState: ExitExecutionState;
 }
 
 export interface DashboardStatus {
@@ -41,8 +41,8 @@ export interface DashboardStatus {
   maxDaysOver: number | null;
   /** 期限超過建玉の含み損益合計。 */
   overduePl: number;
-  /** 期限超過のうち本日の exit 発注に入っている件数。 */
-  overduePendingExit: number;
+  /** 期限超過のうち broker へ送信済みの件数。 */
+  overdueSubmitted: number;
   /** 本日満期 (days_remaining === 0)。まだ超過ではない。 */
   dueToday: number;
   /** 上場廃止などで API から決済できない建玉。 */
@@ -56,7 +56,7 @@ const EMPTY: DashboardStatus = {
   overdue: [],
   maxDaysOver: null,
   overduePl: 0,
-  overduePendingExit: 0,
+  overdueSubmitted: 0,
   dueToday: 0,
   delisted: 0,
   alerts: [],
@@ -70,7 +70,6 @@ export function computeStatus(snap: AlpacaSnapshot | null): DashboardStatus {
   if (!snap) return EMPTY;
 
   const recon = snap.realized?.exit_intent_reconciliation ?? null;
-  const pendingSet = new Set((recon?.intended_pending ?? []).map((x) => x.symbol));
 
   const overdue: OverdueRow[] = snap.positions
     .filter(isOverdue)
@@ -79,13 +78,13 @@ export function computeStatus(snap: AlpacaSnapshot | null): DashboardStatus {
       system: p.system,
       daysOver: -(p.days_remaining as number),
       unrealizedPl: p.unrealized_pl,
-      pendingExit: pendingSet.has(p.symbol),
+      executionState: p.exit_execution_state ?? 'unmeasured',
     }))
     .sort((a, b) => b.daysOver - a.daysOver || a.unrealizedPl - b.unrealizedPl);
 
   const maxDaysOver = overdue.length > 0 ? overdue[0].daysOver : null;
   const overduePl = overdue.reduce((n, r) => n + r.unrealizedPl, 0);
-  const overduePendingExit = overdue.filter((r) => r.pendingExit).length;
+  const overdueSubmitted = overdue.filter((r) => r.executionState === 'submitted').length;
   const dueToday = snap.positions.filter((p) => p.days_remaining === 0).length;
   const delisted = snap.positions.filter(
     (p) => p.system === 'delisted' || p.exit_type === 'delisted',
@@ -102,16 +101,28 @@ export function computeStatus(snap: AlpacaSnapshot | null): DashboardStatus {
   }
 
   if (overdue.length > 0) {
-    // 「本日の exit 発注に入っているか」まで出す。全部 pending なら詰まりではなく
-    // 執行待ちで、そこを混ぜて煽らない。
-    const pendNote =
-      overduePendingExit === overdue.length
-        ? '全件が本日の exit 発注に入っています (執行待ち)'
-        : `うち ${overduePendingExit} 件のみ本日の exit 発注に入っています`;
+    // intent に載っただけでは「発注済」ではない。exact-date artifact の
+    // order_id/dry_run/error から broker 送信状態で出す。ただし exit の実発注は
+    // 夜なので、朝の時点で提案どまりなのは正常 = pending_execution を失敗と混ぜない。
+    const n = (st: ExitExecutionState) =>
+      overdue.filter((r) => r.executionState === st).length;
+    const executionNote =
+      n('pending_execution') === overdue.length
+        ? '全件が本日の exit 計画に入っています (夜の発注待ち)'
+        : [
+            `送信済 ${overdueSubmitted}`,
+            n('pending_execution') > 0 ? `発注待ち ${n('pending_execution')}` : null,
+            n('failed') > 0 ? `送信失敗 ${n('failed')}` : null,
+            n('not_submitted') > 0 ? `未送信 ${n('not_submitted')}` : null,
+            n('not_planned') > 0 ? `未計画 ${n('not_planned')}` : null,
+            n('unmeasured') > 0 ? `未計測 ${n('unmeasured')}` : null,
+          ]
+            .filter(Boolean)
+            .join(' · ');
     red(
       'overdue',
       `期限超過の建玉 ${overdue.length} 件`,
-      `最長 ${maxDaysOver}d 超過 · ${pendNote}`,
+      `最長 ${maxDaysOver}d 超過 · ${executionNote}`,
     );
   }
 
@@ -187,7 +198,7 @@ export function computeStatus(snap: AlpacaSnapshot | null): DashboardStatus {
     overdue,
     maxDaysOver,
     overduePl,
-    overduePendingExit,
+    overdueSubmitted,
     dueToday,
     delisted,
     alerts,
