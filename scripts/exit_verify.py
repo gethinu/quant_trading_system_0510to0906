@@ -2,7 +2,8 @@
 
 exit 側 (SYSTEM_TRADE_RULES の max_holding_days S2=2/S3=3/S5=6/S6=3・利確・ATR ストップ)
 が **実際に paper で発火して決済したか** を観測・検証する。paper_exit_check が生成した
-``exit_orders_YYYYMMDD.json`` (planned exits + position snapshot) を single source にし、
+**実発注 (role=execution)** の exit artifact (planned exits + position snapshot) を
+single source にし、
 
     1. [expected] position snapshot から time-based 満期 (holding_days >= max_holding_days)
                   を **独立再計算** = 「本日 exit すべき」建玉 (paper_exit_check の漏れ検知)。
@@ -14,12 +15,17 @@ exit 側 (SYSTEM_TRADE_RULES の max_holding_days S2=2/S3=3/S5=6/S6=3・利確�
 月曜以降の建玉で time-exit が実発火するのを、この durable ログ (logs/exit_verify_<date>.json)
 で日次に追える。異常 (close 未 fill / 満期漏れ) があれば ntfy WARN。
 
+``--date`` は「いつ検証を走らせたか」であって検証対象日ではない。朝 07:20 の定例
+run が掴む当日 artifact は 06:00 の **提案** なので、それを実発注として検証すると
+毎日「未送信」に見える。既定では ``--date`` 以前で role=execution の直近 artifact
+(= 前営業日夜の実発注) を対象にし、満期判定もその artifact の日付で行う。
+
 Usage:
-    python scripts/exit_verify.py --date 2026-07-13            # 当日を検証 (Alpaca 照合あり)
+    python scripts/exit_verify.py --date 2026-07-13            # 直近の実発注を検証 (Alpaca 照合あり)
     python scripts/exit_verify.py --date 2026-07-13 --no-alpaca # JSON 記録値だけで検証
     python scripts/exit_verify.py --date 2026-07-13 --dry-run   # ntfy を送らず本文表示
 
-Exit codes: 0=乖離なし, 2=discrepancy あり (WARN), 1=入力 (exit_orders JSON) が無い。
+Exit codes: 0=乖離なし, 2=discrepancy あり (WARN), 1=検証対象の実発注 artifact が無い。
 """
 
 from __future__ import annotations
@@ -34,6 +40,11 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from common.alpaca_trading import compute_holding_days  # noqa: E402
+from common.exit_artifacts import (  # noqa: E402
+    artifact_role,
+    latest_execution,
+    load_artifact,
+)
 from common.trade_management import SYSTEM_TRADE_RULES  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -257,12 +268,20 @@ def _notify(date_str: str, v: dict[str, Any], dry_run: bool) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
-        "--date", default=None, help="対象日 YYYY-MM-DD (default: today UTC)"
+        "--date",
+        default=None,
+        help=(
+            "検証を走らせる日 YYYY-MM-DD (default: today UTC)。"
+            "この日以前の直近 role=execution artifact が検証対象になる。"
+        ),
     )
     parser.add_argument(
         "--exit-orders-json",
         default=None,
-        help="exit_orders JSON path (default: results_csv/exit_orders_<date>.json)",
+        help=(
+            "検証する artifact を明示指定 (role 解決を回避)。"
+            "default は results_csv 内の直近 role=execution artifact。"
+        ),
     )
     parser.add_argument("--results-dir", default=str(ROOT / "results_csv"))
     parser.add_argument("--log-dir", default=str(ROOT / "logs"))
@@ -277,21 +296,34 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     date_str = args.date or _today_str()
-    compact = date_str.replace("-", "")
     results_dir = Path(args.results_dir)
-    exit_path = (
-        Path(args.exit_orders_json)
-        if args.exit_orders_json
-        else results_dir / f"exit_orders_{compact}.json"
-    )
-    if not exit_path.exists():
-        print(f"[error] exit_orders JSON が無い: {exit_path}")
-        return 1
-    try:
-        exit_orders = json.loads(exit_path.read_text(encoding="utf-8"))
-    except Exception as exc:  # noqa: BLE001
-        print(f"[error] exit_orders JSON を読めない: {exc}")
-        return 1
+
+    if args.exit_orders_json:
+        exit_path = Path(args.exit_orders_json)
+        exit_orders = load_artifact(exit_path)
+        if exit_orders is None:
+            print(f"[error] exit_orders JSON を読めない: {exit_path}")
+            return 1
+    else:
+        # 当日の artifact を直に読むと、朝 07:20 の時点では daily_pipeline が
+        # 06:00 に書いた **提案** を掴む (夜 22:35 の実発注はまだ)。提案を実発注
+        # として検証すると毎日「未送信」に見えるので、role が execution の直近
+        # artifact を対象にする = 前営業日夜の実発注記録。
+        found = latest_execution(results_dir, on_or_before=date_str)
+        if found is None:
+            print(
+                f"[error] {date_str} 以前に実発注 (role=execution) の exit artifact "
+                f"が無い: {results_dir}"
+            )
+            return 1
+        exit_path, exit_orders = found
+
+    # 満期判定は artifact 自身の日付を基準にする。前営業日の実発注を今日の日付で
+    # 評価すると holding_days が 1 日ずれ、満期漏れを誤検知する。
+    verify_date = str(exit_orders.get("date") or date_str)
+    role = artifact_role(exit_orders) or "unknown"
+    compact = verify_date.replace("-", "")
+    print(f"[source] {exit_path.name} (role={role}, date={verify_date})")
 
     order_ids = [
         str(e.get("order_id"))
@@ -300,7 +332,7 @@ def main(argv: list[str] | None = None) -> int:
     ]
     status_map = {} if args.no_alpaca else _live_status_map(order_ids)
 
-    v = verify(exit_orders, date_str, status_map)
+    v = verify(exit_orders, verify_date, status_map)
     for ln in _summary_lines(v):
         print(ln)
 
@@ -308,6 +340,9 @@ def main(argv: list[str] | None = None) -> int:
         "version": "1.0",
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "exit_orders_source": str(exit_path),
+        "exit_orders_role": role,
+        # 実行日 (--date) と検証対象日は別物。朝の run は前営業日夜を検証する。
+        "requested_date": date_str,
         "alpaca_checked": not args.no_alpaca,
         **v,
     }
