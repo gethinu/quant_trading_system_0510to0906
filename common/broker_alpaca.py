@@ -281,6 +281,10 @@ def submit_order(
             stop_loss=StopLossRequest(
                 stop_price=stop_loss,
             ),  # type: ignore[call-arg]
+            # 2026-08-19: OCO 分岐だけ client_order_id を渡し忘れており、
+            # 再送で冪等 dedup (422 duplicate) が効かず二重発注し得た。
+            # 他の order_type と同じく冪等キーを付ける。
+            **_coid,
         )
     elif order_type == "bracket":
         # BRACKET (OTOCO): entry (market or limit) と同時に take_profit / stop_loss の
