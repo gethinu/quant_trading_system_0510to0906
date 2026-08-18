@@ -929,6 +929,9 @@ def plan_order_execution(
     return (EXEC_QTY, qty, round(notional_usd, 2), f"{why}→whole_share_qty={qty}")
 
 
+_TRADABLE_CACHE: dict[str, bool | None] = {}
+
+
 def get_asset_fractionable(client: Any, symbol: str) -> bool | None:
     """Alpaca asset の ``fractionable`` フラグを照会 (結果を module cache)。
 
@@ -943,11 +946,30 @@ def get_asset_fractionable(client: Any, symbol: str) -> bool | None:
     try:
         asset = client.get_asset(key)
         frac = bool(getattr(asset, "fractionable", False))
+        # 同じ asset 応答から tradable も拾っておく (追加の API 往復を作らない)。
+        tradable = getattr(asset, "tradable", None)
+        _TRADABLE_CACHE[key] = None if tradable is None else bool(tradable)
     except Exception as exc:  # noqa: BLE001
         logger.warning("get_asset(%s) 失敗、非fractionable扱い(unknown): %s", key, exc)
         frac = None
     _FRACTIONABLE_CACHE[key] = frac
     return frac
+
+
+def get_asset_tradable(client: Any, symbol: str) -> bool | None:
+    """Alpaca asset の ``tradable`` を照会 (fractionable と同じ応答を共有)。
+
+    戻り値: True=取引可 / False=取引不可 / None=不明。
+    **不明を取引不可と混同しない**: broker 到達失敗で全 entry を止めないため、
+    呼び出し側は False の時だけ skip する。
+    """
+    key = (symbol or "").upper()
+    if not key:
+        return None
+    if key not in _TRADABLE_CACHE:
+        # fractionable 照会が asset を取り、その副作用で _TRADABLE_CACHE も埋まる。
+        get_asset_fractionable(client, key)
+    return _TRADABLE_CACHE.get(key)
 
 
 def fetch_open_order_state(client: Any) -> tuple[dict[str, set[str]], set[str]]:
@@ -1423,6 +1445,17 @@ def signals_json_to_orders(
             logger.info(
                 "skip (wash 回避): %s %s vs 既存 %s", po.symbol, po.side, opp_side
             )
+            submitted.append(po)
+            continue
+
+        # (2.9) broker が取引を受け付けない銘柄 (上場廃止・非対応等) は、発注して
+        #       42210000 で失敗させるより skip として分類する。失敗として数えると
+        #       「本当に失敗した entry」がノイズに埋もれる (exit 側と同じ方針)。
+        #       **不明 (None) は skip しない** — broker 到達失敗で全 entry を止めない。
+        if get_asset_tradable(client, po.symbol) is False:
+            po.skip_reason = "untradable:not_tradable_at_broker"
+            _audit_log({"event": "skip_untradable", **po.to_row()})
+            logger.info("skip (取引不可銘柄): %s", po.symbol)
             submitted.append(po)
             continue
 
@@ -2454,6 +2487,7 @@ __all__ = [
     "signals_json_to_orders",
     "plan_order_execution",
     "get_asset_fractionable",
+    "get_asset_tradable",
     "fetch_open_order_state",
     "HeldPositionCounts",
     "count_held_positions_by_system",
