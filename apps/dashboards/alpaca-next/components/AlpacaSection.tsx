@@ -17,6 +17,7 @@ import { Collapsible } from '@/components/Collapsible';
 import { computeStatus } from '@/lib/status';
 // formatters / system 色は lib/format.ts に集約 (サマリーと詳細で表記を揃えるため)。
 import {
+  executionLabel,
   fmtPct,
   fmtPrice,
   fmtQty,
@@ -496,10 +497,22 @@ function exitBadge(p: AlpacaPosition): { text: string; cls: string; sub?: string
     // exit_expected='time_based' は days_remaining<=0 で必ず立つため、以前は
     // 超過分を区別できず全部「本日手仕舞い」に潰れていた (超過 Nd が dead code)。
     const d = p.days_remaining;
+    const ex = executionLabel(p.exit_execution_state ?? 'unmeasured');
+    const sub = [p.exit_date, ex.title].filter(Boolean).join(' · ');
+    // 送信済 / 発注待ち は「詰まり」ではないので赤で煽らない。
+    const settled = ex.state === 'submitted' || ex.state === 'pending_execution';
     if (d != null && d < 0) {
-      return { text: `超過 ${-d}d`, cls: 'bg-fail/30 text-fail', sub: p.exit_date ?? undefined };
+      return {
+        text: `超過 ${-d}d · ${ex.short}`,
+        cls: settled ? 'bg-warn/25 text-warn' : 'bg-fail/30 text-fail',
+        sub,
+      };
     }
-    return { text: '本日手仕舞い', cls: 'bg-fail/20 text-fail', sub: p.exit_date ?? undefined };
+    return {
+      text: `本日手仕舞い · ${ex.short}`,
+      cls: settled ? 'bg-warn/20 text-warn' : 'bg-fail/20 text-fail',
+      sub,
+    };
   }
   if (p.exit_type === 'time' && p.days_remaining != null) {
     const d = p.days_remaining;
