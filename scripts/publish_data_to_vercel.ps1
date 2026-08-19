@@ -92,7 +92,9 @@ param(
     [bool]$RefreshAccount = $true,
     [int]$StaleLockSeconds = 300,
     [int]$GitRetryMax = 5,
-    [switch]$NoLockGuard = $false
+    [switch]$NoLockGuard = $false,
+    [string]$DeployHookUrl = $env:QTS_VERCEL_DEPLOY_HOOK,
+    [switch]$TriggerDeploy = $false
 )
 
 $ErrorActionPreference = "Continue"
@@ -107,6 +109,30 @@ $RelData = "apps/dashboards/alpaca-next/data"
 function Write-Log {
     param([string]$Message)
     Write-Host "[publish_data] $Message"
+}
+
+# --- Vercel deploy hook (恒久策: git push -> build 発火の取りこぼしを埋める) ----
+# 2026-08-17 / 2026-08-19 の二度、origin への push は成功し blob も一致していたのに
+# Vercel の deployment が発火せず、本番が前日の run を表示し続けた。push 到達までを
+# 見る verify では原理的に検出も回復もできない (gap が git の下流にあるため)。
+# QTS_VERCEL_DEPLOY_HOOK に Vercel の Deploy Hook URL を入れておくと、push 成功後に
+# それを叩いて build を明示的に発火させる。未設定なら完全な no-op = 既存挙動のまま。
+function Invoke-VercelDeployHook {
+    param([string]$Url, [string]$Reason)
+    if ([string]::IsNullOrWhiteSpace($Url)) {
+        Write-Log "deploy hook 未設定 (QTS_VERCEL_DEPLOY_HOOK) -> 発火せず。build は Vercel の git 連携任せ。"
+        return $false
+    }
+    try {
+        $resp = Invoke-WebRequest -Uri $Url -Method POST -TimeoutSec 30 -UseBasicParsing
+        Write-Log "deploy hook 発火 ($Reason): HTTP $($resp.StatusCode)"
+        return $true
+    }
+    catch {
+        # 発火失敗は publish 本体の成否を変えない (push は既に成功している)。
+        Write-Log "WARN: deploy hook 発火に失敗 ($Reason): $($_.Exception.Message)"
+        return $false
+    }
 }
 
 # --- ntfy WARN (本当に失敗した時だけ鳴らす) ------------------------------
@@ -511,7 +537,12 @@ if ($null -eq $NewCommit) {
     exit 1
 }
 if ($NewCommit -eq "") {
-    # 差分なし = 既に最新。冪等 no-op。served を確認して終了。
+    # 差分なし = origin は既に最新。冪等 no-op。
+    # ただし「origin は最新なのに本番が古い」= deploy 不発火のときは、空 commit を
+    # 積まずに hook だけ叩いて建て直せるように -TriggerDeploy を用意する。
+    if ($TriggerDeploy) {
+        Invoke-VercelDeployHook -Url $DeployHookUrl -Reason "re-trigger (origin already current)" | Out-Null
+    }
     if (Test-PublishServed) { exit 0 } else { exit 1 }
 }
 
@@ -554,6 +585,9 @@ if (-not $pushed) {
         -Body "dashboard data push failed (non-FF/self-heal exhausted): $Branch $Date (commit=$NewCommit)"
     exit 1
 }
+
+# push は成功した。build 発火は git 連携任せだと落ちることがあるので hook で明示発火。
+Invoke-VercelDeployHook -Url $DeployHookUrl -Reason "after push $NewCommit" | Out-Null
 
 # --- 対策E: publish 後の検証 (origin/$Branch served >= generated) ----------
 if (Test-PublishServed) {
