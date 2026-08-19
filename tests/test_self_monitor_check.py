@@ -216,3 +216,123 @@ def test_publish_warn_when_not_a_git_repo(tmp_path: Path):
         tmp_path, "claude/monitor-webapp", max_age_hours=26, data_dir=tmp_path
     )
     assert r.status == "warn"
+
+
+# --- publish の判定基準は origin ref (2026-08-19 の毎日 CRIT 誤警報の回帰) ------
+# publish_data_to_vercel.ps1 は commit-tree で origin tip にだけ commit を載せ、
+# local の branch ref を進めない。local を見ていると publish が正常でも age が伸び
+# 続けて毎日 CRIT になっていた。ここでは「local は 8 日前 / origin は今」という
+# 実際の構図を本物の git remote で再現する。
+def _git_ok(root, *args):
+    import subprocess
+
+    subprocess.run(
+        ["git", "-C", str(root), *args], capture_output=True, text=True, check=True
+    )
+
+
+def _make_publish_repo(tmp_path: Path):
+    """(work, branch): local branch は 8 日前、origin/<branch> は今。"""
+    import subprocess
+
+    branch = "claude/monitor-webapp"
+    bare = tmp_path / "origin.git"
+    subprocess.run(
+        ["git", "init", "--bare", "--quiet", str(bare)], capture_output=True, check=True
+    )
+    work = tmp_path / "work"
+    subprocess.run(
+        ["git", "clone", "--quiet", str(bare), str(work)],
+        capture_output=True,
+        check=True,
+    )
+    _git_ok(work, "config", "user.email", "t@example.com")
+    _git_ok(work, "config", "user.name", "t")
+    _git_ok(work, "checkout", "--quiet", "-b", branch)
+
+    data = work / "apps" / "dashboards" / "alpaca-next" / "data"
+    data.mkdir(parents=True)
+    (data / "today_signals_20260811.json").write_text("{}", encoding="utf-8")
+    old = "2026-08-11T00:00:00+09:00"
+    env_old = ["-c", "user.name=t", "-c", "user.email=t@example.com"]
+    import os
+
+    e = dict(os.environ, GIT_AUTHOR_DATE=old, GIT_COMMITTER_DATE=old)
+    _git_ok(work, "add", "-A")
+    subprocess.run(
+        ["git", "-C", str(work), *env_old, "commit", "--quiet", "-m", "old"],
+        capture_output=True,
+        text=True,
+        check=True,
+        env=e,
+    )
+    stale = subprocess.run(
+        ["git", "-C", str(work), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+    # 新しい publish 相当 (今) を作って origin へ push
+    (data / "today_signals_20260819.json").write_text("{}", encoding="utf-8")
+    _git_ok(work, "add", "-A")
+    _git_ok(work, "commit", "--quiet", "-m", "publish 08-19")
+    _git_ok(work, "push", "--quiet", "origin", branch)
+
+    # local branch だけ古い commit に戻す = publish が local を進めない状況
+    _git_ok(work, "reset", "--hard", "--quiet", stale)
+    return work, branch
+
+
+def test_publish_judges_origin_ref_not_stale_local_branch(tmp_path: Path):
+    work, branch = _make_publish_repo(tmp_path)
+    r = check_publish(work, branch, max_age_hours=26, data_dir=work / "nope")
+    assert r.status == "ok", r.detail
+    assert r.data["basis"] == "origin"
+    assert r.data["ref"] == "origin/" + branch
+    # 副シグナルも origin の tree から読む
+    assert r.data["dashboard_data_date"] == 20260819
+
+
+def test_publish_local_basis_would_have_been_crit(tmp_path: Path):
+    """同じリポを local branch で測ると CRIT。= 直前まで出ていた誤警報そのもの。"""
+    import subprocess
+
+    work, branch = _make_publish_repo(tmp_path)
+    out = subprocess.run(
+        ["git", "-C", str(work), "log", "-1", "--format=%cI", branch],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    from datetime import datetime
+
+    ct = datetime.fromisoformat(out)
+    age_h = (datetime.now(tz=ct.tzinfo) - ct).total_seconds() / 3600.0
+    assert age_h > 26  # local を見ていれば必ず閾値超え = 毎日 CRIT
+
+
+def test_publish_falls_back_to_local_without_origin(tmp_path: Path):
+    """origin が無いリポでは従来どおり local branch で判定する。"""
+    import subprocess
+
+    work = tmp_path / "solo"
+    work.mkdir()
+    subprocess.run(
+        ["git", "init", "--quiet", str(work)], capture_output=True, check=True
+    )
+    _git_ok(work, "config", "user.email", "t@example.com")
+    _git_ok(work, "config", "user.name", "t")
+    (work / "f.txt").write_text("x", encoding="utf-8")
+    _git_ok(work, "add", "-A")
+    _git_ok(work, "commit", "--quiet", "-m", "only")
+    head = subprocess.run(
+        ["git", "-C", str(work), "rev-parse", "--abbrev-ref", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+    r = check_publish(work, head, max_age_hours=26, data_dir=work)
+    assert r.data["basis"] == "local-fallback"
+    assert r.status == "ok"
