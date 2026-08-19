@@ -173,7 +173,9 @@ class TestMainExitCodes:
         _write_signal(results, "20260722")
         _write_signal(data, "20260721")
         called = {"n": 0}
-        monkeypatch.setattr(cdf, "_notify_stale", lambda _r: called.__setitem__("n", 1))
+        monkeypatch.setattr(
+            cdf, "_notify_stale", lambda *_a: called.__setitem__("n", 1)
+        )
         cdf.main(
             [
                 "--results-dir",
