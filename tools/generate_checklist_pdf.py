@@ -14,10 +14,11 @@ def make_checklist(path: str) -> None:
     font_name = "NotoSansCJK"
     registered = False
     for candidate in [
-        # common Windows fonts
-        r"C:\\Windows\\Fonts\\meiryo.ttc",
-        r"C:\\Windows\\Fonts\\meiryo.ttf",
-        r"C:\\Windows\\Fonts\\YuGothR.ttc",
+        # common Windows fonts (forward slashes resolve to the same files on
+        # Windows and match the convention used in apply_title_to_image.py)
+        r"C:/Windows/Fonts/meiryo.ttc",
+        r"C:/Windows/Fonts/meiryo.ttf",
+        r"C:/Windows/Fonts/YuGothR.ttc",
         # common Noto path if present
         r"/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
     ]:

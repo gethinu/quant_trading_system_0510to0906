@@ -392,8 +392,8 @@ def main():
 
   # Windows タスクスケジューラーに登録
   schtasks /create /tn "QuantTradingDailyUpdate" ^
-    /tr "C:\\Repos\\quant_trading_system\\venv\\Scripts\\python.exe ^
-    C:\\Repos\\quant_trading_system\\scripts\\scheduled_daily_update.py" ^
+    /tr "C:/Repos/quant_trading_system/venv/Scripts/python.exe ^
+    C:/Repos/quant_trading_system/scripts/scheduled_daily_update.py" ^
     /sc daily /st 06:00
 
   # cron（Linux/Mac）に登録

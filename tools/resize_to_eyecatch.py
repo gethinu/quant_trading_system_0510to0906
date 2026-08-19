@@ -3,7 +3,7 @@ Resize and center-crop an input image to 1280x670 (note eyecatch size).
 
 Usage:
         python tools/resize_to_eyecatch.py \
-            --in "C:\\Users\\stair\\Downloads\\Generated Image 10-18-13-29.png"
+            --in "C:/Users/stair/Downloads/Generated Image 10-18-13-29.png"
 
 Output will be saved to `docs/eyecatch_final/<basename>_1280x670.png` by default.
 """
