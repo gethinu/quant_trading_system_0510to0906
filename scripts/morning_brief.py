@@ -239,8 +239,30 @@ def _truncate(s: str, n: int) -> str:
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
+def _expected_session(fallback_yyyymmdd: int) -> int:
+    """成果物の鮮度を測る基準日 = **すでに寄り付きを迎えた直近の立会日**。
+
+    このブリーフは 08:00 JST に走る。US セッションは 22:30 JST に寄るので、
+    その時点で「当日ぶん」の執行成果物 (exit 台帳 / snapshot) は **まだ存在し得ない**。
+    カレンダー当日と比べると毎朝必ず赤になり、本物の停止が埋もれる
+    (census 窓 / publish の local 基準と同じ「素朴カレンダー比較」問題)。
+    ``common.market_session`` は土日と NYSE 祝日も飛ばす。
+
+    取得に失敗した時だけカレンダー当日へ戻す (従来挙動 = 安全側に赤が出る)。
+    """
+    try:
+        from common.market_session import last_opened_session_yyyymmdd
+
+        return last_opened_session_yyyymmdd()
+    except Exception as exc:  # noqa: BLE001
+        print(f"[warn] 立会セッション判定に失敗 -> カレンダー当日で代替: {exc}")
+        return fallback_yyyymmdd
+
+
 def check_exit_ledger(
-    results_dir: Path, today_yyyymmdd: int
+    results_dir: Path,
+    today_yyyymmdd: int,
+    expected_session_yyyymmdd: int | None = None,
 ) -> tuple[list[str], bool, str]:
     """exit (決済) の計測が生きているかを毎朝確かめる。
 
@@ -257,7 +279,16 @@ def check_exit_ledger(
 
     建玉不一致 (ticker rename 由来) は原因が既知で毎日出るため赤にせず
     サマリに件数だけ残す (毎朝オオカミ少年にしない)。
+
+    **鮮度はカレンダー当日でなく立会セッションで測る** (2026-08-20):
+    台帳を書くのは 22:35 JST の ``open_auto_run`` なので、08:00 JST の時点で
+    「当日ぶん」は物理的に存在し得ない。``expected_session_yyyymmdd`` は
+    *すでに寄り付きを迎えた直近の立会日* (土日・NYSE 祝日を飛ばす)。
+    台帳がそれより古い = 「セッションは走ったのに台帳が更新されていない」
+    -> 本物の停止なので赤。省略時は ``today_yyyymmdd`` を使う (従来挙動)。
     """
+    if expected_session_yyyymmdd is None:
+        expected_session_yyyymmdd = today_yyyymmdd
     path, date = _latest_dated_json(results_dir, "exit_ledger")
     data = _load_json(path)
     if data is None:
@@ -274,10 +305,11 @@ def check_exit_ledger(
     measurement = data.get("measurement") or {}
     recon = data.get("exit_intent_reconciliation") or {}
 
-    if date is not None and date < today_yyyymmdd:
+    if date is not None and date < expected_session_yyyymmdd:
         red = True
         alerts.append(
-            f"[quant] exit 台帳が当日ぶん未更新 (最新={date}, 今日={today_yyyymmdd}) — publish 経路を確認"
+            f"[quant] exit 台帳が直近立会 ({expected_session_yyyymmdd}) ぶん未更新 "
+            f"(最新={date}) — open_auto_run / publish 経路を確認"
         )
     if not measurement.get("measured"):
         red = True
@@ -352,7 +384,9 @@ def adapter_quant(primary_root: Path, today_yyyymmdd: int) -> ProjectStatus:
     # exit (決済) の計測が生きているか。self_monitor は signals 側しか見ないので
     # ここで別途確かめる (実現損益が「無い」ことに気づけない事故を防ぐ)。
     exit_alerts, exit_red, exit_summary = check_exit_ledger(
-        primary_root / "results_csv", today_yyyymmdd
+        primary_root / "results_csv",
+        today_yyyymmdd,
+        expected_session_yyyymmdd=_expected_session(today_yyyymmdd),
     )
     st.alerts.extend(exit_alerts)
     st.red = st.red or exit_red
