@@ -1723,9 +1723,14 @@ def _apply_portfolio_caps(
     long_systems: Sequence[str],
     short_systems: Sequence[str],
     equity: float,
+    equity_source: str | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """優先度順 final_df に portfolio 上限 (件数 total/long/short + gross/net exposure)
     を適用し、超過分を末尾から trim する。
+
+    ``equity_source`` は観測性専用の additive 引数 (既定 None)。None のとき report は
+    従来と完全一致し、値が渡されたときだけ ``caps.equity_base_usd`` /
+    ``caps.equity_source`` を足す (``CAP_USE_REAL_EQUITY`` ON の経路のみ)。
 
     - 既保有 (active_positions) + 新規 が上限を超えないよう新規側を削る。
     - exposure は ``position_value`` 列がある時のみ (新規分の gross/net を equity×pct と比較)。
@@ -1816,12 +1821,17 @@ def _apply_portfolio_caps(
             "gross_cap_usd": round(gross_cap, 2),
             "net_cap_usd": round(net_cap, 2),
         },
+        # equity_source は CAP_USE_REAL_EQUITY ON の経路でだけ付く (下で追記)。
+        # OFF のときは以下の 2 key を出さず、従来 report と byte 一致させる。
         "allow": {"long": allow_long, "short": allow_short, "total": allow_total},
         "kept": {"long": n_long, "short": n_short, "total": n_total},
         "trimmed": trims,
         "new_long_usd": round(long_usd, 2),
         "new_short_usd": round(short_usd, 2),
     }
+    if equity_source:
+        report["caps"]["equity_base_usd"] = round(float(equity), 2)
+        report["caps"]["equity_source"] = str(equity_source)
     if trims:
         logger.info(
             "[PORTFOLIO_CAP] trimmed %s (held L%d/S%d)", trims, held_long, held_short
@@ -1853,6 +1863,11 @@ def finalize_allocation(
     capital_long: float | None = None,
     capital_short: float | None = None,
     default_capital: float = 100000.0,
+    # portfolio cap (gross/net exposure) の equity 基準。None のとき従来どおり
+    # ``default_capital`` を使う (= 100000.0 に落ちる現行挙動)。**サイジング予算には
+    # 一切影響しない** — cap の分母だけを差し替える additive な引数。
+    cap_equity: float | None = None,
+    cap_equity_source: str | None = None,
     default_long_ratio: float = 0.5,
     default_max_positions: int = 10,
     system_diagnostics: Mapping[str, Any] | None = None,
@@ -2322,6 +2337,13 @@ def finalize_allocation(
     try:
         portfolio_caps = _load_portfolio_caps()
         equity_base = _safe_positive_float(default_capital, allow_zero=True) or 100000.0
+        # CAP_USE_REAL_EQUITY (既定 OFF) が ON の経路でのみ caller が cap_equity を
+        # 渡してくる。渡らなければ equity_base は従来値 = default_capital のまま。
+        equity_source = None
+        cap_equity_conv = _safe_positive_float(cap_equity)
+        if cap_equity_conv is not None:
+            equity_base = cap_equity_conv
+            equity_source = str(cap_equity_source or "caller")
         final_df, caps_report = _apply_portfolio_caps(
             final_df,
             caps=portfolio_caps,
@@ -2330,6 +2352,7 @@ def finalize_allocation(
             long_systems=list(long_alloc.keys()),
             short_systems=list(short_alloc.keys()),
             equity=float(equity_base),
+            equity_source=equity_source,
         )
         try:
             existing_diag = summary.system_diagnostics or {}

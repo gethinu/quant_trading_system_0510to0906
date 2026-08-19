@@ -5549,6 +5549,24 @@ def compute_today_signals(  # noqa: C901  # type: ignore[reportGeneralTypeIssues
                     # Per-system debug must never break the allocation flow
                     _log(f"[ALLOC_DEBUG] Error inspecting per-system {sys_name}")
 
+        # portfolio cap (gross/net exposure) の equity 基準。既定 OFF なので
+        # (None, "disabled") が返り、finalize_allocation は従来どおり
+        # default_capital=100000.0 を分母に使う (完全後方互換)。
+        # CAP_USE_REAL_EQUITY=1 のときだけ実 equity (Alpaca read-only / snapshot) に
+        # 差し替わる。サイジング予算 (capital_long/short) には一切触らない。
+        try:
+            from common.cap_equity import resolve_cap_equity
+
+            _cap_equity, _cap_equity_src = resolve_cap_equity()
+            if _cap_equity is not None:
+                _log(
+                    f"[CAP_EQUITY] portfolio cap の equity 基準を実 equity へ: "
+                    f"{_cap_equity:,.2f} (source={_cap_equity_src})"
+                )
+        except Exception as _cap_exc:  # noqa: BLE001 - 解決失敗は従来挙動へ退避
+            _log(f"[CAP_EQUITY] 解決に失敗、従来の default_capital を使用: {_cap_exc}")
+            _cap_equity, _cap_equity_src = None, "error"
+
         final_df, allocation_summary = finalize_allocation(
             per_system,
             strategies=strategies,
@@ -5558,6 +5576,8 @@ def compute_today_signals(  # noqa: C901  # type: ignore[reportGeneralTypeIssues
             slots_short=slots_short,
             capital_long=capital_long,
             capital_short=capital_short,
+            cap_equity=_cap_equity,
+            cap_equity_source=_cap_equity_src,
             system_diagnostics=ctx.system_diagnostics,
             market_data_dict=ctx.basic_data,
             signal_date=ctx.today,
