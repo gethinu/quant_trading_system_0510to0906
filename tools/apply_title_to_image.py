@@ -2,7 +2,7 @@
 Apply a title text onto an existing image and save to docs/eyecatch_final/
 
 Usage:
-  python tools/apply_title_to_image.py --in "C:\\Users\\stair\\Downloads\\Generated Image October 18, 2025 - 12_30PM.png" \
+  python tools/apply_title_to_image.py --in "C:/Users/stair/Downloads/Generated Image October 18, 2025 - 12_30PM.png" \
     --title "対話で学ぶ Playwright の CI 失敗を 30 分で潰す実践ガイド"
 
 This script is intentionally small and defensive: it checks the input exists and
