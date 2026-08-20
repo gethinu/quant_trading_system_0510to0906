@@ -238,6 +238,10 @@ class System5Strategy(AlpacaOrderMixin, StrategyBase):
         stop_price = entry_price - stop_mult * atr
         if entry_price - stop_price <= 0:
             return None
+        # 指値（前日終値×0.97）は当日バーが到達しなければ約定しない。
+        # 到達していない候補は建玉にしない（勝率の過大評価を防ぐ）。
+        if not self._limit_entry_filled(df, entry_idx, entry_price, "long"):
+            return None
         self._last_entry_atr = atr
         return entry_price, stop_price
 

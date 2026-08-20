@@ -35,7 +35,8 @@ def test_placeholder_run(dummy_data):
     df = pd.DataFrame(
         {
             "Open": [100, 100, 100, 100],
-            "High": [100, 100, 100, 100],
+            # 売り指値 105.0 (前日終値100 x1.05) にエントリー日の高値が届くこと
+            "High": [100, 105, 100, 100],
             "Low": [100, 100, 100, 100],
             "Close": [100, 105, 90, 95],
             "Volume": [1_000_000] * 4,
@@ -57,7 +58,8 @@ def test_entry_rule_limit_short():
     df = pd.DataFrame(
         {
             "Open": [100, 100],
-            "High": [101, 101],
+            # 高値 106 > 売り指値 105.0 -> 約定
+            "High": [101, 106],
             "Low": [99, 99],
             "Close": [100, 100],
             "ATR10": [1, 1],
@@ -69,6 +71,11 @@ def test_entry_rule_limit_short():
     assert entry is not None
     assert entry == (105.0, 108.0)
 
+    # 高値が指値に届かないバーでは約定しない（幻の建玉を作らない）
+    df_no_touch = df.copy()
+    df_no_touch.loc[dates[1], "High"] = 104.99
+    assert strategy.compute_entry(df_no_touch, candidate, 10_000) is None
+
 
 def test_system6_profit_target_exits_next_close():
     strategy = System6Strategy()
@@ -76,7 +83,7 @@ def test_system6_profit_target_exits_next_close():
     df = pd.DataFrame(
         {
             "Open": [100] * 5,
-            "High": [100, 100, 107, 100, 100],
+            "High": [100, 105, 107, 100, 100],
             "Low": [99, 99, 97, 95, 95],
             "Close": [100, 100, 99, 95, 95],
             "ATR10": [1] * 5,
@@ -103,7 +110,7 @@ def test_system6_stop_exit_same_day_at_stop_price():
     df = pd.DataFrame(
         {
             "Open": [100] * 4,
-            "High": [100, 100, 110, 100],
+            "High": [100, 105, 110, 100],
             "Low": [99] * 4,
             "Close": [100, 100, 104, 100],
             "ATR10": [1] * 4,
@@ -132,7 +139,7 @@ def test_system6_time_exit_after_max_days_close():
     df = pd.DataFrame(
         {
             "Open": [100] * periods,
-            "High": [100, 100] + [107] * (periods - 2),
+            "High": [100, 105] + [107] * (periods - 2),
             "Low": [99] * periods,
             "Close": [100, 100] + [103] * (periods - 2),
             "ATR10": [1] * periods,
