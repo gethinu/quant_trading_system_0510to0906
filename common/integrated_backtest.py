@@ -8,10 +8,12 @@ import time
 # ---------------
 # 型と設定
 # ---------------
-from typing import Protocol
+from typing import Any, Protocol
 
 import pandas as pd
 
+from common.backtest_context import backtest_context
+from common.candidate_schema import normalize_candidates_for_date, resolve_entry_bar
 from common.performance_optimization import PerformanceTimer
 
 
@@ -74,11 +76,13 @@ def _symbol_open_in_active(active: list[dict], symbol: str) -> bool:
 
 def _compute_entry_exit(strategy, df: pd.DataFrame, candidate: dict, side: str):
     # entry/stop
-    entry_idx = None
-    try:
-        entry_idx = df.index.get_loc(candidate["entry_date"])
-    except Exception:
+    # Candidates carry either "entry_date" (System1/2/4/5/6/7) or only the
+    # signal "date" (System3 full scan); resolve_entry_bar handles both and
+    # raises CandidateSchemaError when neither is usable.
+    resolved = resolve_entry_bar(df, candidate, system=None)
+    if resolved is None:
         return None
+    entry_idx, _entry_ts = resolved
 
     # Strategy hook
     if hasattr(strategy, "compute_entry"):
@@ -234,6 +238,29 @@ def run_integrated_backtest(
     allow_gross_leverage: bool = False,
     on_progress: Callable[[int, int, float], None] | None = None,
 ) -> tuple[pd.DataFrame, dict[str, int]]:
+    """統合バックテスト（backtest コンテキストを張って本体へ委譲）。"""
+    with backtest_context():
+        return _run_integrated_backtest(
+            system_states,
+            initial_capital,
+            allocations,
+            long_share=long_share,
+            short_share=short_share,
+            allow_gross_leverage=allow_gross_leverage,
+            on_progress=on_progress,
+        )
+
+
+def _run_integrated_backtest(
+    system_states: list[SystemState],
+    initial_capital: float,
+    allocations: AllocationMap | None = None,
+    *,
+    long_share: float = 0.5,
+    short_share: float = 0.5,
+    allow_gross_leverage: bool = False,
+    on_progress: Callable[[int, int, float], None] | None = None,
+) -> tuple[pd.DataFrame, dict[str, int]]:
     """
     統合バックテスト本体。
     - system_states: 各Systemの prepared/candidates を含む状態
@@ -312,21 +339,12 @@ def run_integrated_backtest(
             if stt is None:
                 continue
             cands = stt.candidates_by_date.get(pd.Timestamp(current_date), [])
-            # 互換性確保: {date: {symbol: payload}} 形式にも対応
-            try:
-                if isinstance(cands, dict):
-                    cands = [
-                        {
-                            "symbol": str(sym),
-                            "entry_date": pd.Timestamp(current_date),
-                            **(payload or {}),
-                        }
-                        for sym, payload in cands.items()
-                        if isinstance(sym, str) and sym
-                    ]
-            except Exception:
-                # 正規化に失敗した場合は元の構造のまま進める（後段で弾かれる）
-                pass
+            # 互換性確保: {date: {symbol: payload}} と list 形式の双方に対応。
+            # 認識できない形なら CandidateSchemaError で即座に落とす（黙って
+            # 0 建玉になる旧挙動が System3 を全バックテストから消していた）。
+            cands = normalize_candidates_for_date(
+                cands, current_date, system=sys_name
+            )
             if not cands:
                 continue
 
@@ -351,6 +369,13 @@ def run_integrated_backtest(
                 df = stt.prepared.get(sym)
                 if df is None or df.empty:
                     continue
+
+                resolved = resolve_entry_bar(df, c, system=sys_name)
+                if resolved is None:
+                    continue
+                # 戦略フックが参照する entry_date を、この銘柄の実バーへ解決して渡す
+                # （System3 のフルスキャン候補は "date" しか持たない）。
+                c = {**c, "entry_date": resolved[1]}
 
                 comp = _compute_entry_exit(stt.strategy, df, c, stt.side)
                 if not comp:
@@ -462,7 +487,27 @@ def build_system_states(
     """
     各Systemのデータ準備＋候補抽出を実行して SystemState のリストを返す。
     - ui_bridge_prepare: common.ui_bridge.prepare_backtest_data_ui を渡すとUI連携付きで進捗表示可能
+
+    候補抽出は backtest コンテキスト内で行う。today 実行専用の高速パス
+    （System6 の latest_only 強制など）はここでは無効化され、履歴が潰れない。
+    live（scripts/run_all_systems_today.py）はこの関数を通らないので無影響。
     """
+    with backtest_context():
+        return _build_system_states(
+            symbols,
+            spy_df,
+            ui_bridge_prepare=ui_bridge_prepare,
+            ui_manager=ui_manager,
+        )
+
+
+def _build_system_states(
+    symbols: list[str],
+    spy_df: pd.DataFrame | None = None,
+    *,
+    ui_bridge_prepare: Any = None,
+    ui_manager: Any = None,
+) -> list[SystemState]:
     states: list[SystemState] = []
 
     logging.getLogger(__name__).info("[integrated] preparing per-system data...")

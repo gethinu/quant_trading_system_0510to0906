@@ -36,7 +36,9 @@ from typing import Any, Callable, Tuple
 
 import pandas as pd
 
+from common.backtest_context import in_backtest_context
 from common.system_candidates_utils import set_diagnostics_after_ranking
+from common.system_common import normalize_ohlc_frame
 from common.system_setup_predicates import validate_predicate_equivalence
 from common.utils_spy import resolve_signal_entry_date
 
@@ -47,6 +49,72 @@ MIN_50_WINDOW = 50  # 50-day low window for setup detection
 RECENT_WINDOW_SIZE = 50  # Window size for recent candidate counting
 
 logger = logging.getLogger(__name__)
+
+
+SYSTEM7_DERIVABLE_INDICATORS = ("atr50", "min_50", "max_70")
+
+
+def _derive_system7_indicators(
+    df: pd.DataFrame,
+    *,
+    log_callback: Callable[[str], None] | None = None,
+) -> pd.DataFrame:
+    """Recompute System7's inputs from SPY OHLC when the cache lacks them.
+
+    All three inputs are pure OHLC derivations - no external or paid data is
+    involved - and the formulas are copied from
+    ``common.indicators_common.add_indicators`` so a derived column is
+    numerically identical to a precomputed one:
+
+    ``atr50``   ``ta.volatility.AverageTrueRange(High, Low, Close, 50)``
+    ``min_50``  ``Close.rolling(50).min()``
+    ``max_70``  ``Close.rolling(70).max()``
+
+    **Backtest only.** ``prepare_data_vectorized_system7`` calls this solely when
+    :func:`common.backtest_context.in_backtest_context` is true. The daily
+    (today) run never enters that context, so a missing indicator still trips the
+    IMMEDIATE_STOP guard exactly as before - a stale SPY cache must stop live
+    signal generation, not be papered over.
+    """
+    missing = [c for c in SYSTEM7_DERIVABLE_INDICATORS if c not in df.columns]
+    if not missing:
+        return df
+
+    required_ohlc = ("High", "Low", "Close")
+    if any(col not in df.columns for col in required_ohlc):
+        raise RuntimeError(
+            "IMMEDIATE_STOP: System7 cannot derive "
+            f"{','.join(missing)} for SPY: OHLC columns missing."
+        )
+
+    x = df.copy()
+    high = pd.to_numeric(x["High"], errors="coerce")
+    low = pd.to_numeric(x["Low"], errors="coerce")
+    close = pd.to_numeric(x["Close"], errors="coerce")
+
+    if "atr50" in missing:
+        from ta.volatility import AverageTrueRange
+
+        x["atr50"] = AverageTrueRange(
+            high, low, close, window=50
+        ).average_true_range()
+    if "min_50" in missing:
+        x["min_50"] = close.rolling(window=50).min()
+    if "max_70" in missing:
+        x["max_70"] = close.rolling(window=70).max()
+
+    message = (
+        "System7: derived "
+        + ",".join(missing)
+        + " from SPY OHLC (backtest context; live still hard-stops)"
+    )
+    logger.info(message)
+    if log_callback:
+        try:
+            log_callback(message)
+        except Exception:
+            pass
+    return x
 
 
 def prepare_data_vectorized_system7(
@@ -67,12 +135,25 @@ def prepare_data_vectorized_system7(
         df_raw = raw_data_dict.get("SPY")
         if df_raw is None:
             raise ValueError("SPY data missing")
-        if "Date" in df_raw.columns:
-            df = df_raw.copy()
+        # 2026-08-21: base cache frames arrive with a RangeIndex and all-lowercase
+        # columns. The old else-branch fed that RangeIndex to pd.to_datetime and
+        # produced 1970 epoch dates, and "Low" was absent so setup computation
+        # raised - SPY was dropped and System7 produced no backtest history.
+        df = normalize_ohlc_frame(df_raw)
+        if "Date" in df.columns:
             df.index = pd.Index(pd.to_datetime(df["Date"]).dt.normalize())
-        else:
-            df = df_raw.copy()
+        elif isinstance(df.index, pd.DatetimeIndex):
             df.index = pd.Index(pd.to_datetime(df.index).normalize())
+        else:
+            raise ValueError(
+                "SPY frame has no usable date index "
+                "(no Date/date column and a non-datetime index)"
+            )
+
+        # Backtest only: rebuild the OHLC-derived indicators when the cache is
+        # missing them. live keeps the IMMEDIATE_STOP guard below untouched.
+        if in_backtest_context():
+            df = _derive_system7_indicators(df, log_callback=log_callback)
 
         # Early exit: check required precomputed indicators exist (lowercase)
         if "atr50" not in df.columns:

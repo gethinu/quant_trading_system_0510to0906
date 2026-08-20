@@ -3,6 +3,9 @@ from typing import Any, Optional, Tuple
 
 import pandas as pd
 
+from common.backtest_context import backtest_context
+from common.candidate_schema import normalize_candidates_for_date, resolve_entry_bar
+
 
 def _compute_entry(
     strategy: Any,
@@ -152,6 +155,28 @@ def simulate_trades_with_risk(
 
     Returns: (trades_df, logs_df)
     """
+    with backtest_context():
+        return _simulate_trades_with_risk(
+            candidates_by_date,
+            data_dict,
+            capital,
+            strategy,
+            on_progress,
+            on_log,
+            side=side,
+        )
+
+
+def _simulate_trades_with_risk(
+    candidates_by_date: dict,
+    data_dict: dict,
+    capital: float,
+    strategy: Any,
+    on_progress: Any = None,
+    on_log: Any = None,
+    *,
+    side: Optional[str] = None,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
     results = []
     log_records = []
     active_positions = []
@@ -165,20 +190,15 @@ def simulate_trades_with_risk(
     risk_pct = float(cfg.get("risk_pct", 0.02))
     max_pct = float(cfg.get("max_pct", 0.10))
 
+    system_name = str(getattr(strategy, "SYSTEM_NAME", "") or "") or None
+
     for i, (date, candidates) in enumerate(sorted(candidates_by_date.items()), start=1):
-        try:
-            if isinstance(candidates, dict):
-                candidates = [
-                    {
-                        "symbol": str(sym),
-                        "entry_date": pd.Timestamp(date),
-                        **(payload or {}),
-                    }
-                    for sym, payload in candidates.items()
-                    if isinstance(sym, str) and sym
-                ]
-        except Exception:
-            pass
+        # Candidate shapes differ per system ({symbol: payload} vs list-of-dicts
+        # keyed by "entry_date" or "date"). An unrecognised shape raises
+        # CandidateSchemaError instead of silently booking nothing.
+        candidates = normalize_candidates_for_date(
+            candidates, date, system=system_name
+        )
 
         # update exits
         current_capital, active_positions = strategy.update_capital_with_exits(
@@ -200,10 +220,15 @@ def simulate_trades_with_risk(
                 df = data_dict.get(c["symbol"])
                 if df is None or df.empty:
                     continue
-                try:
-                    entry_idx = df.index.get_loc(c["entry_date"])
-                except Exception:
+                resolved = resolve_entry_bar(df, c, system=system_name)
+                if resolved is None:
+                    # No tradeable bar in this frame (e.g. signal on the last
+                    # available bar) - a data condition, not a schema problem.
                     continue
+                entry_idx, entry_ts = resolved
+                # Hand the strategy hooks a candidate whose entry_date is a real
+                # bar of this frame (System3 full-scan only carries "date").
+                c = {**c, "entry_date": entry_ts}
 
                 entry_price, stop_loss_price = _compute_entry(
                     strategy, df, c, current_capital, side

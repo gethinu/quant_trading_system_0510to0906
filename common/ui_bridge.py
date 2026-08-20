@@ -9,6 +9,7 @@ import time
 import pandas as pd
 import streamlit as st
 
+from common.backtest_context import backtest_context
 from common.cache_manager import base_cache_path, load_base_cache
 from common.i18n import tr
 from common.utils import get_cached_data, safe_filename
@@ -116,6 +117,31 @@ def _fetch_data_ui(
 
 
 def prepare_backtest_data_ui(
+    strategy,
+    symbols,
+    *,
+    system_name: str,
+    spy_df=None,
+    ui_manager=None,
+    **kwargs,
+):
+    """バックテスト用データ準備（UI 連携付き）。
+
+    backtest コンテキストを張るので today 専用の高速パスは効かない。
+    live はこの関数を通らない。
+    """
+    with backtest_context():
+        return _prepare_backtest_data_ui(
+            strategy,
+            symbols,
+            system_name=system_name,
+            spy_df=spy_df,
+            ui_manager=ui_manager,
+            **kwargs,
+        )
+
+
+def _prepare_backtest_data_ui(
     strategy,
     symbols,
     *,

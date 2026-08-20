@@ -3,6 +3,7 @@
 全System*.py間で共有される関数をここに集約：
 - _rename_ohlcv: カラム名正規化
 - _normalize_index: 日付インデックス正規化
+- normalize_ohlc_frame: 日付インデックス + 大文字 OHLCV 別名を追加（非破壊）
 - _prepare_source_frame: データフレーム前処理
 - get_total_days: 総日数計算
 - check_precomputed_indicators: プリコンピューテッド指標チェック
@@ -87,6 +88,56 @@ def _normalize_index(df: pd.DataFrame) -> pd.DataFrame:
             x = x[~x.index.duplicated(keep="last")]
     except Exception:
         pass
+
+    return x
+
+
+def normalize_ohlc_frame(df: pd.DataFrame) -> pd.DataFrame:
+    """日付インデックスと大文字 OHLCV 別名を「追加」して返す（非破壊）。
+
+    ``load_base_cache`` は整数インデックス + 全小文字カラムを返す一方、
+    バックテストのエンジンと戦略フックは日付インデックスと ``Open`` /
+    ``High`` / ``Low`` / ``Close`` を前提にしている。この関数はその差を吸収する。
+
+    ``_rename_ohlcv`` と違い **小文字カラムは残す**（別名を足すだけ）ので、
+    小文字名に依存している既存の呼び出し側は影響を受けない。
+
+    Args:
+        df: 入力データフレーム
+
+    Returns:
+        日付インデックス（取得できた場合）と大文字 OHLCV 別名を持つコピー
+    """
+    if df is None or getattr(df, "empty", True):
+        return df
+
+    x = df.copy()
+
+    if not isinstance(x.index, pd.DatetimeIndex):
+        for date_col in ("Date", "date"):
+            if date_col in x.columns:
+                try:
+                    converted = pd.to_datetime(x[date_col], errors="coerce")
+                    if converted.notna().any():
+                        x[date_col] = converted
+                        x = x.set_index(date_col, drop=False)
+                except Exception:
+                    pass  # 変換できなければ元のインデックスを維持
+                break
+
+    for canonical in ("Open", "High", "Low", "Close", "Volume"):
+        if canonical in x.columns:
+            continue
+        source = next(
+            (
+                c
+                for c in x.columns
+                if isinstance(c, str) and c.lower() == canonical.lower()
+            ),
+            None,
+        )
+        if source is not None:
+            x[canonical] = x[source]
 
     return x
 
