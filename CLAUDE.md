@@ -111,37 +111,34 @@ System3 (`prev_close×0.93`) / System5 (`×0.97`) / System6 (`×1.05`) は前日
 long は `Low <= limit`、short は `High >= limit`、約定値は指値、NaN は fail-closed）。
 
 **読む前に知っておくこと**: 2026-08-20 より前に出力された **System3/5/6 のバックテスト
-実績（およびそれらを含む統合バックテストの成績）はすべて過大**。継続可否の判断は再測定後の数字で行うこと。
+実績（およびそれらを含む統合バックテスト・`common/validation/` の CPCV/DSR 出力）は
+すべて過大**。
 
----
+### 再測定済み (2026-08-21) — `docs/VALIDATION_REMEASURE_LIMIT_FILL_20260821.md`
 
-## Backtest measurability — 2026-08-21 以前の履歴は「7 系統中 3 系統」しか無い
+`common/validation/` の CPCV / bootstrap / DSR を修正後エンジンで再実行した
+（ブランチ `claude/monitor-webapp` HEAD `960487c`、universe 4,654 銘柄、
+`n_groups=6, k_test=2`, `n_boot=2000`, seed 12345）。修正前の S3/5/6 単独レポートは
+**一度も存在しなかった**ため、修正前コードを実走させた A/B で before を作った
+（等価性は全トレード行のダイジェスト一致で検証済み）。
 
-**Status:** fixed 2026-08-21。**バックテスト計測可能性のみ**の修正で、live のシグナル
-生成・発注は無変更（フラグ既定値も変更なし）。詳細と before/after 実測:
-`docs/BACKTEST_ENGINE_GAPS_20260821.md`。
+| | fold Sharpe 平均 前→後 | bootstrap P(SR≤0) 前→後 | DSR 前→後 |
+|---|---|---|---|
+| System3 † | −2.491 → −3.849 | 0.216 → 0.527 | 0.034 → 0.000 |
+| System5 | −2.002 → −3.017 | 1.000 → 1.000 | 0.000 → 0.000 |
+| System6 | **+0.702 → −1.718** | **0.046 → 1.000** | 0.144 → 0.000 |
+| 統合 (7) | −1.625 → −2.311 | 1.000 → 1.000 | 0.000 → 0.000 |
 
-エンジン側の 3 つの欠陥により、System1 / System3 / System6 / System7 は
-バックテストで **1 件も建玉を持てなかった**（警告もログも出ない）。
+† 単独ランは equity がゼロを跨ぐため Sharpe/DSR は参考値（doc §4.2）。
 
-| gap | 系統 | 症状 |
-|---|---|---|
-| 1 | System3 | フルスキャン候補が `date` だけの list 形式。エンジンは dict 形式にしか `entry_date` を注入せず、`get_loc` の `KeyError` を握り潰していた |
-| 2 | System6 | `SYSTEM6_FORCE_LATEST_ONLY` 既定 True がバックテストでも最新 1 日へ潰す |
-| 3 | System1 / System7 | base cache の整数インデックス + 小文字カラムを正規化しておらず、System1 は `setup` 全 False、System7 は SPY ごと prepare から脱落 |
+- **DSR 閾値 0.95 は修正前も修正後も全系統・統合ともに未達 (FAIL)**。修正で
+  PASS→FAIL になった系統は無い（元から一つも PASS していない）。
+- **System1–7 は Bensdorp 準拠の 7 本セットとして維持**。この数字は削減判断ではなく、
+  スロットの公平性はアロケータ側で扱う。
+- 再測定中に判明したエンジン側の**先行不具合 3 件**（本修正とは無関係）は doc §5:
+  System3 の候補が `date`/`entry_date` スキーマ不一致で**両エンジンとも建玉ゼロ**、
+  System6 は `SYSTEM6_FORCE_LATEST_ONLY` 既定 True でバックテストでも最新1日に潰れる、
+  System1 は full-scan 分岐が削除済み・System7 は SPY に `atr50` 欠落で走らない。
 
-**読む前に知っておくこと**: **2026-08-21 より前に出力されたバックテスト／統合
-バックテスト／`common/validation/` の CPCV・DSR・bootstrap は、すべて
-System2 / System4 / System5 の 3 系統ぶんでしかない**。System1/3/6/7 の
-「シグナルが無い」「成績が無い」という過去の記述は、戦略の性質ではなく
-エンジンの欠陥に由来する。
-
-修正後は 60 銘柄 / 534 営業日の実データで **7 系統すべてが建玉を持つ**ことを確認済み
-（既存 3 系統の単独バックテスト建玉数は 66 / 55 / 15 で修正前と完全一致 = 非退行）。
-
-エンジンが候補の形を解釈できない場合は `common.candidate_schema.CandidateSchemaError`
-で**即座に落ちる**。黙って 0 建玉に戻すことはしない。
-
-バックテスト／検証の入口は `common.backtest_context.backtest_context()` を張る。
-today 実行専用の高速パスを緩めたいときは、グローバルなフラグを倒すのではなく
-`in_backtest_context()` を見ること（live は決してこのコンテキストに入らない）。
+**指値修正 `960487c` はまだ `origin/main` に載っていない**（含むのは
+`claude/monitor-webapp` のみ。PR #162 は別件の obs 修正）。

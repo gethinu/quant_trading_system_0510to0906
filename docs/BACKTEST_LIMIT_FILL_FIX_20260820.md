@@ -131,10 +131,17 @@ python outputs/impl/limit_fill_fix/remeasure_limit_fill.py <dir>/candidates.parq
    示している」ことを、proxy sim のマイナス期待値を割り引く根拠にしている。その
    前提が本修正で崩れた。proxy sim 側は当時から約定判定を入れており、**マイナス
    期待値という proxy の結論のほうが正しかった**可能性が高い。再判断が必要。
-3. 🚩 **methodology validation スタック (`common/validation/`) で S3/5/6 を含めて
+3. ✅ **methodology validation スタック (`common/validation/`) で S3/5/6 を含めて
    出した数値**（CPCV fold Sharpe / bootstrap CI / Deflated Sharpe）。
    `common/validation/evaluate.py` は両エンジンを**そのまま**走らせる設計なので、
-   修正前に取得したレポートは同じ膨張を継承している。再実行が必要。
+   修正前に取得したレポートは同じ膨張を継承していた。
+   **2026-08-21 に再測定済み → `docs/VALIDATION_REMEASURE_LIMIT_FILL_20260821.md`**。
+   修正前の S3/5/6 単独レポートはそもそも存在しなかったため、修正前コードを実走させた
+   A/B で before を作った（等価性はトレード全行のダイジェスト一致で検証）。
+   要点: 3 系統とも悪化、**System6 は bootstrap `P(SR≤0)` が 0.046 → 1.000** に反転。
+   **DSR は修正前も修正後も全系統・統合ともに FAIL**（元から一つも PASS していない）。
+   統合も Sharpe −1.940 → −2.977。なお 7 系統は Bensdorp 準拠の一括構成として
+   **維持**する方針であり、この数字は削減判断ではない。
 4. ℹ️ `outputs/SIGNAL_CALIBRATION_PROBE_20260820.md` §5 の「all rows」列（S3/5/6）は
    既に膨張済みと注記されているため、追加対応は不要。同 §7 の live 比較表は
    「fillable」列を使っており、そのまま有効。
