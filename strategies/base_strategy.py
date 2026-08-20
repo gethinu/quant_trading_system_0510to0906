@@ -503,6 +503,81 @@ class StrategyBase(ABC):
 
         return entry_price, stop_price, entry_idx
 
+    @staticmethod
+    def _bar_value(df, bar_idx: int, column: str) -> float | None:
+        """バーの OHLC 値を大文字小文字を問わず取得する（取れなければ None）。"""
+        row = None
+        try:
+            row = df.iloc[int(bar_idx)]
+        except Exception:
+            return None
+        for col in (column, column.upper(), column.lower()):
+            try:
+                value = float(row[col])
+            except Exception:
+                continue
+            if math.isfinite(value):
+                return value
+            return None
+        return None
+
+    def _limit_entry_filled(
+        self,
+        df,
+        entry_idx: int,
+        limit_price: float,
+        side: str,
+    ) -> bool:
+        """指値エントリーが当日バーで実際に約定し得たかを判定する。
+
+        System3/5/6 は前日終値から離した **指値** で仕掛ける。指値は板が
+        そこまで来なければ約定しないため、バックテストでも「当日バーが指値を
+        通過したか」を確認しなければ、実際には約定しなかった候補まで建玉として
+        数えてしまう（勝率の過大評価）。
+
+        判定規約は本エンジンが既に exit 側で使っているものと同一:
+        ``compute_exit`` は ``Low <= stop`` / ``High >= target`` で到達を判定し、
+        約定値はその指定価格そのものとする（窓開けした場合の有利約定は
+        モデル化しない）。エントリーも同じ規約に揃える:
+
+        - long  (buy limit) : ``Low[entry_idx]  <= limit_price``
+        - short (sell limit): ``High[entry_idx] >= limit_price``
+
+        窓開けで指値より有利に寄り付いた場合、実際の約定値は寄値
+        (long なら limit 未満 / short なら limit 超) になるため、指値で
+        約定したものとして扱う本規約は **保守的**（リターンを過小評価する）
+        側に倒れる。
+
+        Low/High が取得できない・NaN の場合は「約定しなかった」として扱う
+        （fail-closed。存在しない建玉を作らない）。
+
+        Args:
+            df: 価格データ（エントリー日を含む）
+            entry_idx: エントリー日の行番号
+            limit_price: 指値
+            side: ``"long"`` または ``"short"``
+
+        Returns:
+            約定し得たなら True
+        """
+        try:
+            limit = float(limit_price)
+        except (TypeError, ValueError):
+            return False
+        if not math.isfinite(limit):
+            return False
+
+        if str(side).lower() == "short":
+            bar_high = self._bar_value(df, entry_idx, "High")
+            if bar_high is None:
+                return False
+            return bar_high >= limit
+
+        bar_low = self._bar_value(df, entry_idx, "Low")
+        if bar_low is None:
+            return False
+        return bar_low <= limit
+
     def _prepare_data_with_fallback(
         self,
         core_prepare_func,

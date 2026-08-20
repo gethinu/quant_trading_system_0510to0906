@@ -230,6 +230,10 @@ class System6Strategy(AlpacaOrderMixin, StrategyBase):
         # ショート戦略: ストップロスはエントリー価格より上に設定される
         if stop_price <= entry_price:
             return None
+        # 指値（前日終値×1.05）は当日バーが到達しなければ約定しない。
+        # 到達していない候補は建玉にしない（勝率の過大評価を防ぐ）。
+        if not self._limit_entry_filled(df, entry_idx, entry_price, "short"):
+            return None
         return entry_price, stop_price
 
     def compute_exit(

@@ -35,12 +35,19 @@ def _gen_ohlc(
     need_atr40: bool = False,
     need_atr50: bool = False,
     force_gap_up_on: List[int] | None = None,
+    force_gap_down_on: List[int] | None = None,
 ) -> pd.DataFrame:
     """Generate deterministic OHLC with ATRn columns.
 
     - Business day index
         - Optional forced gap-up on given day indices
             (for short entries like System2)
+        - Optional forced gap-down on given day indices: drives the bar's Low
+            8% below the prior close so the away-from-market **buy limits** of
+            System3 (x0.93) and System5 (x0.97) are actually touched. Without
+            this the smooth uptrend never reaches those limits and the entries
+            legitimately do not fill (see
+            docs/BACKTEST_LIMIT_FILL_FIX_20260820.md).
     """
     idx = pd.bdate_range(start=start, periods=days)
     # base linear trend
@@ -59,6 +66,12 @@ def _gen_ohlc(
             high[i] = max(high[i], open_[i] + 1.0)
             low[i] = min(low[i], open_[i] - 1.0)
             close[i] = max(close[i], open_[i])
+
+    # Optional gap down on specific day indices (long limit entries: S3/S5)
+    for i in force_gap_down_on or []:
+        if 0 <= i < days and i > 0:
+            prev_close = close[i - 1]
+            low[i] = min(low[i], round(prev_close * 0.92, 2))
 
     df = pd.DataFrame(
         {"Open": open_, "High": high, "Low": low, "Close": close}, index=idx
@@ -156,9 +169,19 @@ def _assert_slot_and_capital_constraints(logs: pd.DataFrame, strategy) -> None:
             {"need_atr10": True, "need_atr20": True},
             [2, 6, 10, 14, 18],
         ),
-        (System3Strategy, ["AAA", "BBB", "CCC"], {"need_atr10": True}, []),
+        (
+            System3Strategy,
+            ["AAA", "BBB", "CCC"],
+            {"need_atr10": True},
+            [4, 10, 16],
+        ),
         (System4Strategy, ["AAA", "BBB", "CCC"], {"need_atr40": True}, []),
-        (System5Strategy, ["AAA", "BBB", "CCC"], {"need_atr10": True}, []),
+        (
+            System5Strategy,
+            ["AAA", "BBB", "CCC"],
+            {"need_atr10": True},
+            [4, 10, 16],
+        ),
         (
             System6Strategy,
             ["AAA", "BBB", "CCC"],
@@ -184,7 +207,18 @@ def test_monthly_roll_no_errors(system_cls, symbols, atr_flags, gap_days):
             need_atr20=atr_flags.get("need_atr20", False),
             need_atr40=atr_flags.get("need_atr40", False),
             need_atr50=atr_flags.get("need_atr50", False),
-            force_gap_up_on=gap_days,
+            # short systems need an up-gap (S2 filter / S6 sell limit);
+            # S3/S5 need a down-gap through their buy limit
+            force_gap_up_on=(
+                gap_days
+                if system_cls in (System2Strategy, System6Strategy)
+                else []
+            ),
+            force_gap_down_on=(
+                gap_days
+                if system_cls in (System3Strategy, System5Strategy)
+                else []
+            ),
         )
         data_dict[sym] = df
 
@@ -222,6 +256,7 @@ def test_monthly_roll_no_errors(system_cls, symbols, atr_flags, gap_days):
         System1Strategy,
         System3Strategy,
         System4Strategy,
+        System5Strategy,
         System6Strategy,
         System7Strategy,
     ):
