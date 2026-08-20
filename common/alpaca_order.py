@@ -14,6 +14,7 @@ import pandas as pd
 
 from common import broker_alpaca as ba
 from common.notifier import Notifier
+from common.order_status import normalize_order_status
 from common.position_age import load_entry_dates, save_entry_dates
 from common.position_tracker import remove_position, update_positions_from_signals
 from common.symbol_map import (
@@ -230,7 +231,7 @@ def submit_orders_df(
                     "qty": qty,
                     "price": price_val,
                     "order_id": getattr(order, "id", None),
-                    "status": getattr(order, "status", None),
+                    "status": normalize_order_status(getattr(order, "status", None)),
                     "system": system,
                     "order_type": ot,
                     "time_in_force": tif,
@@ -388,7 +389,7 @@ def submit_exit_orders_df(
                     "when": when,
                     "system": system,
                     "order_id": getattr(order, "id", None),
-                    "status": getattr(order, "status", None),
+                    "status": normalize_order_status(getattr(order, "status", None)),
                 }
             )
             # cleanup local tracking for the symbol upon exit

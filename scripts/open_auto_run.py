@@ -77,6 +77,11 @@ from common.exit_artifacts import (  # noqa: E402
     ROLE_PROPOSAL,
     write_with_sidecar,
 )
+from common.order_status import (  # noqa: E402  (ROOT を通してから import)
+    is_filled,
+    is_working,
+    normalize_order_status,
+)
 
 # 段の途中で import が失敗しても runner 自体は落とさない (import は遅延)。
 PYEXE = sys.executable
@@ -88,6 +93,64 @@ def _child_env() -> dict[str, str]:
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
     return env
+
+
+def parse_close_response(resp: object) -> dict[str, object]:
+    """``DELETE /v2/positions`` の 1 件ぶんレスポンスを正規化する。
+
+    alpaca-py の ``ClosePositionResponse`` は ``order_id`` が **Optional**
+    (既定 None)、``body`` が必須。close は **非同期**なので、受理されても
+    top-level ``order_id`` が埋まらないまま HTTP 200 が返ることがある。
+
+    旧実装は成功条件を ``status == 200 and order_id`` にしていたため、
+    2026-08-20 は 39 件の受理済み close をすべて「失敗」に数え、
+    ``ok=0 -> market_ids=[] -> fill 監視スキップ`` まで連鎖した。
+    受理判定は **HTTP ステータスだけ**で行い、order_id は fill 監視に
+    使える時だけ拾う (成功時は ``body`` が ``Order`` なので ``body.id``
+    から復元できる)。
+
+    422 等の実エラー (INACTIVE asset など) は accepted=False のまま残す。
+    """
+    body = getattr(resp, "body", None)
+    status = getattr(resp, "status", None)
+    try:
+        http = int(status) if status is not None else None
+    except (TypeError, ValueError):
+        http = None
+
+    raw_oid = getattr(resp, "order_id", None)
+    if not raw_oid:
+        # 非同期受理では top-level が空。成功時の body は Order なので id を持つ。
+        raw_oid = getattr(body, "id", None)
+        if raw_oid is None and isinstance(body, dict):
+            raw_oid = body.get("id")
+    oid = str(raw_oid) if raw_oid else None
+
+    symbol = getattr(resp, "symbol", None)
+    if not symbol:
+        symbol = getattr(body, "symbol", None)
+
+    accepted = http is not None and 200 <= http < 300
+    error = None
+    if not accepted:
+        # FailedClosePositionDetails は message/code を持つ。
+        msg = getattr(body, "message", None)
+        if msg is None and isinstance(body, dict):
+            msg = body.get("message")
+        code = getattr(body, "code", None)
+        if code is None and isinstance(body, dict):
+            code = body.get("code")
+        error = str(msg) if msg else f"http={http}"
+        if code is not None:
+            error = f"{error} (code={code})"
+
+    return {
+        "symbol": str(symbol) if symbol else None,
+        "http_status": http,
+        "order_id": oid,
+        "accepted": accepted,
+        "error": error,
+    }
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -111,6 +174,8 @@ class Runner:
         self.results = ROOT / "results_csv"
         self.signals_json = self.results / f"today_signals_{self.compact}.json"
         self.exit_json = self.results / f"exit_orders_{self.compact}.json"
+        # flatten で close 受理済み = 建玉が消えるのを待つべき symbol 集合。
+        self.pending_flat_symbols: set[str] = set()
         self.paper_json = self.results / f"paper_orders_{self.compact}.json"
         self._log_path = self.out / "run.log"
         self.record: dict[str, object] = {
@@ -468,17 +533,25 @@ class Runner:
 
         ok = 0
         failed = 0
+        accepted_symbols: list[str] = []
         for r in resps or []:
-            sym = getattr(r, "symbol", None)
-            st = getattr(r, "status", None)
-            raw_oid = getattr(r, "order_id", None)
-            oid = str(raw_oid) if raw_oid else None
-            if st == 200 and oid:
+            parsed = parse_close_response(r)
+            sym = parsed["symbol"]
+            st = parsed["http_status"]
+            oid = parsed["order_id"]
+            if parsed["accepted"]:
+                # close は非同期。HTTP 2xx = 受理であって fill ではない。
+                # order_id が無くても失敗ではない (BUG 2026-08-20)。
                 ok += 1
-                market_ids.append(oid)
+                if oid:
+                    market_ids.append(oid)
+                if sym:
+                    accepted_symbols.append(str(sym).upper())
             else:
                 failed += 1
-                self.log(f"[exit] close 失敗 sym={sym} http={st}")
+                self.log(
+                    f"[exit] close 拒否 sym={sym} http={st} reason={parsed['error']}"
+                )
             exits_rows.append(
                 {
                     "symbol": sym,
@@ -486,9 +559,13 @@ class Runner:
                     "reason": "flatten_all",
                     "order_id": oid,
                     "http_status": st,
+                    "accepted": parsed["accepted"],
+                    "error": parsed["error"],
                     "dry_run": False,
                 }
             )
+        # 非同期 fill の settle 待ちに使う (order_id が無くても建玉消滅は観測できる)。
+        self.pending_flat_symbols = set(accepted_symbols)
         self.record["exit_count"] = len(exits_rows)
         self.record["flatten_ok"] = ok
         self.record["flatten_failed"] = failed
@@ -504,49 +581,92 @@ class Runner:
         write_with_sidecar(self.exit_json, payload, ROLE_EXECUTION)
         self._dump("exit_orders.json", payload)
         self.log(
-            f"[exit] flatten-all 発注: ok={ok} failed={failed} -> "
-            f"{len(market_ids)} 件を fill 監視"
+            f"[exit] flatten-all 受理: ok={ok} rejected={failed} -> "
+            f"order_id {len(market_ids)} 件 / 建玉解消待ち {len(accepted_symbols)} 件"
         )
         return market_ids
 
     def wait_exit_fills(self, order_ids: list[str]) -> None:
-        if self.dry_run or not order_ids:
+        """close の非同期 fill が settle するまで待ってから建玉を verify する。
+
+        待つ対象は 2 つ:
+          1. order_id が判る close 注文 -> status が終端になるまで poll。
+          2. order_id が返らなかった受理済み close (``pending_flat_symbols``)
+             -> **建玉そのもの**が消えるまで poll。
+
+        2 が無いと ``close_all_positions`` の非同期受理を待てず、fill 前の
+        positions を「verify 済み」として撮ってしまう (2026-08-20 の
+        ``positions 41->41``)。close の中身は一切変えない。観測の timing だけ。
+        """
+        pending_symbols = {
+            str(s).upper() for s in (self.pending_flat_symbols or set()) if s
+        }
+        if self.dry_run or (not order_ids and not pending_symbols):
             self.log("[wait] exit fill 監視スキップ (dry-run または close 0)")
             return
+
+        deadline = time.monotonic() + float(self.args.poll_timeout)
+        if order_ids:
+            self._dump("close_fills.json", self._poll_order_ids(order_ids, deadline))
+        if pending_symbols:
+            self._wait_positions_flat(pending_symbols, deadline)
+        self._snapshot_positions("positions_after_close.json")
+
+    def _poll_order_ids(self, order_ids: list[str], deadline: float) -> dict[str, str]:
+        """order_id -> 終端 status。終端化するか deadline まで poll する。"""
         from common.broker_alpaca import get_orders_status_map
 
         client = self._client()
-        deadline = time.monotonic() + float(self.args.poll_timeout)
-        working = {
-            "new",
-            "accepted",
-            "pending_new",
-            "partially_filled",
-            "held",
-            "accepted_for_bidding",
-            "pending_replace",
-            "calculated",
-            "pending_cancel",
-        }
         fills: dict[str, str] = {}
-        while time.monotonic() < deadline:
+        while True:
             smap = get_orders_status_map(client, order_ids)
             pending = []
             for oid in order_ids:
-                st = smap.get(oid)
-                s = str(st or "").lower().split(".")[-1]
-                fills[oid] = s
-                if s in working or s == "" or s == "none":
+                raw = smap.get(oid)
+                fills[oid] = normalize_order_status(raw)
+                if is_working(raw):
                     pending.append(oid)
             if not pending:
                 self.log(f"[wait] 全 exit close settled ({len(order_ids)} 件)")
                 break
+            if time.monotonic() >= deadline:
+                self.log(
+                    f"[wait] TIMEOUT ({self.args.poll_timeout}s) "
+                    f"order pending {len(pending)}/{len(order_ids)} -> 継続"
+                )
+                break
             self.log(f"[wait] pending {len(pending)}/{len(order_ids)} ... 3s")
             time.sleep(3)
-        else:
-            self.log(f"[wait] TIMEOUT ({self.args.poll_timeout}s) pending 残 -> 継続")
-        self._dump("close_fills.json", fills)
-        self._snapshot_positions("positions_after_close.json")
+        return fills
+
+    def _wait_positions_flat(self, symbols: set[str], deadline: float) -> None:
+        """受理済み close の建玉が実際に消えるまで待つ (非同期 fill の settle)。"""
+        from common.alpaca_trading import fetch_position_snapshots
+
+        client = self._client()
+        remaining = set(symbols)
+        while True:
+            try:
+                held = {
+                    str(s.symbol).upper() for s in fetch_position_snapshots(client)
+                }
+            except Exception as exc:  # noqa: BLE001 - 一時失敗は次の poll で回復
+                self.log(f"[wait] positions 取得失敗 (継続): {exc}")
+            else:
+                remaining = {s for s in symbols if s in held}
+                if not remaining:
+                    self.log(f"[wait] flatten settled: {len(symbols)} 件の建玉解消を確認")
+                    break
+            if time.monotonic() >= deadline:
+                self.log(
+                    f"[wait] TIMEOUT ({self.args.poll_timeout}s) flatten 未解消 "
+                    f"{len(remaining)}/{len(symbols)} 件: {sorted(remaining)[:10]}"
+                )
+                break
+            self.log(f"[wait] flatten pending {len(remaining)}/{len(symbols)} ... 3s")
+            time.sleep(3)
+        self.record["flatten_settled"] = len(symbols) - len(remaining)
+        self.record["flatten_unsettled"] = sorted(remaining)
 
     def entry_stage(self, eq: float | None) -> None:
         argv = [
@@ -579,6 +699,103 @@ class Runner:
             self._dump("paper_orders.json", data)
         except Exception as exc:  # noqa: BLE001
             self.log(f"[entry] paper_orders 解析失敗: {exc}")
+
+    def reconcile_entry_fills(self) -> None:
+        """submit 時点の status スナップショットを **実 fill** で上書きする。
+
+        ``paper_trading_submit`` が書けるのは submit 直後の status
+        (``pending_new``) だけで、fill は非同期に後から起きる。その JSON を
+        そのまま recon に食わせると ``entry_filled`` が構造的に 0 に固定される
+        (2026-08-20 は 47/47 が fill 済みで ``fill 0`` と報告した)。
+
+        ここで order を終端化するまで re-poll し、artifact を実状へ合わせる。
+        **観測のみ** — 発注も取消もしない。失敗しても run は継続する。
+        """
+        if self.dry_run:
+            return
+        try:
+            data = json.loads(self.paper_json.read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001 - artifact 未生成でも run は継続
+            self.log(f"[fills] paper_orders 読めず reconcile skip: {exc}")
+            return
+        orders = (data or {}).get("orders") or []
+        by_id: dict[str, list[dict]] = {}
+        for o in orders:
+            oid = o.get("order_id")
+            if oid and not o.get("error"):
+                by_id.setdefault(str(oid), []).append(o)
+        if not by_id:
+            self.log("[fills] 再突合対象の order_id が無い -> skip")
+            return
+
+        try:
+            from common.broker_alpaca import get_orders_status_map
+
+            client = self._client()
+        except Exception as exc:  # noqa: BLE001
+            self.log(f"[fills] broker 接続できず reconcile skip: {exc}")
+            return
+
+        ids = list(by_id)
+        deadline = time.monotonic() + float(self.args.poll_timeout)
+        smap: dict[str, object] = {}
+        blind = 0  # 1 件も status が引けなかった連続回数 (broker 不達の早期離脱用)
+        while True:
+            try:
+                smap = get_orders_status_map(client, ids)
+            except Exception as exc:  # noqa: BLE001 - 次の poll で回復を試す
+                self.log(f"[fills] status 取得失敗 (継続): {exc}")
+                smap = {}
+            if any(normalize_order_status(smap.get(oid)) for oid in ids):
+                blind = 0
+            else:
+                blind += 1
+                if blind >= 3:
+                    # broker が全件無応答。待っても埋まらないので観測を諦める
+                    # (poll_timeout ぶん空回りして notify/publish を遅らせない)。
+                    self.log("[fills] status が 3 回連続で 0 件 -> broker 不達とみなし中断")
+                    break
+            pending = [oid for oid in ids if is_working(smap.get(oid))]
+            if not pending:
+                self.log(f"[fills] entry order {len(ids)} 件すべて終端")
+                break
+            if time.monotonic() >= deadline:
+                self.log(
+                    f"[fills] TIMEOUT ({self.args.poll_timeout}s) "
+                    f"未終端 {len(pending)}/{len(ids)} -> 現状で記録"
+                )
+                break
+            self.log(f"[fills] pending {len(pending)}/{len(ids)} ... 3s")
+            time.sleep(3)
+
+        filled = 0
+        reconciled = 0
+        for oid, rows in by_id.items():
+            raw = smap.get(oid)
+            status = normalize_order_status(raw)
+            if not status:
+                continue
+            reconciled += 1
+            hit = is_filled(raw)
+            for row in rows:
+                row["status"] = status
+                row["status_source"] = "reconciled"
+            if hit:
+                filled += len(rows)
+
+        data["entry_filled"] = filled
+        data["status_reconciled"] = reconciled
+        try:
+            self.paper_json.write_text(
+                json.dumps(data, ensure_ascii=False, indent=2, default=str),
+                encoding="utf-8",
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.log(f"[fills] paper_orders 書き戻し失敗: {exc}")
+            return
+        self._dump("paper_orders.json", data)
+        self.record["entry_filled"] = filled
+        self.log(f"[fills] entry fill 再突合: filled={filled}/{len(ids)} 件")
 
     def _snapshot_positions(self, name: str) -> None:
         if self.dry_run:
@@ -740,7 +957,17 @@ class Runner:
                 )
             lines += [
                 f"- exit_count: {self.record.get('exit_count')}",
+            ]
+            if self.record.get("flatten_ok") is not None:
+                lines.append(
+                    f"- flatten: accepted={self.record.get('flatten_ok')} "
+                    f"rejected={self.record.get('flatten_failed')} "
+                    f"settled={self.record.get('flatten_settled')} "
+                    f"unsettled={self.record.get('flatten_unsettled')}"
+                )
+            lines += [
                 f"- entry: submitted={self.record.get('entry_submitted')} "
+                f"filled={self.record.get('entry_filled')} "
                 f"skipped={self.record.get('entry_skipped')} "
                 f"failed={self.record.get('entry_failed')} "
                 f"status={self.record.get('entry_status')}",
@@ -778,6 +1005,8 @@ class Runner:
         self.wait_exit_fills(market_ids)  # exit->entry 順の担保点
         if self.entry_allowed:
             self.entry_stage(eq)
+            # submit 時点の status は必ず未終端。recon の前に実 fill へ寄せる。
+            self.reconcile_entry_fills()
         else:
             self.log(
                 f"[entry] SKIP: {self.record.get('entry_skip_reason')} "
