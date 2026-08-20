@@ -114,4 +114,33 @@ long は `Low <= limit`、short は `High >= limit`、約定値は指値、NaN �
 
 **読む前に知っておくこと**: 2026-08-20 より前に出力された **System3/5/6 のバックテスト
 実績（およびそれらを含む統合バックテスト・`common/validation/` の CPCV/DSR 出力）は
-すべて過大**。継続可否の判断は再測定後の数字で行うこと。
+すべて過大**。
+
+### 再測定済み (2026-08-21) — `docs/VALIDATION_REMEASURE_LIMIT_FILL_20260821.md`
+
+`common/validation/` の CPCV / bootstrap / DSR を修正後エンジンで再実行した
+（ブランチ `claude/monitor-webapp` HEAD `960487c`、universe 4,654 銘柄、
+`n_groups=6, k_test=2`, `n_boot=2000`, seed 12345）。修正前の S3/5/6 単独レポートは
+**一度も存在しなかった**ため、修正前コードを実走させた A/B で before を作った
+（等価性は全トレード行のダイジェスト一致で検証済み）。
+
+| | fold Sharpe 平均 前→後 | bootstrap P(SR≤0) 前→後 | DSR 前→後 |
+|---|---|---|---|
+| System3 † | −2.491 → −3.849 | 0.216 → 0.527 | 0.034 → 0.000 |
+| System5 | −2.002 → −3.017 | 1.000 → 1.000 | 0.000 → 0.000 |
+| System6 | **+0.702 → −1.718** | **0.046 → 1.000** | 0.144 → 0.000 |
+| 統合 (7) | −1.625 → −2.311 | 1.000 → 1.000 | 0.000 → 0.000 |
+
+† 単独ランは equity がゼロを跨ぐため Sharpe/DSR は参考値（doc §4.2）。
+
+- **DSR 閾値 0.95 は修正前も修正後も全系統・統合ともに未達 (FAIL)**。修正で
+  PASS→FAIL になった系統は無い（元から一つも PASS していない）。
+- **System1–7 は Bensdorp 準拠の 7 本セットとして維持**。この数字は削減判断ではなく、
+  スロットの公平性はアロケータ側で扱う。
+- 再測定中に判明したエンジン側の**先行不具合 3 件**（本修正とは無関係）は doc §5:
+  System3 の候補が `date`/`entry_date` スキーマ不一致で**両エンジンとも建玉ゼロ**、
+  System6 は `SYSTEM6_FORCE_LATEST_ONLY` 既定 True でバックテストでも最新1日に潰れる、
+  System1 は full-scan 分岐が削除済み・System7 は SPY に `atr50` 欠落で走らない。
+
+**指値修正 `960487c` はまだ `origin/main` に載っていない**（含むのは
+`claude/monitor-webapp` のみ。PR #162 は別件の obs 修正）。

@@ -1,0 +1,58 @@
+{
+  "limit": 400,
+  "normalize": true,
+  "arms": {
+    "prefix_tree": {
+      "System3": {
+        "n": 579,
+        "pnl": -21936.73,
+        "digest": "3280aedc3a935fcd"
+      },
+      "System5": {
+        "n": 216,
+        "pnl": -36791.32,
+        "digest": "da705b0c398bb3a5"
+      },
+      "System6": {
+        "n": 7,
+        "pnl": -382.98,
+        "digest": "f91a6dc9604f415c"
+      }
+    },
+    "forcefill": {
+      "System3": {
+        "n": 579,
+        "pnl": -21936.73,
+        "digest": "3280aedc3a935fcd"
+      },
+      "System5": {
+        "n": 216,
+        "pnl": -36791.32,
+        "digest": "da705b0c398bb3a5"
+      },
+      "System6": {
+        "n": 7,
+        "pnl": -382.98,
+        "digest": "f91a6dc9604f415c"
+      }
+    },
+    "fixed": {
+      "System3": {
+        "n": 430,
+        "pnl": -65637.74,
+        "digest": "2f34a3e18564e03f"
+      },
+      "System5": {
+        "n": 197,
+        "pnl": -41317.42,
+        "digest": "424f079a72bc345f"
+      },
+      "System6": {
+        "n": 5,
+        "pnl": -1088.43,
+        "digest": "0903f9d3a30447fe"
+      }
+    }
+  },
+  "reconstruction_exact": true
+}
