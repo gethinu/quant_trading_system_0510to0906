@@ -25,13 +25,25 @@ from datetime import datetime, timezone
 import json
 import logging
 from pathlib import Path
+import sys
 from typing import Any
+
+_ROOT = Path(__file__).resolve().parents[1]
+if str(_ROOT) not in sys.path:
+    # ``python scripts/build_execution_recon.py`` の直叩きでも common を引けるように。
+    sys.path.insert(0, str(_ROOT))
+
+from common.order_status import (  # noqa: E402  (_ROOT を通してから import)
+    FILLED_ORDER_STATUSES,
+    normalize_order_status,
+)
 
 logger = logging.getLogger(__name__)
 
-# fill とみなす Alpaca order status (成行は submit 直後 accepted のことが多く、
-# fill は非同期。ここに載るのは既に約定確認できた分のみ = best-effort)。
-_FILLED_STATUSES = {"filled", "partially_filled"}
+# fill とみなす Alpaca order status。producer が enum を default=str で serialize
+# した ``"OrderStatus.FILLED"`` も normalize_order_status で素の token に戻すので、
+# ここは常に素の小文字だけを見ればよい。
+_FILLED_STATUSES = FILLED_ORDER_STATUSES
 # exit protection の reason_code (それ以外の exit は close 扱い)
 _PROTECT_REASONS = {
     "protect_stop",
@@ -245,7 +257,9 @@ def build_recon(
             skip_reason = o.get("skip_reason")
             error = o.get("error")
             order_id = o.get("order_id")
-            status = str(o.get("status") or "").lower()
+            # 生 enum 由来の "OrderStatus.FILLED" も素の "filled" に潰してから突合。
+            # 潰さないと entry_filled が構造的に 0 に固定される (2026-08-20)。
+            status = normalize_order_status(o.get("status"))
             if skip_reason:
                 sb["skipped"] += 1
                 kind = str(skip_reason).split(":", 1)[0]

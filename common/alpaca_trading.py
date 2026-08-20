@@ -27,6 +27,7 @@ from typing import Any
 import pandas as pd
 
 from common import broker_alpaca as ba
+from common.order_status import normalize_order_status
 from common.symbol_map import resolve_primary_system
 
 logger = logging.getLogger(__name__)
@@ -595,7 +596,7 @@ def submit_paper_order(
         raise _classify_error(exc) from exc
 
     prepared.order_id = str(getattr(order, "id", "") or "")
-    prepared.status = str(getattr(order, "status", "") or "")
+    prepared.status = normalize_order_status(getattr(order, "status", None))
     _audit_log({"event": "submitted", **prepared.to_row()})
     logger.info(
         "Paper order submitted: %s %s x%d id=%s status=%s",
@@ -1492,7 +1493,7 @@ def signals_json_to_orders(
                 )
                 order = client.submit_order(order_data=req)
                 po.order_id = str(getattr(order, "id", "") or "")
-                po.status = str(getattr(order, "status", "") or "")
+                po.status = normalize_order_status(getattr(order, "status", None))
                 _audit_log({"event": "submitted_notional", **po.to_row()})
             else:  # EXEC_QTY — 整数株 (short / 非fractionable)
                 po.qty = qty
@@ -1507,7 +1508,7 @@ def signals_json_to_orders(
                     client=client,
                 )
                 po.order_id = result.order_id
-                po.status = result.status
+                po.status = normalize_order_status(result.status)
                 _audit_log({"event": "submitted_qty", **po.to_row()})
             # 自注文を口座状態に反映し、同一バッチ内の後続 self-wash / 二重を防ぐ
             open_sides.setdefault(po.symbol, set()).add(po.side)
@@ -2829,7 +2830,7 @@ def submit_paper_exit_order(
         raise _classify_error(exc) from exc
 
     po.order_id = str(getattr(order, "id", "") or "")
-    po.status = str(getattr(order, "status", "") or "")
+    po.status = normalize_order_status(getattr(order, "status", None))
     _audit_log({"event": "exit_submitted", **po.to_row()})
     logger.info(
         "Paper exit submitted: %s %s x%s %s id=%s status=%s reason=%s",
