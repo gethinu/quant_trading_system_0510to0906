@@ -19,6 +19,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts.self_monitor_check import (  # noqa: E402
+    _latest_open_run_dir,
     check_daily,
     check_data_advance,
     check_open_run,
@@ -208,6 +209,83 @@ def test_open_run_none_when_no_dirs(tmp_path: Path):
     logs.mkdir()
     r = check_open_run(logs, tmp_path / "results_csv", max_age_hours=96)
     assert r.status == "info"
+
+
+# --- open_run: one-shot sidecar dir を nightly と取り違えない (2026-08-20 の偽 WARN) ---
+def _nightly_and_sidecar(tmp_path: Path) -> Path:
+    """08-20 の実データと同じ構図: canonical nightly + `_oneshot_flatten` sidecar。"""
+    logs = tmp_path / "logs"
+    _write(
+        logs / "open_run_20260820" / "completion_recon.json",
+        {
+            "date": "2026-08-20",
+            "mode": "paper_submit",
+            "entry_submitted": 47,
+            "entry_status": "ok",
+        },
+    )
+    (logs / "open_run_20260820" / "DONE.lock").write_text("x", encoding="utf-8")
+    # sidecar は 22:30 の flatten が残す退避 dir。entry を出さないのが正常なので
+    # entry_submitted=0 / skipped_thin_signals は「異常」ではない。
+    _write(
+        logs / "open_run_20260820_oneshot_flatten" / "completion_recon.json",
+        {
+            "date": "2026-08-20",
+            "mode": "paper_submit",
+            "entry_submitted": 0,
+            "entry_status": "skipped_thin_signals",
+        },
+    )
+    return logs
+
+
+def test_latest_open_run_dir_skips_oneshot_sidecar(tmp_path: Path):
+    logs = _nightly_and_sidecar(tmp_path)
+    # 名前順 sorted(reverse=True) だと sidecar が先頭に来る = 旧実装が踏んだ罠。
+    assert sorted(p.name for p in logs.iterdir())[-1] == (
+        "open_run_20260820_oneshot_flatten"
+    )
+    assert _latest_open_run_dir(logs).name == "open_run_20260820"
+
+
+def test_open_run_ignores_oneshot_sidecar_and_stays_ok(tmp_path: Path):
+    logs = _nightly_and_sidecar(tmp_path)
+    r = check_open_run(logs, tmp_path / "results_csv", max_age_hours=96)
+    assert r.data["dir"] == "open_run_20260820"
+    assert r.data["entry_submitted"] == 47
+    assert r.status == "ok"
+
+
+def test_open_run_sidecar_from_a_later_date_does_not_win(tmp_path: Path):
+    """sidecar だけが最新日でも nightly の canonical 最新日を選ぶ (mtime 順の穴も塞ぐ)。"""
+    logs = _nightly_and_sidecar(tmp_path)
+    _write(
+        logs / "open_run_20260821_oneshot_flatten" / "completion_recon.json",
+        {"date": "2026-08-21", "mode": "paper_submit", "entry_submitted": 0},
+    )
+    assert _latest_open_run_dir(logs).name == "open_run_20260820"
+
+
+def test_open_run_info_when_only_sidecars_exist(tmp_path: Path):
+    logs = tmp_path / "logs"
+    _write(
+        logs / "open_run_20260820_oneshot_flatten" / "completion_recon.json",
+        {"date": "2026-08-20", "mode": "paper_submit", "entry_submitted": 0},
+    )
+    assert _latest_open_run_dir(logs) is None
+    r = check_open_run(logs, tmp_path / "results_csv", max_age_hours=96)
+    assert r.status == "info"
+
+
+def test_open_run_ignores_non_dir_and_malformed_names(tmp_path: Path):
+    logs = tmp_path / "logs"
+    _write(
+        logs / "open_run_20260819" / "completion_recon.json",
+        {"date": "2026-08-19", "mode": "paper_submit", "entry_submitted": 12},
+    )
+    (logs / "open_run_20260820").write_text("not a dir", encoding="utf-8")
+    (logs / "open_run_2026082").mkdir()  # 7 桁 = 日付として不正
+    assert _latest_open_run_dir(logs).name == "open_run_20260819"
 
 
 # --- publish (git 無しの tmp dir では warn へフォールバック) ----------------

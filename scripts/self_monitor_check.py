@@ -23,7 +23,9 @@
     3. [publish]   Vercel publish が成功したか。monitor-webapp ブランチに当日 commit があるか
                    (git log)。古ければ dashboard 固着の疑い → CRIT。
     4. [open_run]  オープン自動発注 run が走り entry が fill したか。
-                   最新 logs/open_run_<date>/completion_recon.json + paper_orders_*.json。
+                   最新 logs/open_run_<YYYYMMDD>/completion_recon.json + paper_orders_*.json。
+                   one-shot ツールが残す `_<suffix>` 付き sidecar dir は **除外** する
+                   (canonical 名だけが nightly。詳細は _latest_open_run_dir)。
                    abort(market_closed) は良性、それ以外の abort / entry 0 は WARN。
 
 Exit codes: 0=全 OK, 2=WARN あり, 3=CRIT あり。
@@ -305,15 +307,42 @@ def check_publish(
     )
 
 
+# nightly のオープン自動発注は成果物を必ず `logs/open_run_<YYYYMMDD>` (8 桁ちょうど)
+# へ書く (scripts/open_auto_run.py の Runner.out)。一方 one-shot の手動ツールは同じ日の
+# 成果物を別けて残すため `open_run_<YYYYMMDD>_<suffix>` という **sidecar** を作る
+# (例: oneshot_flatten_20260820.ps1 の `open_run_${Compact}_oneshot_flatten`)。
+# 名前順 sorted() だと suffix 付きが canonical の **後ろ** に並ぶので sidecar を掴んで
+# しまう。2026-08-20 はそれで本番 run (entry_submitted=47) が sidecar の
+# entry_submitted=0 / skipped_thin_signals に隠され、「実 run だが entry_submitted=0」と
+# 偽陰性 WARN を出した。mtime 順も sidecar が nightly より後に走れば同じ罠を踏むので、
+# このチェックが見たい nightly = canonical 名のものだけを対象にする。
+_CANONICAL_OPEN_RUN_RE = re.compile(r"^open_run_(\d{8})$")
+
+
+def _latest_open_run_dir(logs_dir: Path) -> Path | None:
+    """nightly の canonical `open_run_<YYYYMMDD>` のうち最新日を返す (sidecar は除外)。
+
+    日付はゼロ埋め 8 桁なので辞書順 == 時系列順。該当が無ければ None。
+    """
+    canonical = [
+        d
+        for d in logs_dir.glob("open_run_*")
+        if _CANONICAL_OPEN_RUN_RE.match(d.name) and d.is_dir()
+    ]
+    if not canonical:
+        return None
+    return max(canonical, key=lambda d: d.name)
+
+
 def check_open_run(
     logs_dir: Path, results_dir: Path, max_age_hours: float
 ) -> CheckResult:
     """最新 open_run_<date> の completion_recon で自動発注 run の実行/約定を判定。"""
-    dirs = sorted(logs_dir.glob("open_run_*"), reverse=True)
-    dirs = [d for d in dirs if d.is_dir()]
-    if not dirs:
-        return CheckResult("open_run", "info", "open_run_* ディレクトリがまだ無い")
-    newest = dirs[0]
+    newest = _latest_open_run_dir(logs_dir)
+    if newest is None:
+        return CheckResult(
+            "open_run", "info", "open_run_<YYYYMMDD> ディレクトリがまだ無い"
+        )
     recon = _load_json(newest / "completion_recon.json") or {}
     done = (newest / "DONE.lock").exists()
     age = _mtime_age_hours(newest / "completion_recon.json") or _mtime_age_hours(newest)
