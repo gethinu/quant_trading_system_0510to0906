@@ -253,13 +253,22 @@ test_gap3a_bulk_entry_dates_match_the_canonical_resolver` で検証（差分 0 �
 
 ## 7. 積み残し / 要判断
 
-1. **`core/system1.py::_apply_filter_conditions` の大文字固定 `Close` 参照。**
-   base cache 形状に対して `filter` / `setup` 列を常に False にしてしまう。
-   直せば列が正しくなるが、この helper は **live の latest_only fast path も
-   使っている**（`core/system1.py:750`）。現状 live は `setup` 列が False でも
-   predicate へフォールバックするので採否は変わらない見込みだが、
-   merged frame / diagnostics の `setup` 値が False→True に変わる。
-   live 挙動に触れるため**本作業では変更せず、判断待ち**とする。
+1. ~~**`core/system1.py::_apply_filter_conditions` の大文字固定 `Close` 参照。**~~
+   **解決済み (2026-08-21): `docs/SYSTEM1_FILTER_CASE_FIX_20260821.md`。**
+   helper は `_resolve_column`（実体は `common/indicator_access.get_indicator`）
+   経由で列を大小文字非依存に引くようになった。
+
+   本項が懸念していた「live の `setup` が False→True に変わる」は**起きなかった**。
+   実ユニバース 4,655 銘柄で live 経路を再現して計測したところ、helper に届く
+   4,557 フレームは**全件が大文字 `Close` を持って**おり
+   （`common/today_data_loader._normalize_ohlcv` と `core/system1._rename_ohlcv` の
+   二段の正規化による）、`predicate_only_pass_count` / `mismatch_flag` はいずれも 0、
+   候補 20 件も出力 JSON 全体も修正前後でビット同一だった。
+   バックテスト側（§6 の数値）も 7 系統すべて前後同一。
+
+   つまり本項は helper 単体の欠陥としては正しかったが、live 影響の見積もりとしては
+   過大だった。修正の実利は「呼び出し側が事前に正規化していること」への
+   暗黙の依存を外した点にある。
 2. **System7 フルスキャンの `entry_price` payload に look-ahead がある。**
    `core/system7.py` のフル経路は履歴上のどの候補にも
    `last_price = df["Close"].iloc[-1]`（フレーム最終足の終値）を入れている。

@@ -42,6 +42,7 @@ from typing import Any, Callable, Mapping, Optional, cast
 import pandas as pd
 
 from common.batch_processing import process_symbols_batch
+from common.indicator_access import get_indicator
 from common.system_candidates_utils import set_diagnostics_after_ranking
 from common.system_common import (
     check_precomputed_indicators,
@@ -66,13 +67,54 @@ MIN_ROC200 = 0.0  # Minimum ROC200 for momentum confirmation
 # ============================================================================
 # Helper Functions
 # ============================================================================
+def _resolve_column(df: pd.DataFrame, name: str) -> pd.Series | None:
+    """Resolve a column by canonical name, tolerating case/alias variation.
+
+    2026-08-21: ``_apply_filter_conditions`` used to read ``df.get("Close")``
+    with a hard-coded capital C. Frames in the ``load_base_cache`` shape carry
+    all-lowercase columns, so ``Close`` came back ``None``, was coerced to 0.0,
+    and ``filter``/``setup`` collapsed to False on every row - silently, for
+    rows whose real Close satisfies the System1 filter.
+
+    The canonical row predicate
+    (``common.system_setup_predicates.system1_setup_predicate``) already reads
+    the very same fields through ``common.indicator_access.get_indicator``.
+    Routing the column path through the same resolver means the column route
+    and the row route can no longer disagree about which column they read.
+
+    ``get_indicator`` prefers the exact/canonical name, so frames that already
+    carry ``Close`` (every live frame does - see
+    ``common/today_data_loader._normalize_ohlcv`` and ``_rename_ohlcv`` below)
+    resolve to byte-identical values.
+    """
+    try:
+        value = get_indicator(df, name)
+    except Exception:
+        value = None
+    if value is not None:
+        return cast(pd.Series, value)
+    # get_indicator short-circuits on a zero-row frame; fall back to a plain
+    # case-insensitive column scan so the column set still resolves there.
+    try:
+        for col in df.columns:
+            if isinstance(col, str) and col.lower() == name.lower():
+                return df[col]
+    except Exception:
+        pass
+    return None
+
+
 def _apply_filter_conditions(df: pd.DataFrame) -> pd.DataFrame:
     """Apply System1 filter: Close>=MIN_PRICE & DollarVolume20>MIN_DOLLAR_VOLUME_20.
+
+    Column names are resolved case-insensitively via ``_resolve_column`` so the
+    same frame yields the same ``filter`` whether its OHLCV columns arrived
+    capitalised (live / rolling cache) or lowercase (``load_base_cache``).
 
     Preserves existing 'filter' column if present for test compatibility.
 
     Args:
-        df: DataFrame with Close and dollarvolume20 columns
+        df: DataFrame with Close (any case) and dollarvolume20 columns
 
     Returns:
         DataFrame with 'filter' boolean column added/updated
@@ -81,7 +123,7 @@ def _apply_filter_conditions(df: pd.DataFrame) -> pd.DataFrame:
 
     # Coerce to numeric to avoid runtime/type issues
     try:
-        _val_close = x.get("Close")
+        _val_close = _resolve_column(x, "Close")
         if _val_close is None:
             _close = pd.Series(0.0, index=x.index)
         else:
@@ -90,7 +132,7 @@ def _apply_filter_conditions(df: pd.DataFrame) -> pd.DataFrame:
         _close = pd.Series(0.0, index=x.index)
 
     try:
-        _val_dv = x.get("dollarvolume20")
+        _val_dv = _resolve_column(x, "dollarvolume20")
         if _val_dv is None:
             _dv = pd.Series(0.0, index=x.index)
         else:

@@ -472,3 +472,168 @@ def test_gap3b_system7_books_trades():
         by_date, prepared, CAPITAL, System7Strategy(), side="short"
     )
     assert not trades.empty, "System7 must book trades in a backtest"
+
+
+# ---------------------------------------------------------------------------
+# Section 7 item 1 - core/system1.py::_apply_filter_conditions case sensitivity
+#
+# The helper used to read ``df.get("Close")`` with a hard-coded capital C, so a
+# frame in the ``load_base_cache`` shape (all-lowercase columns) collapsed Close
+# to 0.0 and produced filter=False / setup=False on *every* row - including rows
+# whose real Close satisfies the System1 filter.
+#
+# Every frame the live path hands to this helper already carries a capitalised
+# ``Close`` (common/today_data_loader._normalize_ohlcv upstream, then
+# core/system1._rename_ohlcv inside the latest_only fast path), so the fix is a
+# no-op there; the tests below pin both halves of that: lowercase frames now
+# evaluate the real data, capitalised frames keep their exact previous answers.
+# ---------------------------------------------------------------------------
+
+
+def _system1_lowercase_frame(periods: int = 12) -> pd.DataFrame:
+    """A System1 frame exactly as ``load_base_cache`` hands it over.
+
+    Integer index, all-lowercase columns. Rows alternate between genuinely
+    passing and genuinely failing the System1 rule so a blanket True is as
+    detectable as a blanket False:
+
+      filter = close >= 5 and dollarvolume20 > 50,000,000
+      setup  = filter and sma25 > sma50 and roc200 > 0
+    """
+    close = [100.0, 3.0, 120.0, 4.99, 150.0, 200.0] * (periods // 6)
+    dv20 = [200e6, 200e6, 200e6, 200e6, 10e6, 200e6] * (periods // 6)
+    sma25 = [110.0, 110.0, 110.0, 110.0, 110.0, 90.0] * (periods // 6)
+    sma50 = [90.0] * periods
+    roc200 = [0.5, 0.5, 0.5, 0.5, 0.5, 0.5] * (periods // 6)
+    return pd.DataFrame(
+        {
+            "date": pd.bdate_range("2024-05-01", periods=periods),
+            "open": [c - 1 for c in close],
+            "high": [c + 1 for c in close],
+            "low": [c - 2 for c in close],
+            "close": close,
+            "volume": [10_000_000] * periods,
+            "atr20": [1.0] * periods,
+            "sma25": sma25,
+            "sma50": sma50,
+            "roc200": roc200,
+            "dollarvolume20": dv20,
+        }
+    )
+
+
+def _expected_filter(df: pd.DataFrame) -> pd.Series:
+    return (df["close"] >= 5.0) & (df["dollarvolume20"] > 50_000_000)
+
+
+def _expected_setup(df: pd.DataFrame) -> pd.Series:
+    return _expected_filter(df) & (df["sma25"] > df["sma50"]) & (df["roc200"] > 0.0)
+
+
+def test_sec7_filter_reads_close_from_a_lowercase_frame():
+    """The helper must evaluate the real Close, not the 0.0 fallback."""
+    from core.system1 import _apply_filter_conditions, _apply_setup_conditions
+
+    raw = _system1_lowercase_frame()
+    assert "Close" not in raw.columns and "close" in raw.columns
+
+    out = _apply_setup_conditions(_apply_filter_conditions(raw))
+
+    expected_filter = _expected_filter(raw)
+    expected_setup = _expected_setup(raw)
+    # the fixture is only meaningful if it contains both outcomes
+    assert expected_setup.any() and (~expected_setup).any()
+
+    assert list(out["filter"].astype(bool)) == list(expected_filter)
+    assert list(out["setup"].astype(bool)) == list(expected_setup)
+
+
+def test_sec7_filter_still_false_where_the_data_genuinely_fails():
+    """Reading the real Close must not turn genuine failures into passes."""
+    from core.system1 import _apply_filter_conditions, _apply_setup_conditions
+
+    raw = _system1_lowercase_frame()
+    for column, value, why in (
+        ("close", 4.99, "below MIN_PRICE"),
+        ("dollarvolume20", 50_000_000.0, "not strictly above the DV20 floor"),
+        ("sma25", 80.0, "sma25 <= sma50"),
+        ("roc200", -0.1, "roc200 <= 0"),
+    ):
+        frame = raw.copy()
+        frame[column] = value
+        out = _apply_setup_conditions(_apply_filter_conditions(frame))
+        assert not out["setup"].any(), f"setup must stay False when {why}"
+
+
+def test_sec7_column_route_agrees_with_the_canonical_row_predicate():
+    """The column path and system1_setup_predicate must not diverge."""
+    from common.system_setup_predicates import system1_setup_predicate
+    from core.system1 import _apply_filter_conditions, _apply_setup_conditions
+
+    raw = _system1_lowercase_frame()
+    out = _apply_setup_conditions(_apply_filter_conditions(raw))
+    for i in range(len(raw)):
+        assert bool(out["setup"].iloc[i]) == bool(
+            system1_setup_predicate(raw.iloc[i])
+        ), f"column/predicate mismatch on row {i}"
+
+
+def test_sec7_capitalised_live_shape_frames_are_unchanged():
+    """Regression guard: the live frame shape must keep its exact answers."""
+    from core.system1 import _apply_filter_conditions, _apply_setup_conditions
+
+    raw = _system1_lowercase_frame()
+    # the shape common/today_data_loader._normalize_ohlcv produces for live
+    live = raw.rename(
+        columns={
+            "open": "Open",
+            "high": "High",
+            "low": "Low",
+            "close": "Close",
+            "volume": "Volume",
+            "date": "Date",
+        }
+    )
+    out = _apply_setup_conditions(_apply_filter_conditions(live))
+    assert list(out["filter"].astype(bool)) == list(_expected_filter(raw))
+    assert list(out["setup"].astype(bool)) == list(_expected_setup(raw))
+
+
+def test_sec7_capitalised_column_wins_when_both_cases_are_present():
+    """``Close`` stays authoritative when a frame carries both spellings."""
+    from core.system1 import _apply_filter_conditions
+
+    frame = pd.DataFrame(
+        {
+            "close": [1.0, 1.0],  # would fail the filter
+            "Close": [100.0, 100.0],  # canonical, passes
+            "dollarvolume20": [200_000_000.0, 200_000_000.0],
+        }
+    )
+    assert list(_apply_filter_conditions(frame)["filter"].astype(bool)) == [True, True]
+
+
+def test_sec7_missing_close_entirely_still_yields_false():
+    """No price column at all must remain a fail-closed False."""
+    from core.system1 import _apply_filter_conditions
+
+    frame = pd.DataFrame({"dollarvolume20": [200_000_000.0, 200_000_000.0]})
+    assert not _apply_filter_conditions(frame)["filter"].any()
+
+
+def test_sec7_reuse_indicators_fast_path_on_a_lowercase_frame():
+    """The one shipped route that fed the helper a lowercase frame.
+
+    ``prepare_data_vectorized_system1(raw, reuse_indicators=True)`` with
+    ``latest_only`` unset skips ``_rename_ohlcv`` and hands the caller's frame
+    straight to ``_apply_filter_conditions``. Before the fix that produced a
+    prepared frame whose ``setup`` column was False on every row.
+    """
+    from core.system1 import prepare_data_vectorized_system1
+
+    raw = _system1_lowercase_frame()
+    prepared = prepare_data_vectorized_system1({"AAA": raw}, reuse_indicators=True)
+    assert "AAA" in prepared
+    out = prepared["AAA"]
+    assert list(out["setup"].astype(bool)) == list(_expected_setup(raw))
+    assert bool(out["setup"].any()), "setup must not collapse to all-False"
