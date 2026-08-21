@@ -194,6 +194,35 @@ class System2Strategy(AlpacaOrderMixin, StrategyBase):
         stop_price = entry_price + stop_mult * atr
         return entry_price, stop_price
 
+    def compute_entry_limit_price(self, prev_close: float) -> float | None:
+        """spec の指値売り価格 = 前日終値 x (1 + entry_min_gap_pct)。
+
+        docs/systems/システム2.txt「仕掛け」:
+            「翌日、前日の終値を4%以上上回る価格で売る。」
+
+        値の出所 (いずれも既存の repo 内 spec。ここで新しい数字は作らない):
+          - ``config/config.yaml`` system2.entry_min_gap_pct: 0.04
+          - ``strategies/constants.py`` ENTRY_MIN_GAP_PCT_DEFAULT = 0.04
+          - ``common/trade_management.py`` system2:
+                entry_type=LIMIT / entry_price_offset_pct=4.0 /
+                entry_reference="close"
+          - ``common/alpaca_trading.py`` の docs-alignment コメント:
+                「S2 = 翌日 前日終値+4% 以上の指値売 (LIMIT)」
+
+        ``compute_entry`` (バックテスト経路) は当日 Open が既知なので
+        「Open が +4% ギャップを満たしたか」で判定する。**翌日の指値を今日出す
+        live 経路には Open が無い** ため、こちらは spec そのままの指値を返す。
+        丸めは system6 の ``compute_entry`` と同じ 2 桁。
+        """
+        try:
+            pc = float(prev_close)
+        except (TypeError, ValueError):
+            return None
+        if not (pc > 0):
+            return None
+        gap = float(self.config.get("entry_min_gap_pct", ENTRY_MIN_GAP_PCT_DEFAULT))
+        return round(pc * (1.0 + gap), 2)
+
     def compute_exit(
         self,
         df: pd.DataFrame,

@@ -125,7 +125,17 @@ class TestHydrateSystemTags:
 
 class TestHoldingDays:
     def test_basic(self):
-        assert compute_holding_days("2026-07-01", "2026-07-04") == 3
+        # 2026-08-22 fix: holding days は **立会日** で数える。max_holding_days が
+        # 立会日ベースの spec (strategies/system2_strategy.py compute_exit:
+        # 「未達: 2営業日待っても…」/ system5: 「時間退出: 6営業日経過後も…」) な
+        # ので、暦日と突き合わせると週末・祝日ぶん早く手仕舞ってしまう。
+        # 2026-07-01(水) -> 2026-07-04(土) は木 07-02 の 1 立会日だけ
+        # (07-03 は独立記念日の振替休場、07-04 は土曜)。暦日なら 3。
+        assert compute_holding_days("2026-07-01", "2026-07-04") == 1
+
+    def test_weekday_span_matches_calendar(self):
+        # 月 -> 水 は週末をまたがないので暦日と一致する (回帰の据え置き確認)。
+        assert compute_holding_days("2026-08-17", "2026-08-19") == 2
 
     def test_same_day(self):
         assert compute_holding_days("2026-07-01", "2026-07-01") == 0
@@ -210,10 +220,13 @@ class TestBuildExitOrders:
         assert time_exits[0].entry_date == "2026-07-13"
 
     def test_system5_time_based_at_6_days(self):
+        # 「6営業日」= 立会 6 日 (strategies/system5_strategy.py compute_exit)。
+        # 2026-06-26(金) から 6 立会日後は 2026-07-07(火)
+        # (06-29,06-30,07-01,07-02,07-06 … 07-03 は休場)。
         snap = _snap("NVDA", "system5", "long", 3, 120.0, "2026-06-26")
         exits = build_exit_orders_from_positions(
             [snap],
-            today="2026-07-02",
+            today="2026-07-07",
             atr_by_symbol={"NVDA": {10: 2.0}},
         )
         te = [e for e in exits if e.reason == ExitReasonCode.TIME]

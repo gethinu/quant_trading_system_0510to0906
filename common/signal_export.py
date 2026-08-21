@@ -162,10 +162,15 @@ def _row_signal(row: Any, system_key: str) -> dict[str, Any]:
     if reason is not None:
         reason = str(reason)
     score = _to_float(_first(row, "score"))
+    # spec の指値 (例 System2 = 前日終値 x 1.04) が確定している時だけ入る。
+    # None の行は成行のまま = 従来挙動 (common/alpaca_trading.py の
+    # 「limit_price が row に無い場合の runtime fallback は現状維持」に従う)。
+    limit_price = _to_float(_first(row, "limit_price"))
     return {
         "symbol": str(symbol) if symbol is not None else None,
         "side": side,
         "entry_price": entry_price,
+        "limit_price": limit_price,
         "rank": rank,
         "reason": reason,
         "score": score,
@@ -326,6 +331,7 @@ def build_signals_json(
                     "symbol": s["symbol"],
                     "side": s["side"],
                     "entry_price": s["entry_price"],
+                    "limit_price": s.get("limit_price"),
                     "weight": _weight(s),
                     "rank": s["rank"] if s.get("rank") is not None else i,
                     "reason": s["reason"],

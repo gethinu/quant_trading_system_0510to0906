@@ -46,6 +46,7 @@ from common.alpaca_trading import (  # noqa: E402
     PreparedExit,
     assert_paper_env,
     build_exit_orders_from_positions,
+    build_stop_rearm_after_failed_oco,
     classify_exit_submit_error,
     fetch_existing_exit_coids,
     fetch_existing_protect_coids,
@@ -658,7 +659,58 @@ def main(argv: list[str] | None = None) -> int:
                     # cancel は非同期。qty が解放されるまで短く待つ (best-effort)。
                     time.sleep(float(getattr(args, "cancel_settle_seconds", 2.5)))
 
+        # --- cancel-before-upgrade: 単発 stop -> OCO 昇格 (PROTECT_USE_OCO=1) ---
+        # 単発 stop が qty を全量予約したままだと OCO は code 40310000 で必ず拒否
+        # される。昇格対象の **その stop 1 本だけ** を coid 指定で外す
+        # (同じ銘柄の他注文には触らない)。dry-run では絶対に通らない経路。
+        upgrade_coids = {
+            coid
+            for po in exits
+            if not po.skip_reason
+            for coid in (getattr(po, "cancel_client_order_ids", None) or [])
+        }
+        if upgrade_coids:
+            canc_up = ba.cancel_open_orders_by_client_order_ids(client, upgrade_coids)
+            print(
+                f"[exit_check] cancel-before-upgrade: canceled "
+                f"{canc_up['canceled']}/{len(upgrade_coids)} standalone stop(s) "
+                f"before submitting OCO protection"
+            )
+            if canc_up["canceled"]:
+                time.sleep(float(getattr(args, "cancel_settle_seconds", 2.5)))
+
         # 実発注 pass
+        rearmed: list[PreparedExit] = []
+
+        def _rearm_stop_if_oco_upgrade_failed(po: PreparedExit) -> None:
+            """昇格 OCO が失敗したら、外した単発 stop を必ず張り直す。
+
+            昇格は「resting stop を cancel してから OCO を出す」ので、OCO が
+            拒否されたまま放置すると建玉が **無保護** になる。利確が張れない
+            ことより遥かに悪いので、ここで元の stop 価格・数量で張り直す。
+            """
+            stop_po = build_stop_rearm_after_failed_oco(po)
+            if stop_po is None:
+                return
+            print(
+                f"[exit_check] !! OCO 昇格失敗 ({po.symbol}): 外した stop を "
+                f"stop={stop_po.stop_price} で張り直す (無保護を作らない)"
+            )
+            try:
+                res = submit_paper_exit_order(stop_po, dry_run=False, client=client)
+                if res.error:
+                    print(
+                        f"[exit_check] !! CRITICAL {po.symbol}: stop の張り直しにも"
+                        f" 失敗 ({res.error})。この建玉は **無保護** の可能性がある。"
+                    )
+            except Exception as exc2:  # noqa: BLE001
+                stop_po.error = str(exc2)
+                print(
+                    f"[exit_check] !! CRITICAL {po.symbol}: stop の張り直しにも"
+                    f" 失敗 ({exc2})。この建玉は **無保護** の可能性がある。"
+                )
+            rearmed.append(stop_po)
+
         for po in exits:
             try:
                 result = submit_paper_exit_order(po, dry_run=False, client=client)
@@ -673,6 +725,7 @@ def main(argv: list[str] | None = None) -> int:
                         already_protected += 1
                     else:
                         submit_failed += 1
+                        _rearm_stop_if_oco_upgrade_failed(result)
                 elif result.order_id:
                     submitted_ok += 1
             except Exception as exc:
@@ -683,6 +736,9 @@ def main(argv: list[str] | None = None) -> int:
                 else:
                     po.error = str(exc)
                     submit_failed += 1
+                    _rearm_stop_if_oco_upgrade_failed(po)
+        # 張り直した stop も artifact に残す (無保護でないことの証跡)。
+        exits.extend(rearmed)
 
     mode = "submitted" if not dry_run else "dry_run"
 

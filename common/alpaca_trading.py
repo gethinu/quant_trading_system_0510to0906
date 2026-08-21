@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
 import json
 import logging
@@ -850,11 +850,22 @@ def _flatten_json_signals(json_data: dict[str, Any]) -> list[dict[str, Any]]:
                 weight = float(s.get("weight") or 0.0)
             except (TypeError, ValueError):
                 weight = 0.0
+            # spec の指値 (例 S2 = 前日終値 x 1.04) を emitter が確定できた行だけ
+            # 持つ。無い行は従来どおり成行にフォールバックする。
+            limit_price: float | None
+            try:
+                _lp = s.get("limit_price")
+                limit_price = float(_lp) if _lp is not None else None
+                if limit_price is not None and not (limit_price > 0):
+                    limit_price = None
+            except (TypeError, ValueError):
+                limit_price = None
             out.append(
                 {
                     "symbol": sym,
                     "side": side,
                     "entry_price": price,
+                    "limit_price": limit_price,
                     "weight": weight,
                     "system": norm_sys,
                 }
@@ -1307,11 +1318,28 @@ def signals_json_to_orders(
                 if qty <= 0:
                     pre_skip = f"skip:below_1_share:${notional:.2f}_@${price:.2f}"
 
+        # 注文種別は docs/systems/システム{N}.txt の「仕掛け」節を single source of
+        # truth とする _DEFAULT_SYSTEM_ORDER_TYPE に従う。
+        # ただし **limit_price が row に無ければ market へフォールバック** する
+        # (本 module 冒頭の docs-alignment コメントで明文化済の既定挙動)。指値
+        # 価格が確定していないのに limit を出すと誤発注になるため。
+        # 2026-08-22 以前はここが order_type="market" 固定で、S2 の
+        # 「翌日 前日終値+4% 以上の指値売 (LIMIT)」が live で一度も出ていなかった。
+        limit_price = s.get("limit_price")
+        order_type = _DEFAULT_SYSTEM_ORDER_TYPE.get(system, "market")
+        if order_type == "limit" and not limit_price:
+            order_type = "market"
+            limit_price = None
+        if order_type != "limit":
+            limit_price = None
         po = PreparedOrder(
             symbol=sym,
             qty=qty,
             side=side,
-            order_type="market",
+            order_type=order_type,
+            limit_price=limit_price,
+            # 指値は **DAY**。翌セッションまで残った売り指値が寝たまま約定すると
+            # その日のシグナルでない建玉を持つことになるので GTC にはしない。
             time_in_force="day",
             client_order_id=client_order_id,
             system=system,
@@ -1461,13 +1489,16 @@ def signals_json_to_orders(
             continue
 
         # (3) 実行方式を分類: long+fractionable→notional / それ以外→整数株 / 不能→skip
+        #     指値注文 (S2 の spec 指値等) は notional (成行専用) では出せないので
+        #     必ず整数株経路へ寄せる。ここで prefer_fractional を落とさないと
+        #     long の指値が黙って成行に化ける。
         fractionable = get_asset_fractionable(client, po.symbol)
         mode, qty, notional, reason = plan_order_execution(
             side=po.side,
             notional_usd=float(po.notional_usd or 0.0),
             price=price,
             fractionable=fractionable,
-            prefer_fractional=prefer_fractional,
+            prefer_fractional=prefer_fractional and po.order_type != "limit",
         )
         po.exec_mode = mode
         po.extra["fractionable"] = fractionable
@@ -1502,6 +1533,7 @@ def signals_json_to_orders(
                     qty,
                     po.side,
                     order_type=po.order_type,
+                    limit_price=po.limit_price,
                     time_in_force=po.time_in_force,
                     client_order_id=po.client_order_id,
                     dry_run=False,
@@ -1550,6 +1582,11 @@ _PROTECT_STOP_SUFFIX = "protect-stop"
 _PROTECT_TRAIL_SUFFIX = "protect-trail"
 _PROTECT_TARGET_SUFFIX = "protect-target"
 _PROTECT_OCO_SUFFIX = "protect-oco"
+# OCO 昇格が broker に拒否されたときに張り直す単発 stop の suffix。
+# 元の coid は再利用できない (Alpaca は client_order_id を使い回せない) ので
+# 別名にする。この coid が resting = 「昇格を一度試して失敗した建玉」の印で、
+# 以後の run は昇格を再試行せず従来の stop-only 定常状態を維持する。
+_PROTECT_STOP_REARM_SUFFIX = "protect-stop-rearm"
 _EXIT_TIME_SUFFIX = "exit-time"
 _EXIT_BREAKOUT_SUFFIX = "exit-breakout"
 # 端株 (fractional) 用 synthetic protection の coid suffix。Alpaca は端株に
@@ -1669,6 +1706,11 @@ class PreparedExit:
     skip_reason: str | None = None
     dry_run: bool = True
     time_in_force: str = "day"
+    # この注文を出す **前に** cancel すべき resting order の client_order_id。
+    # PROTECT_USE_OCO=1 の stop -> OCO 昇格でだけ使う (単発 stop が qty を全量
+    # 予約したままだと OCO が code 40310000 で確実に拒否されるため)。
+    # dry-run では絶対に cancel しない (提案として artifact に残るだけ)。
+    cancel_client_order_ids: list[str] = field(default_factory=list)
 
     def to_row(self) -> dict[str, Any]:
         return asdict(self)
@@ -1850,25 +1892,75 @@ def hydrate_system_tags(
 # -----------------------------------------------------------------------
 
 
+def _nyse_trading_days_between(d0: date, d1: date) -> int | None:
+    """[d0, d1) の NYSE 立会日数。calendar が使えない時は None。
+
+    ``pandas_market_calendars`` は既に ``common/utils_spy`` が使っている依存
+    なので新規追加ではない。祝日 (Thanksgiving 等) を平日として数えないために
+    素の ``busday_count`` より優先する。lazy import で本 module の import
+    コストは増やさない。
+    """
+    if d1 <= d0:
+        return 0
+    try:
+        import pandas_market_calendars as mcal
+
+        sched = mcal.get_calendar("NYSE").schedule(
+            start_date=pd.Timestamp(d0), end_date=pd.Timestamp(d1)
+        )
+        days = pd.to_datetime(sched.index).normalize()
+        # [d0, d1): entry 当日は 0 日保有、d1 当日も未経過として数えない。
+        return int(((days > pd.Timestamp(d0)) & (days <= pd.Timestamp(d1))).sum())
+    except Exception:
+        return None
+
+
 def compute_holding_days(
     entry_date: str | None, today: str | None = None
 ) -> int | None:
     """entry_date (ISO 'YYYY-MM-DD') と today から holding days を計算。
 
-    parse 失敗時は None。
+    **立会日 (trading day) で数える**。parse 失敗時は None。
+
+    NOTE (2026-08-22 fix): 以前は暦日 (``(d1 - d0).days``) を返していたが、
+    突き合わせ先の ``SystemTradeRules.max_holding_days`` は立会日ベースの spec
+    である:
+
+      - ``strategies/system2_strategy.py`` compute_exit docstring:
+        「未達: 2営業日待っても利確に届かない場合は3日目の大引けで決済」
+      - 同 compute_exit のループは ``idx = entry_idx + offset`` = **bar 単位**
+        (= 立会日) で回る。
+      - ``config/config.yaml`` system2.max_hold_days: 2 (「書籍通り」)
+
+    暦日で数えると金曜エントリーの System2 は土日を 2 日と数え、月曜 (=立会 1 日)
+    に time exit が発火して **spec より 1 立会日早く** 手仕舞ってしまう。
+    立会日換算は既存の ``common/profit_protection.calculate_business_holding_days``
+    と同じ概念で、こちらは NYSE 祝日も除外する (calendar が無ければ
+    ``np.busday_count`` 相当の Mon-Fri 換算へフォールバック)。
     """
     if not entry_date:
         return None
     try:
-        d0 = datetime.fromisoformat(str(entry_date)[:10])
+        d0 = datetime.fromisoformat(str(entry_date)[:10]).date()
         if today is None:
             d1 = datetime.now(timezone.utc).date()
-            d1 = datetime(d1.year, d1.month, d1.day)
         else:
-            d1 = datetime.fromisoformat(str(today)[:10])
-        return int((d1 - d0).days)
+            d1 = datetime.fromisoformat(str(today)[:10]).date()
     except Exception:
         return None
+    if d1 <= d0:
+        return 0
+    exact = _nyse_trading_days_between(d0, d1)
+    if exact is not None:
+        return exact
+    try:
+        import numpy as np
+
+        return int(np.busday_count(d0, d1))
+    except Exception:
+        # 最終手段: 暦日 (従来挙動)。ここに落ちるのは numpy も calendar も
+        # 使えない環境だけ。
+        return int((d1 - d0).days)
 
 
 # -----------------------------------------------------------------------
@@ -2088,6 +2180,8 @@ _PROTECT_SUFFIX_BY_KIND = {
     "trailing": _PROTECT_TRAIL_SUFFIX,
     "stop": _PROTECT_STOP_SUFFIX,
     "target": _PROTECT_TARGET_SUFFIX,
+    "oco": _PROTECT_OCO_SUFFIX,
+    "stop_rearm": _PROTECT_STOP_REARM_SUFFIX,
 }
 
 
@@ -2172,15 +2266,79 @@ def _build_protection_orders(
         return []
 
     # (2) 同種が既に open なら従来どおり静かに skip (これは正常な定常状態)。
+    #
+    # NOTE (2026-08-22): OCO は自分自身の coid を dedup 対象に入れていなかった。
+    # PROTECT_USE_OCO=1 で一度 OCO が resting になると、翌 run も legs={stop,target}
+    # のまま OCO 分岐へ入って **同じ coid を毎日再送** し、Alpaca の 422 duplicate を
+    # 毎日 1 件の「失敗」として記録してしまう (classify_exit_submit_error は 40310000
+    # しか救わない)。resting OCO は stop+target 両方を張り終えた正常な定常状態なので、
+    # 静かに skip する。
+    if _coid("oco") in existing_protect_coids:
+        return []
+    # 昇格に失敗して張り直した stop (rearm) も「stop が resting」として扱う。
+    stop_rearmed = _coid("stop_rearm") in existing_protect_coids
     already_open = [
         k
         for k in _PROTECT_KIND_PRIORITY
-        if k in legs and _coid(k) in existing_protect_coids
+        if k in legs
+        and (
+            _coid(k) in existing_protect_coids or (k == "stop" and stop_rearmed)
+        )
     ]
     for k in already_open:
         legs.pop(k, None)
     if not legs:
         return []
+
+    # (2.5) stop -> OCO 昇格 (PROTECT_USE_OCO=1 のみ)。
+    #
+    # なぜ必要か: 単発 stop が既に resting だと (2) の already_open で短絡し、
+    # OCO 分岐 (3) に **到達しない**。つまり flag を立てても既存建玉の利確は
+    # 永久に張られないままになる。2026-08-22 の paper 実測でも、flag ON/OFF で
+    # 提案 25 件が 1 行も変わらなかった (broker 側 resting = stop 17 / trail 5 /
+    # target 0 / oco 0)。
+    # 昇格は「単発 stop だけが resting」かつ「target leg も作れる」時に限る。
+    # trailing が握っている建玉 (S1/S4) は OCO 化しない = 従来どおり。
+    # ``stop_rearmed`` = 過去に昇格して broker に拒否された建玉。再試行しない
+    # (毎日 cancel -> 拒否 -> 張り直しを繰り返して保護に穴を空けないため)。
+    if (
+        _protect_use_oco()
+        and already_open == ["stop"]
+        and not stop_rearmed
+        and "target" in legs
+        and "trailing" not in legs
+    ):
+        stop_price_up = _stop_price_for(snap, rules, atr_value)
+        target_price_up = _target_price_for(snap, rules, atr_value)
+        if (
+            stop_price_up is not None
+            and target_price_up is not None
+            and target_price_up > 0
+        ):
+            oco_up = PreparedExit(
+                symbol=snap.symbol,
+                system=snap.system,
+                qty=snap.exit_qty(),
+                side=close_side,
+                order_type="oco",
+                reason=ExitReasonCode.PROTECT_OCO,
+                entry_date=snap.entry_date,
+                limit_price=round_to_alpaca_tick(target_price_up),
+                stop_price=round_to_alpaca_tick(stop_price_up),
+                client_order_id=_coid("oco"),
+                dry_run=True,
+                time_in_force="gtc",
+                # 単発 stop を先に外さないと qty 予約で OCO が拒否される。
+                cancel_client_order_ids=[_coid("stop")],
+            )
+            logger.info(
+                "protection OCO 昇格: %s の単発 stop を外して stop=%.4f /"
+                " target=%.4f の OCO へ差し替える (利確が常駐できるようになる)。",
+                snap.symbol,
+                oco_up.stop_price or 0.0,
+                oco_up.limit_price or 0.0,
+            )
+            return [oco_up]
 
     if already_open:
         # 別種の protection が既に qty を全量握っている → 新規 leg は必ず
@@ -2252,6 +2410,44 @@ def _build_protection_orders(
         )
         out.append(po)
     return out
+
+
+def build_stop_rearm_after_failed_oco(po: PreparedExit) -> PreparedExit | None:
+    """OCO 昇格が失敗したときに張り直す単発 stop を作る (pure)。
+
+    昇格は「resting の単発 stop を cancel してから OCO を出す」ので、OCO が
+    broker に拒否されると **建玉が無保護のまま翌 run まで放置** される。これは
+    利確が張れないことより遥かに悪い。よって昇格由来の OCO が失敗したら、
+    同じ qty / 同じ stop 価格の単発 stop を必ず張り直す。
+
+    coid は元のものを再利用できない (Alpaca は client_order_id を使い回せない)
+    ため ``-protect-stop-rearm`` を使う。この coid は次回以降の
+    ``_build_protection_orders`` で「stop は resting」かつ「昇格済で失敗」と
+    解釈され、昇格は再試行されない。
+
+    昇格由来でない OCO / stop 価格が無い場合は None (張り直す対象が無い)。
+    """
+    if po.order_type != "oco":
+        return None
+    if not (po.cancel_client_order_ids or []):
+        return None
+    if po.stop_price is None or po.stop_price <= 0:
+        return None
+    entry_date_compact = (po.entry_date or "").replace("-", "")
+    base = f"protect-{po.system}-{po.symbol}-{entry_date_compact}"
+    return PreparedExit(
+        symbol=po.symbol,
+        system=po.system,
+        qty=po.qty,
+        side=po.side,
+        order_type="stop",
+        reason=ExitReasonCode.PROTECT_STOP,
+        entry_date=po.entry_date,
+        stop_price=po.stop_price,
+        client_order_id=f"{base}-{_PROTECT_STOP_REARM_SUFFIX}",
+        dry_run=True,
+        time_in_force="gtc",
+    )
 
 
 def _build_synthetic_protection_orders(
@@ -2962,4 +3158,5 @@ __all__ = [
     "submit_paper_exit_orders",
     "fetch_existing_protect_coids",
     "fetch_existing_exit_coids",
+    "build_stop_rearm_after_failed_oco",
 ]

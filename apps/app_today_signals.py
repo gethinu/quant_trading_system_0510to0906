@@ -2663,7 +2663,17 @@ def _entry_and_stop_prices(
             stop_mult = float(strategy.config.get("stop_atr_multiple", 5.0))
             return entry_price, entry_price - stop_mult * atr20
         if system == "system2":
-            entry_price = float(df.iloc[int(entry_idx)]["Open"])
+            # docs/systems/システム2.txt「仕掛け」:
+            #   「翌日、前日の終値を4%以上上回る価格で売る。」
+            # = 前日終値 x (1 + entry_min_gap_pct) の **指値売**。
+            # config/config.yaml system2.entry_min_gap_pct: 0.04
+            # common/trade_management.py system2: entry_type=LIMIT /
+            #   entry_price_offset_pct=4.0 / entry_reference="close"
+            # 旧実装は当日 Open を約定価格として復元していたが、指値の建玉に
+            # Open を当てると stop も +4% 利確も spec からズレる (system6 は
+            # 同じ指値系なのに ratio で復元しており、system2 だけが例外だった)。
+            gap = float(strategy.config.get("entry_min_gap_pct", 0.04))
+            entry_price = round(prev_close * (1.0 + gap), 2)
             atr = float(df.iloc[int(max(0, entry_idx - 1))]["ATR10"])
             stop_mult = float(strategy.config.get("stop_atr_multiple", 3.0))
             return entry_price, entry_price + stop_mult * atr

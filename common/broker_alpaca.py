@@ -549,6 +549,49 @@ def cancel_open_orders_for_symbols(client, symbols: Iterable[str]) -> dict[str, 
     return result
 
 
+def cancel_open_orders_by_client_order_ids(
+    client, client_order_ids: Iterable[str]
+) -> dict[str, Any]:
+    """指定 client_order_id の未約定注文だけを cancel する (GET -> 個別 cancel by id)。
+
+    ``cancel_open_orders_for_symbols`` の symbol スコープよりさらに狭い。
+    PROTECT_USE_OCO=1 の「単発 stop -> OCO 昇格」で、その建玉の *その stop 1 本* だけを
+    外すために使う。同じ銘柄に載っている他の注文 (ユーザーの手動注文等) には触らない。
+
+    - 個別 cancel の失敗は握り潰し (best-effort)。返り値でカウントを返す。
+    - paper / read-then-cancel。position 自体は触らない。
+    """
+    want = {str(c).strip() for c in client_order_ids if str(c).strip()}
+    result: dict[str, Any] = {"canceled": 0, "coids": [], "want": sorted(want)}
+    if not want:
+        return result
+    try:
+        open_orders = get_open_orders(client)
+    except Exception:
+        return result
+    touched: list[str] = []
+    for o in open_orders or []:
+        coid = str(getattr(o, "client_order_id", "") or "")
+        if coid not in want:
+            continue
+        oid = getattr(o, "id", None)
+        if oid is None:
+            continue
+        for meth in ("cancel_order_by_id", "cancel_order"):
+            fn = getattr(client, meth, None)
+            if fn is None:
+                continue
+            try:
+                fn(oid)
+                result["canceled"] += 1
+                touched.append(coid)
+                break
+            except Exception:
+                continue
+    result["coids"] = sorted(set(touched))
+    return result
+
+
 def subscribe_order_updates(client, log_callback=None):
     """注文更新の WebSocket を購読して即時実行（ブロッキング）。"""
     _require_sdk()

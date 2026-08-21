@@ -83,6 +83,11 @@ from common.order_status import (  # noqa: E402  (ROOT を通してから import
 PYEXE = sys.executable
 OBSERVABILITY_DEGRADED_EXIT_CODE = 4
 
+# gate() の Alpaca clock 取得リトライ。gate は exit_stage より前なので、clock の
+# 一過性エラーで ABORT すると **その日の time exit が丸ごと飛ぶ**。
+_CLOCK_FETCH_ATTEMPTS = 3
+_CLOCK_FETCH_BACKOFF_SECONDS = 2.0
+
 
 def _child_env() -> dict[str, str]:
     """子プロセス用 env: UTF-8 を強制して cp932 デコード事故を根絶する。"""
@@ -320,23 +325,52 @@ class Runner:
             return False
 
         # market-open (Alpaca clock)
-        try:
-            clock = self._client().get_clock()
-            is_open = bool(getattr(clock, "is_open", False))
-            self.record["market_is_open"] = is_open
-            self.record["clock_next_open"] = str(getattr(clock, "next_open", ""))
-            self.log(f"[gate] market_is_open={is_open}")
-        except Exception as exc:  # noqa: BLE001
-            self.log(f"[gate] clock 取得失敗: {exc}")
+        #
+        # NOTE (2026-08-22 fix): clock の取得は **単発** で、1 回でも失敗すると
+        # is_open=False -> ABORT となり、gate は exit_stage より前なので
+        # **その日の time exit が丸ごと飛ぶ**。市場が実際に開いていても API の
+        # 一過性エラーだけで手仕舞いが 1 立会日遅れる (max_holding_days=2 の
+        # System2 では致命的)。少数回リトライしてから「閉場」と結論する。
+        # 本当に閉場ならリトライしても閉場のままなので、安全側は崩れない。
+        is_open = False
+        clock_error: str | None = None
+        for attempt in range(_CLOCK_FETCH_ATTEMPTS):
+            try:
+                clock = self._client().get_clock()
+                is_open = bool(getattr(clock, "is_open", False))
+                clock_error = None
+                self.record["market_is_open"] = is_open
+                self.record["clock_next_open"] = str(getattr(clock, "next_open", ""))
+                self.log(
+                    f"[gate] market_is_open={is_open} (attempt {attempt + 1})"
+                )
+                break
+            except Exception as exc:  # noqa: BLE001
+                clock_error = str(exc)
+                self.log(
+                    f"[gate] clock 取得失敗 (attempt {attempt + 1}/"
+                    f"{_CLOCK_FETCH_ATTEMPTS}): {exc}"
+                )
+                if attempt + 1 < _CLOCK_FETCH_ATTEMPTS:
+                    time.sleep(_CLOCK_FETCH_BACKOFF_SECONDS * (attempt + 1))
+        if clock_error is not None:
             is_open = False
             self.record["market_is_open"] = None
+            # 「閉場だった」と「clock が読めなかった」は別物。取り違えると
+            # exit が飛んだ日を「休場だから正常」と誤読する。
+            self.record["clock_unavailable"] = clock_error
         if not is_open and not self.args.allow_closed:
-            self.log("[gate] market CLOSED -> ABORT (--allow-closed で無視可)")
-            self.record["abort"] = "market_closed"
-            self._ntfy_warn(
-                f"OpenAutoRun ABORT {self.date}",
-                "market closed のため自動発注を中止 (paper)。",
+            reason = "clock_unavailable" if clock_error else "market_closed"
+            self.log(f"[gate] {reason} -> ABORT (--allow-closed で無視可)")
+            self.record["abort"] = reason
+            detail = (
+                f"clock を {_CLOCK_FETCH_ATTEMPTS} 回取得できず開場判定不能"
+                f" ({clock_error}): 自動発注を中止 (paper)。**exit も飛ぶ**ので"
+                " 保有の期限超過を確認すること。"
+                if clock_error
+                else "market closed のため自動発注を中止 (paper)。"
             )
+            self._ntfy_warn(f"OpenAutoRun ABORT {self.date}", detail)
             return False
         return True
 
