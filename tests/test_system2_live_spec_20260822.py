@@ -275,14 +275,18 @@ class TestLimitEntry:
         "system_module,side,atr_col",
         [
             ("strategies.system1_strategy:System1Strategy", "long", "ATR20"),
-            ("strategies.system3_strategy:System3Strategy", "long", "ATR10"),
             ("strategies.system4_strategy:System4Strategy", "long", "ATR40"),
-            ("strategies.system5_strategy:System5Strategy", "long", "ATR10"),
-            ("strategies.system6_strategy:System6Strategy", "short", "ATR10"),
         ],
     )
     def test_other_systems_live_entry_is_unchanged(self, system_module, side, atr_col):
-        """S1/S3/S4/S5/S6 は従来どおり offset なしの前日終値のまま。"""
+        """成行 system (S1/S4) は従来どおり offset なしの前日終値のまま。
+
+        NOTE (2026-08-22, S3/S5/S6 fix): S3/S5/S6 はこの本 fix の時点では
+        ``prev_close_fallback`` のままで、当テストもそれを固定していた。同日の
+        後続 fix で 3 系統にも spec 指値 (S3 x0.93 / S5 x0.97 / S6 x1.05) を
+        生やしたため、ここでは成行 spec の S1/S4 だけを残す。3 系統の新しい
+        期待値は ``tests/test_system356_live_spec_20260822.py`` が固定する。
+        """
         import importlib
 
         mod_name, cls_name = system_module.split(":")
@@ -403,6 +407,13 @@ class TestOrderEmission:
         assert s2.side == "sell"
 
     def test_other_systems_still_emit_market_orders(self):
+        """この JSON は sys2 にしか ``limit_price`` を載せていない。
+
+        S3/S5/S6 は ``_DEFAULT_SYSTEM_ORDER_TYPE`` 上は limit だが、行に指値が
+        無いので documented fallback (market) に落ちる — それをここで固定する。
+        指値が **載っている** ときの期待値は
+        ``tests/test_system356_live_spec_20260822.py`` 側。
+        """
         orders = {
             o.system: o
             for o in signals_json_to_orders(
