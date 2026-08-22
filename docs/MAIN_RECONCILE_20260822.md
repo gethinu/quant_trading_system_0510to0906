@@ -4,7 +4,7 @@
 その解消。あわせて 2 件の修正 (保有日数の単位 / 指値なし limit の扱い) を land した。
 
 - 起点 `origin/main` = `2d09839`
-- 着点 `main` = `75a9f96`
+- 着点 `main` = 本ファイルを含む commit (`git log 2d09839..main`)
 - **live 発注は一切していない (paper のみ / MT5 端末不使用)**。main は何も実行して
   いないので、この取り込みによる **live 挙動の変化はゼロ**。
 
@@ -134,7 +134,7 @@ main 側の既存修正 (`f8fbba4` / `ffb5acb` / `2d09839`) が auto-merge 後�
 | `5707179` | Phase1 常設ゲート (measurement/served/freshness/monotonic/snapshot/funnel) | (a) | land `14f3a91` |
 | `db9a2e6` | alpaca data 検証スクリプト + publish/exit hardening 運用ドキュメント | (a) | land `c995aed` |
 | `d9e750a` | pipeline_20260730 を fired/armed 新セマンティクスで再計測 | (a) | land `c0ff8c3` |
-| `5ec0e6c` | producer → recon → preflight を 1 本の鎖として検証 | (a) | land `da26188` |
+| `5ec0e6c` | producer → recon → preflight を 1 本の鎖として検証 | (a) だが **依存が §5.1 側** | land 後に **revert `ad53c16`**。`scripts/prepare_dashboard_bundle.py` (= `26385b0` 由来) を import するため単体では collection error になる |
 | `c8c180f` | publish した run が production に届かないことの検出 | (a) | land `cc9cb6b` |
 | `a473453` | ハードコードパスの表記を forward slash に統一 | (a) | land `7f02cc0` |
 | `8bca2f9` | exit-ledger 鮮度を **立会セッション**で判定 (暦日 today ではない) | (a) | land `e8ca2ba` |
@@ -299,9 +299,10 @@ python -m pytest tests -o addopts='' -q -p no:randomly -p no:cacheprovider \
 | | 失敗 + エラー |
 |---|---|
 | baseline (`2d09839`) | **238** (225 failed + 13 errors) |
-| after (`75a9f96`) | 本文末尾に記載 |
+| after (`ad53c16`) | **238** (224 failed + 14 errors) — **新規 0 / 解消 1** |
 
-**新規失敗 0** が受け入れ条件。1 回目の突合で出た 9 件は以下のとおり全て
+**新規失敗 0** が受け入れ条件 (最終確認済み。`tests/test_publish_signals.py::
+test_ntfy_dry_run_headers_and_action` は逆に **解消** した)。1 回目の突合で出た 9 件は以下のとおり全て
 **テスト側の前提が古い**もので、`75a9f96` で解消した (`fix(test): 統合後の期待値を…`):
 
 | 失敗 | 原因 | 対応 |
@@ -317,6 +318,12 @@ python -m pytest tests -o addopts='' -q -p no:randomly -p no:cacheprovider \
 main の `f8fbba4` が **当日バーの到達判定**を入れていたため。指値の *値* を比べる
 テストは到達するバーを作るよう直し、**到達しないバーが None になること**を新テストで
 別に固定した (`c37d3bb`)。
+
+`5ec0e6c` (`test(obs): producer -> recon -> preflight`) はテキスト上 clean に
+cherry-pick できたが、`scripts/prepare_dashboard_bundle.py` (§5.1 の `26385b0` 由来) を
+import するため collection error になった。**「clean に当たる」= 「単体で成立する」では
+ない**ことの実例で、`ad53c16` で revert した (dashboard bundle 系を land するパスで
+一緒に入れる)。
 
 repo 全体 `ruff check .` は **All checks passed** (取り込んだ新規ファイルの
 lint 債務 6 件を `75a9f96` で解消済み)。
