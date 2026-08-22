@@ -406,27 +406,45 @@ class TestOrderEmission:
         assert s2.time_in_force == "day"
         assert s2.side == "sell"
 
-    def test_other_systems_still_emit_market_orders(self):
+    def test_market_systems_emit_market_orders_and_limit_systems_skip(self):
         """この JSON は sys2 にしか ``limit_price`` を載せていない。
 
-        S3/S5/S6 は ``_DEFAULT_SYSTEM_ORDER_TYPE`` 上は limit だが、行に指値が
-        無いので documented fallback (market) に落ちる — それをここで固定する。
+        S1/S4/S7 は spec 上 market なのでそのまま成行。S3/S5/S6 は
+        ``_DEFAULT_SYSTEM_ORDER_TYPE`` 上 limit なのに行に指値が無いので
+        **skip** される (2026-08-22 以前は market へ silent downgrade していた)。
         指値が **載っている** ときの期待値は
         ``tests/test_system356_live_spec_20260822.py`` 側。
         """
+        from common.alpaca_trading import SKIP_LIMIT_WITHOUT_PRICE
+
         orders = {
             o.system: o
             for o in signals_json_to_orders(
                 self._json(), tier="medium", dry_run=True, account_equity=100_000.0
             )
         }
-        for other in ("system1", "system3", "system4", "system5", "system6", "system7"):
-            assert orders[other].order_type == "market", other
-            assert orders[other].limit_price is None, other
-            assert orders[other].time_in_force == "day", other
+        for market_sys in ("system1", "system4", "system7"):
+            assert orders[market_sys].order_type == "market", market_sys
+            assert orders[market_sys].limit_price is None, market_sys
+            assert orders[market_sys].time_in_force == "day", market_sys
+            assert orders[market_sys].skip_reason is None, market_sys
+        for limit_sys in ("system3", "system5", "system6"):
+            po = orders[limit_sys]
+            assert po.skip_reason is not None, limit_sys
+            assert po.skip_reason.startswith(SKIP_LIMIT_WITHOUT_PRICE), limit_sys
+            assert po.order_type != "market", limit_sys  # 成行に化けていない
+            assert po.limit_price is None, limit_sys
 
-    def test_limit_system_without_a_price_falls_back_to_market(self):
-        """limit_price が無い行は成行へ (誤発注防止)。既存の documented fallback。"""
+    def test_limit_system_without_a_price_is_skipped_not_downgraded(self):
+        """limit_price が無い行は **成行に落とさず skip** する (2026-08-22)。
+
+        S2 の spec は「前日終値 +4% 以上で売る」。指値が確定していない行を成行に
+        落とすと「いま売る」になり、spec とはまったく別の注文になる。誤発注を
+        避けたいならば **出さない** のが正しい。skip_reason を残すので、朝の
+        recon が ``limit_without_price: N`` として必ず数えられる。
+        """
+        from common.alpaca_trading import SKIP_LIMIT_WITHOUT_PRICE
+
         js = self._json()
         js["systems"]["sys2"]["signals"][0].pop("limit_price")
         orders = {
@@ -435,8 +453,13 @@ class TestOrderEmission:
                 js, tier="medium", dry_run=True, account_equity=100_000.0
             )
         }
-        assert orders["system2"].order_type == "market"
-        assert orders["system2"].limit_price is None
+        po = orders["system2"]
+        assert po.skip_reason is not None
+        assert po.skip_reason.startswith(SKIP_LIMIT_WITHOUT_PRICE)
+        assert po.order_type != "market"
+        assert po.limit_price is None
+        # recon の drop_breakdown が拾う kind
+        assert po.skip_reason.split(":")[1] == "limit_without_price"
 
 
 # =====================================================================

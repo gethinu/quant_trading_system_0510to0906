@@ -9,7 +9,8 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from common.alpaca_trading import signals_to_orders
+import common.alpaca_trading as at
+from common.alpaca_trading import SKIP_LIMIT_WITHOUT_PRICE, signals_to_orders
 
 
 @pytest.fixture
@@ -191,8 +192,18 @@ def test_empty_or_missing_shares_returns_empty():
     assert signals_to_orders(no_shares, account_equity=1.0, dry_run=True) == []
 
 
-def test_limit_without_price_falls_back_to_market():
-    """limit システムでも entry_price が無ければ market にフォールバック。"""
+def test_limit_without_price_is_skipped_not_downgraded():
+    """limit システムで entry_price が無い行は **成行に落とさず skip** する。
+
+    2026-08-22 以前は ``order_type="market"`` へフォールバックしていた。だが
+    S2 の spec は「前日終値 +4% 以上の指値売」、S3 は「-7% の指値買」なので、
+    指値が確定していない行を成行にすると **まったく別の注文** になる
+    (「7% 下で買う」→「いま成行で買う」)。誤発注を避けたいなら出さないのが正しい。
+
+    silent drop にはしない: 同 module の ``_side_from_row`` (side 不正行) と同じく
+    ``skip_reason`` + 監査ログ + ``logger.error`` を残し、朝の recon が
+    ``limit_without_price: N`` として数えられるようにする。
+    """
     df = pd.DataFrame(
         [
             {
@@ -205,5 +216,82 @@ def test_limit_without_price_falls_back_to_market():
         ]
     )
     orders = signals_to_orders(df, account_equity=100000.0, dry_run=True)
-    assert orders[0].order_type == "market"
-    assert orders[0].limit_price is None
+    assert len(orders) == 1
+    po = orders[0]
+    assert po.skip_reason is not None
+    assert po.skip_reason.startswith(SKIP_LIMIT_WITHOUT_PRICE)
+    assert po.order_type != "market"  # 成行に化けていない
+    assert po.limit_price is None
+    # scripts/build_execution_recon.py の drop_breakdown が拾う kind
+    assert po.skip_reason.split(":")[1] == "limit_without_price"
+
+
+def test_limit_with_a_price_is_still_emitted():
+    """指値が載っている行はそのまま limit として出る (skip は指値なしだけ)。"""
+    df = pd.DataFrame(
+        [
+            {
+                "symbol": "TSLA",
+                "system": "system2",
+                "side": "short",
+                "shares": 5,
+                "entry_date": "2026-06-30",
+                "entry_price": 250.0,
+            }
+        ]
+    )
+    po = signals_to_orders(df, account_equity=100000.0, dry_run=True)[0]
+    assert po.order_type == "limit"
+    assert po.limit_price == 250.0
+    assert po.skip_reason is None
+
+
+def test_market_system_without_a_price_is_untouched():
+    """market system (S1/S4/S7) は entry_price が無くても skip しない。"""
+    df = pd.DataFrame(
+        [
+            {
+                "symbol": "AAPL",
+                "system": "system1",
+                "side": "long",
+                "shares": 10,
+                "entry_date": "2026-06-30",
+            }
+        ]
+    )
+    po = signals_to_orders(df, account_equity=100000.0, dry_run=True)[0]
+    assert po.order_type == "market"
+    assert po.skip_reason is None
+
+
+def test_price_less_limit_is_never_submitted(monkeypatch):
+    """非 dry_run でも指値なし limit は broker へ送らない。"""
+    sent: list = []
+
+    def _fake_submit(*args, **kwargs):  # pragma: no cover - 呼ばれたら失敗
+        sent.append((args, kwargs))
+        raise AssertionError("指値なし limit が submit された")
+
+    monkeypatch.setattr(at, "submit_paper_order", _fake_submit)
+    monkeypatch.setattr(at, "assert_paper_env", lambda: None)
+    df = pd.DataFrame(
+        [
+            {
+                "symbol": "TSLA",
+                "system": "system2",
+                "side": "short",
+                "shares": 5,
+                "entry_date": "2026-06-30",
+            }
+        ]
+    )
+    orders = signals_to_orders(
+        df,
+        account_equity=100000.0,
+        dry_run=False,
+        open_positions={},
+        client=object(),
+    )
+    assert sent == []
+    assert len(orders) == 1  # 結果からは落とさない (silent drop 禁止)
+    assert orders[0].skip_reason.startswith(SKIP_LIMIT_WITHOUT_PRICE)

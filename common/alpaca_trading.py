@@ -656,6 +656,55 @@ def _order_type_from_row(row: pd.Series, override: str | None) -> str:
     return _DEFAULT_SYSTEM_ORDER_TYPE.get(system, "market")
 
 
+# --- 指値なし limit の扱い (2026-08-22) ---------------------------------
+# ``_DEFAULT_SYSTEM_ORDER_TYPE`` が limit の system (S2/S3/S5/S6) の行に
+# ``limit_price`` (JSON 経路) / ``entry_price`` (DataFrame 経路) が無い場合、
+# 2026-08-22 以前は **黙って成行へ落として発注** していた。これは
+# 「前日終値 -7% の指値買」を「いま成行で買う」に化けさせる silent downgrade で、
+# 指値が spec の一部である S3/S5 では entry 価格が丸ごと別物になる (S6/S2 の
+# 売り指値なら「+4% まで待つ」が「いま売る」になる)。
+#
+# 誤発注を防ぐための fallback だった、というのが元の意図だが、**成行で出すこと
+# 自体が誤発注** なので、同 module の ``_side_from_row`` (side 不正行) と同じ
+# 方針に揃える: 行を skip し、監査ログと skip_reason を残して観測可能にする。
+# 黙って落とさないので朝の recon (scripts/build_execution_recon.py の
+# drop_breakdown) に ``limit_without_price: N`` として必ず現れる。
+SKIP_LIMIT_WITHOUT_PRICE = "skip:limit_without_price"
+
+
+def _coerce_limit_price(raw: Any, *, round_tick: bool = False) -> float | None:
+    """limit price として使える正の float なら返す。使えなければ None。
+
+    ``None`` / 空文字 / 非数値 / 0 以下 / NaN をすべて「指値なし」として扱う。
+    """
+    if raw is None or raw == "":
+        return None
+    try:
+        px = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(px) or px <= 0:
+        return None
+    if round_tick:
+        px = round_to_alpaca_tick(px)
+        if px is None or px <= 0:
+            return None
+    return px
+
+
+def _limit_without_price_reason(system: str | None, raw: Any) -> str:
+    """recon の drop_breakdown が ``limit_without_price`` に集計できる skip 理由。"""
+    missing = raw is None or raw == ""
+    if not missing:
+        # pandas は列欠落を NaN で埋めるので、これも「値が無い」として扱う。
+        try:
+            missing = math.isnan(float(raw))
+        except (TypeError, ValueError):
+            missing = False
+    detail = "missing" if missing else f"invalid={raw!r}"
+    return f"{SKIP_LIMIT_WITHOUT_PRICE}:{system or 'unknown'}_{detail}"
+
+
 def _build_client_order_id(row: pd.Series) -> str:
     sym = str(row.get("symbol", "")).upper()
     system = str(row.get("system", "")).lower()
@@ -728,18 +777,31 @@ def signals_to_orders(
 
         ot = _order_type_from_row(row, order_type)
         limit_price: float | None = None
+        skip_reason: str | None = None
         if ot == "limit":
             raw_px = row.get("entry_price")
-            try:
-                if raw_px not in (None, ""):
-                    # sub-penny guard: >=$1 の limit entry を小数4桁のまま
-                    # 発注すると Alpaca が code 42210000 で拒否するため、native
-                    # protection order と同じ tick ルールで丸める。
-                    limit_price = round_to_alpaca_tick(float(raw_px))
-            except (TypeError, ValueError):
-                limit_price = None
+            # sub-penny guard: >=$1 の limit entry を小数4桁のまま発注すると
+            # Alpaca が code 42210000 で拒否するため、native protection order と
+            # 同じ tick ルールで丸める。
+            limit_price = _coerce_limit_price(raw_px, round_tick=True)
             if limit_price is None:
-                ot = "market"
+                skip_reason = _limit_without_price_reason(system, raw_px)
+                logger.error(
+                    "skip signals row: %s %s は指値 system だが entry_price が "
+                    "無い/不正 (raw=%r)。成行へ落とさず skip する。",
+                    system or "?",
+                    sym,
+                    raw_px,
+                )
+                _audit_log(
+                    {
+                        "event": "skip_limit_without_price",
+                        "detail": skip_reason,
+                        "symbol": sym,
+                        "system": system,
+                        "entry_date": entry_date,
+                    }
+                )
 
         po = PreparedOrder(
             symbol=sym,
@@ -752,14 +814,35 @@ def signals_to_orders(
             system=system or None,
             entry_date=entry_date,
         )
+        po.skip_reason = skip_reason
         prepared.append(po)
 
+    dropped_limits = sum(
+        1
+        for po in prepared
+        if (po.skip_reason or "").startswith(SKIP_LIMIT_WITHOUT_PRICE)
+    )
     logger.info(
         "signals_to_orders: %d 注文を生成 (equity=$%.0f, dry_run=%s)",
         len(prepared),
         account_equity,
         dry_run,
     )
+    if dropped_limits:
+        # 朝の recon が「指値が無くて落ちた N 件」を数えられるようにする。
+        # 黙って成行に化けさせるくらいなら、出さずに数えるほうが安全。
+        logger.warning(
+            "signals_to_orders: 指値 system の %d 件を limit_price 欠落で skip した "
+            "(成行フォールバックはしない)。",
+            dropped_limits,
+        )
+        _audit_log(
+            {
+                "event": "skip_limit_without_price_summary",
+                "count": dropped_limits,
+                "generated": len(prepared),
+            }
+        )
 
     if dry_run:
         for po in prepared:
@@ -768,6 +851,11 @@ def signals_to_orders(
 
     submitted: list[PreparedOrder] = []
     for po in prepared:
+        if po.skip_reason:
+            # 発注はしないが結果からは落とさない (silent drop 禁止)。
+            _audit_log({"event": "skip_pre_submit", **po.to_row()})
+            submitted.append(po)
+            continue
         result = submit_paper_order(
             po.symbol,
             po.qty,
@@ -1321,16 +1409,23 @@ def signals_json_to_orders(
 
         # 注文種別は docs/systems/システム{N}.txt の「仕掛け」節を single source of
         # truth とする _DEFAULT_SYSTEM_ORDER_TYPE に従う。
-        # ただし **limit_price が row に無ければ market へフォールバック** する
-        # (本 module 冒頭の docs-alignment コメントで明文化済の既定挙動)。指値
-        # 価格が確定していないのに limit を出すと誤発注になるため。
         # 2026-08-22 以前はここが order_type="market" 固定で、S2 の
         # 「翌日 前日終値+4% 以上の指値売 (LIMIT)」が live で一度も出ていなかった。
-        limit_price = s.get("limit_price")
         order_type = _DEFAULT_SYSTEM_ORDER_TYPE.get(system, "market")
-        if order_type == "limit" and not limit_price:
-            order_type = "market"
-            limit_price = None
+        limit_price = _coerce_limit_price(s.get("limit_price"))
+        if order_type == "limit" and limit_price is None:
+            # 指値 system なのに指値が無い行を **成行へ落とさない** (SKIP_LIMIT_
+            # WITHOUT_PRICE の docstring 参照)。skip_reason は最初に立った理由を
+            # 優先する (サイズ不能等が既にあるならそちらのほうが根本原因)。
+            if pre_skip is None:
+                pre_skip = _limit_without_price_reason(system, s.get("limit_price"))
+            logger.error(
+                "skip signals row: %s %s は指値 system だが limit_price が無い/不正 "
+                "(raw=%r)。成行へ落とさず skip する。",
+                system,
+                sym,
+                s.get("limit_price"),
+            )
         if order_type != "limit":
             limit_price = None
         po = PreparedOrder(
@@ -1354,6 +1449,26 @@ def signals_json_to_orders(
             po.skip_reason = pre_skip
         prepared.append(po)
 
+    dropped_limits = sum(
+        1
+        for po in prepared
+        if (po.skip_reason or "").startswith(SKIP_LIMIT_WITHOUT_PRICE)
+    )
+    if dropped_limits:
+        # skip_reason は build_execution_recon の drop_breakdown で
+        # ``limit_without_price: N`` として朝の recon に必ず現れる。
+        logger.warning(
+            "signals_json_to_orders: 指値 system の %d 件を limit_price 欠落で "
+            "skip した (成行フォールバックはしない)。",
+            dropped_limits,
+        )
+        _audit_log(
+            {
+                "event": "skip_limit_without_price_summary",
+                "count": dropped_limits,
+                "generated": len(prepared),
+            }
+        )
     logger.info(
         "signals_json_to_orders: %d 注文 mode=%s deploy_budget=$%.0f "
         "gross=$%.0f net=$%.0f dry_run=%s equity=$%.0f caps=%s",
@@ -3121,6 +3236,7 @@ __all__ = [
     "parse_entry_date_from_client_order_id",
     "fetch_position_snapshots",
     "hydrate_system_tags",
+    "SKIP_LIMIT_WITHOUT_PRICE",
     "compute_holding_days",
     "build_exit_orders_from_positions",
     "submit_paper_exit_order",

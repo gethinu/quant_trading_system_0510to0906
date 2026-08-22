@@ -94,18 +94,32 @@ def paper_env(monkeypatch):
 
 
 def _json(signals: list[dict], date="2026-07-02") -> dict:
-    """sys{N} JSON を組み立てる (_flatten_json_signals が system{N} に正規化)。"""
+    """sys{N} JSON を組み立てる (_flatten_json_signals が system{N} に正規化)。
+
+    指値 system (S2/S3/S5/S6) の行には ``limit_price`` を必ず載せる。載せないと
+    2026-08-22 以降は「指値 system なのに指値が無い」として skip され
+    (skip:limit_without_price)、このファイルが見たい **standing cap** の判定まで
+    到達しない。ここで見たいのは cap であって指値ではないので、spec の
+    ``entry_price_offset_pct`` から素直に作る。
+    """
+    from common.trade_management import SYSTEM_TRADE_RULES
+
     systems: dict = {}
     for s in signals:
         key = s["system"].replace("system", "sys")
-        systems.setdefault(key, {"signals": []})["signals"].append(
-            {
-                "symbol": s["symbol"],
-                "side": s["side"],
-                "entry_price": s.get("entry_price", 100.0),
-                "weight": s.get("weight", 1.0),
-            }
-        )
+        entry_price = s.get("entry_price", 100.0)
+        row = {
+            "symbol": s["symbol"],
+            "side": s["side"],
+            "entry_price": entry_price,
+            "weight": s.get("weight", 1.0),
+        }
+        rules = SYSTEM_TRADE_RULES.get(s["system"])
+        if rules is not None and rules.entry_type.value.lower() == "limit":
+            row["limit_price"] = round(
+                entry_price * (1.0 + rules.entry_price_offset_pct / 100.0), 2
+            )
+        systems.setdefault(key, {"signals": []})["signals"].append(row)
     return {"date": date, "systems": systems}
 
 

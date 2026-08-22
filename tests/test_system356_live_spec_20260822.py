@@ -389,12 +389,24 @@ class TestOrderEmission:
             assert orders[other].time_in_force == "day", other
 
     @pytest.mark.parametrize("system", SYSTEMS)
-    def test_limit_system_without_a_price_falls_back_to_market(self, system):
-        """limit_price が無い行は成行へ (誤発注防止)。既存の documented fallback。"""
+    def test_limit_system_without_a_price_is_skipped_not_downgraded(self, system):
+        """limit_price が無い行は **成行に落とさず skip** する (2026-08-22)。
+
+        以前はここで ``order_type="market"`` へフォールバックしていたが、それは
+        「前日終値 -7% の指値買」を「いま成行で買う」に化けさせる silent
+        downgrade だった。誤発注を防ぐための fallback という意図に対し、
+        **成行で出すこと自体が誤発注**なので、行を skip して理由を残す。
+        """
+        from common.alpaca_trading import SKIP_LIMIT_WITHOUT_PRICE
+
         keep = tuple(k for k in ("sys2", "sys3", "sys5", "sys6") if k != f"sys{system[-1]}")
-        orders = _orders(_json(with_limits=keep))
-        assert orders[system].order_type == "market", system
-        assert orders[system].limit_price is None, system
+        po = _orders(_json(with_limits=keep))[system]
+        assert po.skip_reason is not None, system
+        assert po.skip_reason.startswith(SKIP_LIMIT_WITHOUT_PRICE), system
+        assert po.order_type != "market", system  # 成行に化けていない
+        assert po.limit_price is None, system
+        # recon (scripts/build_execution_recon.py) が数えられる形になっていること
+        assert po.skip_reason.split(":")[1] == "limit_without_price", system
 
     @pytest.mark.parametrize("system", SYSTEMS)
     def test_end_to_end_todaysignal_to_order(self, system):
