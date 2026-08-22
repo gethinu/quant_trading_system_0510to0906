@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import sys
+from types import SimpleNamespace
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -19,6 +23,7 @@ from common.publishers.ntfy import (  # noqa: E402
     _latin1_safe_headers,
     _sanitize_ascii_title,
 )
+from scripts.publish_execution_summary import _resolve_recon  # noqa: E402
 
 
 def _recon() -> dict:
@@ -99,7 +104,7 @@ def test_title_is_ascii_plus_emoji_and_has_counts():
 def test_body_has_funnel_and_per_system_and_drops():
     body = build_body(_recon())
     assert "Tgt 4123 → sig 49 → gen 34 → entry 27 → fill 25" in body
-    assert "exit 14 (close 5 / protect 9)" in body
+    assert "exit 14 fired (close 5 / protect 9)" in body
     assert "LONG entry 18 / SHORT entry 9" in body
     assert "資産 $10,120" in body
     # per-system: s1 long, s2 short
@@ -180,3 +185,103 @@ def test_send_text_emoji_title_does_not_raise(monkeypatch):
     assert result.status_code == 200
     # POST に渡った X-Title は latin-1 safe
     captured["headers"]["X-Title"].encode("latin-1")
+
+
+def test_resolve_recon_rebuild_preserves_signals_run_id(tmp_path):
+    date_str = "2026-07-08"
+    compact = date_str.replace("-", "")
+    signals = {
+        "date": date_str,
+        "meta": {"run_id": "night-20260708-open"},
+        "portfolio": {"total_signals": 0},
+        "systems": {},
+    }
+    (tmp_path / f"today_signals_{compact}.json").write_text(
+        json.dumps(signals), encoding="utf-8"
+    )
+    args = SimpleNamespace(
+        results_dir=str(tmp_path),
+        date=date_str,
+        recon_json=None,
+        signals_json=None,
+        paper_orders_json=None,
+        exit_orders_json=None,
+        account_equity=None,
+    )
+
+    recon = _resolve_recon(args)
+
+    assert recon is not None
+    assert recon["source_signals_run_id"] == "night-20260708-open"
+
+
+def _resolver_args(tmp_path, *, recon_json=None):
+    return SimpleNamespace(
+        results_dir=str(tmp_path),
+        date="2026-07-08",
+        recon_json=recon_json,
+        signals_json=None,
+        paper_orders_json=None,
+        exit_orders_json=None,
+        account_equity=None,
+    )
+
+
+def _write_current_signals(tmp_path, run_id="night-20260708-open"):
+    payload = {
+        "date": "2026-07-08",
+        "meta": {"run_id": run_id},
+        "portfolio": {"total_signals": 1},
+        "systems": {"sys1": {"signals": [{"symbol": "AAPL", "side": "BUY"}]}},
+    }
+    (tmp_path / "today_signals_20260708.json").write_text(
+        json.dumps(payload), encoding="utf-8"
+    )
+    return payload
+
+
+def test_resolve_recon_reuses_default_only_when_lineage_matches(tmp_path):
+    _write_current_signals(tmp_path)
+    cached = {
+        "source_signals_run_id": "night-20260708-open",
+        "cached_sentinel": True,
+    }
+    (tmp_path / "recon_20260708.json").write_text(json.dumps(cached), encoding="utf-8")
+
+    recon = _resolve_recon(_resolver_args(tmp_path))
+
+    assert recon == cached
+
+
+@pytest.mark.parametrize(
+    "cached",
+    [
+        {"source_signals_run_id": "morning-20260708", "cached_sentinel": True},
+        {"version": "1.0", "cached_sentinel": True},
+    ],
+    ids=["mismatch", "legacy_without_lineage"],
+)
+def test_resolve_recon_rebuilds_stale_or_legacy_default(tmp_path, cached):
+    _write_current_signals(tmp_path)
+    (tmp_path / "recon_20260708.json").write_text(json.dumps(cached), encoding="utf-8")
+
+    recon = _resolve_recon(_resolver_args(tmp_path))
+
+    assert recon is not None
+    assert recon["source_signals_run_id"] == "night-20260708-open"
+    assert recon["portfolio"]["signals"] == 1
+    assert "cached_sentinel" not in recon
+
+
+def test_resolve_recon_keeps_explicit_recon_even_when_lineage_mismatches(tmp_path):
+    _write_current_signals(tmp_path)
+    explicit = {
+        "source_signals_run_id": "explicit-old-run",
+        "explicit_sentinel": True,
+    }
+    explicit_path = tmp_path / "operator-selected-recon.json"
+    explicit_path.write_text(json.dumps(explicit), encoding="utf-8")
+
+    recon = _resolve_recon(_resolver_args(tmp_path, recon_json=str(explicit_path)))
+
+    assert recon == explicit

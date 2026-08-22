@@ -120,3 +120,77 @@ git revert <commit-hash>   # config + final_allocation + portfolio_guard を戻�
 
 count/exposure cap のデフォルトは no-op なので、revert しなくても config を
 既定値に戻せば挙動は従来と一致する。
+
+---
+
+## 6. 追記 (2026-08-20) — exposure cap の equity 基準を実 equity に (flag-gated)
+
+**§2 / §3.1 は cap を「equity 比」と規定している** (`gross / equity`,
+`|net| / equity`, 「`equity × pct` を超える行を trim」)。ここで言う equity は
+**cash account の実口座 equity** であり (§2.1 `max_gross_exposure_pct` の根拠
+「cash account では gross ≤ equity が物理上限」)、固定額のことではない。
+
+### 6.1 実装の乖離 (バグ)
+
+`_apply_portfolio_caps(equity=...)` に渡される値は
+`finalize_allocation(default_capital=...)` から来るが、**本番の呼び出しは
+`default_capital` を渡していない**ため signature 既定の `100000.0` に落ちる。
+
+| 位置 | 内容 |
+|---|---|
+| `core/final_allocation.py::finalize_allocation` | `default_capital: float = 100000.0` (signature 既定) |
+| 同 `_apply_portfolio_caps` 呼び出し | `equity_base = _safe_positive_float(default_capital, ...) or 100000.0` |
+| `scripts/run_all_systems_today.py::compute_today_signals` | `finalize_allocation(...)` に `default_capital` を **渡していない** |
+| `scripts/open_auto_run.py::signals()` → `app_today_signals.py --headless` | `--capital-long/--capital-short` を渡さない (= `capital_long/short=None`) |
+
+実測 (`results_csv/today_signals_*.json` の `portfolio.caps`): 2026-08-13..19 の
+全営業日で `gross_cap_usd=100000.0 / net_cap_usd=50000.0` が **固定**。同期間の実
+equity は 99,788〜100,570 USD。**docs 意図からの逸脱であり、equity が 100k から
+乖離するほど cap がずれる**。
+
+### 6.2 修正 (既定 OFF)
+
+- 新 flag **`CAP_USE_REAL_EQUITY`** (既定 **OFF**)。OFF の間は挙動・診断 JSON とも
+  現行と完全一致 (新 key を 1 つも足さない)。
+- `common/cap_equity.py::resolve_cap_equity()` が equity を解決する。
+  解決順: `CAP_EQUITY_USD` (明示上書き) → Alpaca paper 口座 (**read-only GET**)
+  → `results_csv/alpaca_snapshot_*.json` の `account.equity` → 解決不能なら `None`
+  (= 呼び出し側は従来どおり `default_capital`)。
+- `finalize_allocation(cap_equity=..., cap_equity_source=...)` を additive に追加。
+  **cap の分母だけ**を差し替え、`capital_long/short` = サイジング予算には触れない。
+- ON のときだけ診断に `caps.equity_base_usd` / `caps.equity_source` が付く。
+
+### 6.3 計測結果 — この fix 単体では long 4 system は解放されない
+
+`scripts/replay_portfolio_caps.py` (オフライン・発注ゼロ) で 2026-08-13..19 の
+7 営業日を「固定 100k」対「実 equity」で再生した。再構成は arm A が当日の記録を
+再現できるかで自己検証済 (**7/7 日一致**)。
+
+- **equity 基準の差し替えだけでは kept が 1 件も変わらない (0/7 日)**。
+  当該期間の trim 理由は毎日 `long_count` のみで、`gross_exposure` /
+  `net_exposure` による trim は **1 件も発生していない** (新規 long notional は
+  $5.4k〜6.2k、|net| は $6.1k〜7.1k に対し net cap は $50k / gross cap は $100k)。件数 cap は equity に依存しないため、equity を上げても
+  下げても `allow_long` は動かない。
+- 実際の binding constraint は **`allow_long = max_long_positions(40) − held_long`**。
+  held_long 30〜32 のうち **28〜30 は `held_unmapped` (delisted/orphan)**。
+  orphan を held から外した counterfactual では `allow_long` が 8〜10 → 38 に増え、
+  sys3 が 10、sys4 が 8〜10、sys5 が 0〜8 本入る。
+- したがって **sys5 兵糧攻めの主因は cap の equity 基準ではなく、orphan 建玉に
+  よる long 枠の占有**。本 fix は docs 準拠への回帰として単独で正当だが、
+  sys5 解放の手段ではない。
+- ただし orphan を解消した後は exposure が跳ね上がる。trim 行の position_value を
+  kept の平均と仮定すると gross $31.8k〜$42.9k / |net| $7.7k〜$18.8k、kept の最大値
+  と仮定する悲観ケースでは gross $45.0k〜$62.2k / |net| $20.8k〜$37.7k となり、
+  後者では **実際に `net_exposure` trim が発生する日が出る** (2026-08-16/17/19)。
+  すなわち **orphan 解消後は exposure cap が binding になり得る**。その局面では
+  cap の分母が実 equity かどうかが効くので、本 fix は orphan 解消の**前**に
+  入れておく価値がある。
+
+### 6.4 有効化 (paper のみ / ライブ発注なし)
+
+```bash
+CAP_USE_REAL_EQUITY=1 python scripts/open_auto_run.py --date <YYYY-MM-DD> --dry-run
+```
+
+`CAP_EQUITY_USD=<usd>` で equity を明示上書きできる (replay / 検証用)。
+本 flag は allocation 段の候補 trim にしか効かず、submit 経路は不変。

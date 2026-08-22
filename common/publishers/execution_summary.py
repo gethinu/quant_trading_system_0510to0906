@@ -55,13 +55,22 @@ def build_body(recon: dict[str, Any]) -> str:
     gen = _n(p.get("orders_generated"))
     entry = _n(p.get("entry_submitted"))
     fill = _n(p.get("entry_filled"))
-    exit_sub = _n(p.get("exit_submitted"))
-    exit_close = _n(p.get("exit_close"))
-    exit_protect = _n(p.get("exit_protect"))
+    exit_sub = _n(p.get("exit_submitted"))  # fired
+    exit_close = _n(p.get("exit_close"))    # fired 分のみ
+    exit_protect = _n(p.get("exit_protect"))  # fired 分のみ
+    exit_armed = _n(p.get("exit_armed"))    # 未発火の保護注文 (別枠)
 
     # 1 行目: 全体 funnel
-    lines.append(f"Tgt {tgt_s} → sig {sig} → gen {gen} → entry {entry} → fill {fill}")
-    lines.append(f"exit {exit_sub} (close {exit_close} / protect {exit_protect})")
+    lines.append(
+        f"Tgt {tgt_s} → sig {sig} → gen {gen} → entry {entry} → fill {fill}"
+    )
+    # exit 行: fired (= submitted, close+protect が常に一致) と armed を分離表示。
+    # 「exit 0 / protect 25」の誤解 (fired と armed の分母混在) を解消する。
+    armed_suffix = f" · {exit_armed} armed" if exit_armed else ""
+    lines.append(
+        f"exit {exit_sub} fired (close {exit_close} / protect {exit_protect})"
+        f"{armed_suffix}"
+    )
 
     # long/short 充足 + 残高
     le = _n(p.get("long_entry_submitted"))

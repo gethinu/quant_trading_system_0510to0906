@@ -240,6 +240,35 @@ class System6Strategy(AlpacaOrderMixin, StrategyBase):
             return None
         return entry_price, stop_price
 
+    def compute_entry_limit_price(self, prev_close: float) -> float | None:
+        """spec の指値売り価格 = 前日終値 x entry_price_ratio_vs_prev_close。
+
+        docs/systems/システム6.txt「仕掛け」:
+            「前日の終値を5%上回る位置に指値を置いて売る。」
+
+        値の出所 (いずれも既存の repo 内 spec。ここで新しい数字は作らない):
+          - ``config/config.yaml`` system6.entry_price_ratio_vs_prev_close: 1.05
+          - ``common/trade_management.py`` system6:
+                entry_type=LIMIT / entry_price_offset_pct=5.0 /
+                entry_reference="close"  (1 + (5.0/100) = 1.05)
+          - ``common/alpaca_trading.py`` の docs-alignment コメント:
+                「S6 = 前日終値+5% 指値売 (LIMIT)」
+
+        ``compute_entry`` (バックテスト経路) は entry_date の bar が df にある前提で
+        同じ ratio を掛ける。**翌日の指値を今日出す live 経路には entry_date の bar
+        がまだ無い** ため (``df.index.get_loc`` が失敗して None を返す)、こちらは
+        prev_close だけから spec そのままの指値を返す。丸めは ``compute_entry``
+        と同じ 2 桁。
+        """
+        try:
+            pc = float(prev_close)
+        except (TypeError, ValueError):
+            return None
+        if not (pc > 0):
+            return None
+        ratio = float(self.config.get("entry_price_ratio_vs_prev_close", 1.05))
+        return round(pc * ratio, 2)
+
     def compute_exit(
         self,
         df: pd.DataFrame,

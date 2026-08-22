@@ -52,11 +52,14 @@ from common.alpaca_trading import (  # noqa: E402
     PreparedExit,
     assert_paper_env,
     build_exit_orders_from_positions,
+    build_stop_rearm_after_failed_oco,
+    classify_exit_submit_error,
     fetch_existing_exit_coids,
     fetch_existing_protect_coids,
     fetch_position_snapshots,
     parse_entry_date_from_client_order_id,
     parse_system_from_client_order_id,
+    probe_asset_tradable,
     submit_paper_exit_order,
 )
 from common.exit_artifacts import (  # noqa: E402
@@ -65,10 +68,12 @@ from common.exit_artifacts import (  # noqa: E402
     write_with_sidecar,
 )
 from common.position_tracker import load_tracker  # noqa: E402
+from common.symbol_map import load_symbol_system_map  # noqa: E402
 from common.trade_management import SYSTEM_TRADE_RULES  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 SPY_ROLLING = ROOT / "data_cache" / "rolling" / "SPY.csv"
+TICKER_RENAMES = ROOT / "config" / "ticker_renames.json"
 
 
 # -------------------------------------------------------------------------
@@ -79,14 +84,28 @@ SPY_ROLLING = ROOT / "data_cache" / "rolling" / "SPY.csv"
 
 
 def _collect_entry_orders_index(
-    results_dir: Path, lookback_days: int = 30
+    results_dir: Path,
+    lookback_days: int = 30,
+    required_symbols: set[str] | None = None,
 ) -> dict[str, dict[str, Any]]:
+    """paper order artifact から entry metadata を集める。
+
+    通常は直近 ``lookback_days`` 件だけを読む。ticker rename で現 symbol が
+    旧 entry より後に変わった場合だけ、``required_symbols`` の不足分を満たすまで
+    過去 artifact を遡る。無関係な古い建玉を広く採用しないための限定的な fallback。
+    """
     idx: dict[str, dict[str, Any]] = {}
     if not results_dir.exists():
         return idx
+    required = {str(symbol).strip().upper() for symbol in required_symbols or set()}
+    required.discard("")
+    unresolved = set(required)
     # 新しい方から見る (最新 entry_date で上書き)
     files = sorted(results_dir.glob("paper_orders_*.json"), reverse=True)
-    for f in files[:lookback_days]:
+    for position, f in enumerate(files):
+        # 既定 window を越えるのは、configured alias の旧 symbol を補う時だけ。
+        if position >= lookback_days and not unresolved:
+            break
         try:
             data = json.loads(f.read_text(encoding="utf-8"))
         except Exception:
@@ -94,6 +113,8 @@ def _collect_entry_orders_index(
         for row in (data or {}).get("orders", []) or []:
             sym = str(row.get("symbol", "")).upper()
             if not sym:
+                continue
+            if position >= lookback_days and sym not in unresolved:
                 continue
             sys_tag = row.get("system") or parse_system_from_client_order_id(
                 row.get("client_order_id")
@@ -103,28 +124,130 @@ def _collect_entry_orders_index(
             )
             if sym not in idx:
                 idx[sym] = {"system": sys_tag, "entry_date": ed}
+                unresolved.discard(sym)
             else:
                 # 既存より新しい entry_date が入ってきたら update しない (先に見た方=新しい)
                 pass
     return idx
 
 
-def _hydrate_from_alpaca_coids(snapshots: list[PositionSnapshot], client: Any) -> None:
+def _load_ticker_renames(path: Path = TICKER_RENAMES) -> dict[str, dict[str, Any]]:
+    """config の現 ticker(alias) -> {"canonical": 旧 ticker, "qty": 株数} を読む。
+
+    rename は broker 上の保有 symbol を変更しない。exit は常に broker が返した
+    alias で出し、ここでは旧 symbol の entry system/date を引く用途に限定する。
+    壊れた/未配備の config は空へ縮退して既存の unmanaged 表示を維持する。
+
+    ``qty`` は「株数がちょうど打ち消し合う」という採用根拠そのものなので必須に
+    する。qty を持たない行は証拠が無い = alias を作らない。この config は exit
+    order の生成に効くので、書いただけで効く経路を残さない。
+    """
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    rows = data.get("renames") if isinstance(data, dict) else None
+    renames: dict[str, dict[str, Any]] = {}
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        alias = str(row.get("alias") or "").strip().upper()
+        canonical = str(row.get("canonical") or "").strip().upper()
+        if not alias or not canonical or alias == canonical:
+            continue
+        try:
+            qty = abs(float(row.get("qty")))
+        except (TypeError, ValueError):
+            continue
+        if qty <= 0:
+            continue
+        renames[alias] = {"canonical": canonical, "qty": qty}
+    return renames
+
+
+def _resolve_rename_aliases(
+    snapshots: list[PositionSnapshot],
+    renames: dict[str, dict[str, Any]],
+) -> dict[str, str]:
+    """保有株数が config の qty と一致する alias だけを採用する。
+
+    ledger 側 (build_exit_ledger) は「残差が一意に打ち消す」対だけを採る。exit 側
+    には約定履歴の再構成が無いので、代わりに **今 broker が返している株数** を
+    突き合わせる。株数が動いた建玉 (部分決済 / 買い増し / 別物) は alias を捨て、
+    従来どおり unmanaged のまま残す。silent に落とさず理由を出す。
+    """
+    if not renames or not snapshots:
+        return {}
+    qty_by_symbol = {
+        str(snap.symbol).strip().upper(): abs(float(snap.qty or 0))
+        for snap in snapshots
+    }
+    aliases: dict[str, str] = {}
+    for alias, row in renames.items():
+        held = qty_by_symbol.get(alias)
+        if held is None:
+            # その alias を保有していない。今回の run には無関係。
+            continue
+        if abs(held - float(row["qty"])) > 1e-6:
+            print(
+                f"[warn] rename alias 不採用 (qty 不一致): {alias} 保有 {held:g} "
+                f"!= config {float(row['qty']):g} -> {row['canonical']} に寄せない"
+            )
+            continue
+        aliases[alias] = str(row["canonical"])
+    return aliases
+
+
+def _hydrate_from_alpaca_coids(
+    snapshots: list[PositionSnapshot],
+    client: Any,
+    symbol_aliases: dict[str, str] | None = None,
+) -> None:
     """Alpaca の直近 orders から client_order_id を pull し、system/entry_date を補う。"""
     if client is None:
         return
     # broker_alpaca の get_open_orders は open だけなので、全 order は client 直呼び。
     try:
-        # QueryOrderStatus.ALL で最近の orders 取得
+        # QueryOrderStatus.ALL を **全件ページング**で取得する。limit=500 固定だと
+        # 古い entry order (例: 17日保有の system3) が窓から溢れて coid 解決できず、
+        # そのポジが exit builder に無管理として落とされる (MF の実害根因)。
         from alpaca.trading.enums import QueryOrderStatus
         from alpaca.trading.requests import GetOrdersRequest
 
-        raw = client.get_orders(
-            GetOrdersRequest(status=QueryOrderStatus.ALL, limit=500)
-        )
+        raw = []
+        until = None
+        for _page in range(40):  # 上限 40*500=20000 件で安全弁
+            req = GetOrdersRequest(
+                status=QueryOrderStatus.ALL,
+                limit=500,
+                until=until,
+                direction="desc",
+            )
+            batch = list(client.get_orders(req) or [])
+            if not batch:
+                break
+            raw.extend(batch)
+            if len(batch) < 500:
+                break
+            # 次ページ = これより古い注文。submitted_at/created_at を境界にする。
+            oldest = None
+            for o in reversed(batch):
+                oldest = getattr(o, "submitted_at", None) or getattr(
+                    o, "created_at", None
+                )
+                if oldest is not None:
+                    break
+            if oldest is None or oldest == until:
+                break
+            until = oldest
     except Exception:
         return
     coid_by_symbol: dict[str, str] = {}
+    aliases = {
+        str(alias).strip().upper(): str(canonical).strip().upper()
+        for alias, canonical in (symbol_aliases or {}).items()
+        if str(alias).strip() and str(canonical).strip()
+    }
     for o in raw or []:
         try:
             sym = str(getattr(o, "symbol", "") or "").upper()
@@ -142,7 +265,12 @@ def _hydrate_from_alpaca_coids(snapshots: list[PositionSnapshot], client: Any) -
     for snap in snapshots:
         if snap.system and snap.entry_date:
             continue
-        coid = coid_by_symbol.get(snap.symbol)
+        observed_symbol = str(snap.symbol).strip().upper()
+        # broker の現 symbol で見つかればそれを優先する。見つからない rename 済み
+        # 建玉だけ、config で裏づけた旧 symbol の entry coid を参照する。
+        coid = coid_by_symbol.get(observed_symbol)
+        if not coid:
+            coid = coid_by_symbol.get(aliases.get(observed_symbol, ""))
         if not coid:
             continue
         if not snap.system:
@@ -254,8 +382,84 @@ def _load_price_by_symbol(symbols: list[str]) -> dict[str, float]:
 # -------------------------------------------------------------------------
 
 
+def refine_orphan_classifications(
+    unassigned: list[dict], client: object | None = None
+) -> dict[str, int]:
+    """orphan を「帰属欠落」と「exit 不能」に分ける (broker へ read-only 問い合わせ)。
+
+    ``build_exit_orders_from_positions`` は pure function なので broker を見ない。
+    そこで client を持つここで tradability を付与する。
+
+    区別が要る理由: 「帰属が無い」と「そもそも exit を出せない」は別問題である。
+    上場廃止等で ``tradable=False`` の銘柄は、system 帰属を直しても保護注文は
+    **API では永久に発注できない** (手動対応が必要)。同じ orphan として括ると
+    「直せば守れる」と誤読され、放置される。確認できない時は断定しない。
+    """
+    counts = {"untradable": 0, "tradable": 0, "unknown": 0}
+    for row in unassigned:
+        symbol = str(row.get("symbol") or "")
+        if not symbol:
+            continue
+        tradable = probe_asset_tradable(symbol, client)
+        row["tradable"] = tradable
+        if tradable is False:
+            row["classification"] = "untradable_no_exit_possible"
+            counts["untradable"] += 1
+        elif tradable is None:
+            row["classification"] = "orphan_no_system_origin_tradability_unknown"
+            counts["unknown"] += 1
+        else:
+            counts["tradable"] += 1
+    return counts
+
+
 def _today_str() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def _signals_run_id(results_dir: Path, date_str: str) -> str | None:
+    """同日 today_signals の run_id を読む (exit 判断には一切使わない)。
+
+    exit は建玉とルールから決まるので signals に依存しないが、「どの pipeline
+    run の最中に作られた exit か」を recon 側が突合できるよう provenance だけ
+    残す。読めなくても exit 処理は継続する (None = 検証不能)。
+    """
+    path = results_dir / f"today_signals_{date_str.replace('-', '')}.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 - provenance は best-effort
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return str((payload.get("meta") or {}).get("run_id") or "") or None
+
+
+def _protection_summary(
+    coverage: list[dict[str, Any]], evaluated_at: str
+) -> dict[str, Any]:
+    """保護カバレッジの集計。「常駐注文が無い建玉が何玉あるか」を一目で出す。
+
+    端株は Alpaca が stop/limit/trailing を受け付けないためブローカー常駐注文を
+    張れず、日次 synthetic 判定 (この run の時刻) でしか stop/target を評価
+    できない。これは **ブローカー制約であって不具合ではない** が、silent にすると
+    「保護されている」と誤読されるので件数と評価時刻を必ず残す。
+    """
+    modes: dict[str, int] = {}
+    for row in coverage:
+        mode = str(row.get("mode") or "unknown")
+        modes[mode] = modes.get(mode, 0) + 1
+    no_resident = [r for r in coverage if not r.get("resident_order")]
+    return {
+        "positions": len(coverage),
+        "by_mode": modes,
+        # 常駐注文が無い = ザラ場中は無防備で日次判定に依存している玉。
+        "no_resident_order": len(no_resident),
+        "no_resident_symbols": sorted(
+            str(r.get("symbol") or "") for r in no_resident
+        ),
+        # 日次判定はこの run の時点でしか行われない (連続監視ではない)。
+        "daily_evaluation_date": evaluated_at,
+    }
 
 
 def _write_output(
@@ -356,6 +560,10 @@ def main(argv: list[str] | None = None) -> int:
     # broker が到達不能で positions を取れなかった場合、「0 exits = 成功」と誤認
     # させないための anomaly フラグ (--no-alpaca の意図的 offline とは区別する)。
     broker_unreachable = False
+    # alias は現 broker symbol を変えず、旧 entry metadata を探すためだけに使う。
+    # config を読むだけでは効かせない。実際の保有株数と突合してから採用する。
+    rename_rows = _load_ticker_renames()
+    rename_aliases: dict[str, str] = {}
 
     if not args.no_alpaca:
         if args.confirm:
@@ -384,11 +592,22 @@ def main(argv: list[str] | None = None) -> int:
         else:
             existing_protect_coids = fetch_existing_protect_coids(client)
             existing_exit_coids = fetch_existing_exit_coids(client)
-            _hydrate_from_alpaca_coids(snapshots, client)
+            # positions が取れて初めて qty ゲートを掛けられる。
+            rename_aliases = _resolve_rename_aliases(snapshots, rename_rows)
+            _hydrate_from_alpaca_coids(snapshots, client, symbol_aliases=rename_aliases)
 
     # --- 2) tracker / entry_orders_index --------------------------------
     tracker = load_tracker()
-    entry_orders_index = _collect_entry_orders_index(results_dir)
+    # 既定 window を越えて遡るのは、採用済み alias の canonical を埋める時だけ
+    # (qty ゲートを通っていない = 保有していない alias では深掘りしない)。
+    entry_orders_index = _collect_entry_orders_index(
+        results_dir, required_symbols=set(rename_aliases.values())
+    )
+    # durable な symbol->system マップ (tracker/entry_index が空でも system を拾う保険)。
+    try:
+        symbol_map = load_symbol_system_map()
+    except Exception:
+        symbol_map = {}
 
     # --- 3) context (SPY, ATR, 現値) ------------------------------------
     spy_high, spy_max70 = _load_spy_context()
@@ -398,10 +617,18 @@ def main(argv: list[str] | None = None) -> int:
     price_by_symbol = _load_price_by_symbol(symbols) if symbols else {}
 
     # --- 4) build exit proposals ----------------------------------------
+    unassigned: list[dict[str, Any]] = []
+    # 建玉ごとの「保護がどう掛かっているか」。端株は broker 常駐注文を張れず日次
+    # synthetic 判定に振替になるため、silent にせず artifact に残す (2026-08-19)。
+    protection_coverage: list[dict[str, Any]] = []
     exits = build_exit_orders_from_positions(
         snapshots,
         today=date_str,
+        unassigned_out=unassigned,
+        protection_coverage_out=protection_coverage,
         tracker=tracker,
+        symbol_map=symbol_map,
+        symbol_aliases=rename_aliases,
         entry_orders_index=entry_orders_index,
         existing_protect_coids=existing_protect_coids,
         existing_exit_coids=existing_exit_coids,
@@ -411,9 +638,17 @@ def main(argv: list[str] | None = None) -> int:
         price_by_symbol=price_by_symbol,
     )
 
+    # orphan を「帰属欠落 (直せば守れる)」と「exit 発注不能 (手動対応が要る)」に
+    # 分ける。build_exit_orders_from_positions は pure なのでここで broker を見る。
+    if unassigned:
+        refine_orphan_classifications(unassigned, client)
+
     dry_run = not args.confirm
     submitted_ok = 0
     submit_failed = 0
+    # 「既に保護済み」は失敗ではない。素の failed に混ぜると本当の exit 失敗が
+    # 埋もれる (2026-08-18: 23 件中 12 件が failed と表示されたが全件これだった)。
+    already_protected = 0
 
     if dry_run:
         for po in exits:
@@ -440,17 +675,86 @@ def main(argv: list[str] | None = None) -> int:
                     # cancel は非同期。qty が解放されるまで短く待つ (best-effort)。
                     time.sleep(float(getattr(args, "cancel_settle_seconds", 2.5)))
 
+        # --- cancel-before-upgrade: 単発 stop -> OCO 昇格 (PROTECT_USE_OCO=1) ---
+        # 単発 stop が qty を全量予約したままだと OCO は code 40310000 で必ず拒否
+        # される。昇格対象の **その stop 1 本だけ** を coid 指定で外す
+        # (同じ銘柄の他注文には触らない)。dry-run では絶対に通らない経路。
+        upgrade_coids = {
+            coid
+            for po in exits
+            if not po.skip_reason
+            for coid in (getattr(po, "cancel_client_order_ids", None) or [])
+        }
+        if upgrade_coids:
+            canc_up = ba.cancel_open_orders_by_client_order_ids(client, upgrade_coids)
+            print(
+                f"[exit_check] cancel-before-upgrade: canceled "
+                f"{canc_up['canceled']}/{len(upgrade_coids)} standalone stop(s) "
+                f"before submitting OCO protection"
+            )
+            if canc_up["canceled"]:
+                time.sleep(float(getattr(args, "cancel_settle_seconds", 2.5)))
+
         # 実発注 pass
+        rearmed: list[PreparedExit] = []
+
+        def _rearm_stop_if_oco_upgrade_failed(po: PreparedExit) -> None:
+            """昇格 OCO が失敗したら、外した単発 stop を必ず張り直す。
+
+            昇格は「resting stop を cancel してから OCO を出す」ので、OCO が
+            拒否されたまま放置すると建玉が **無保護** になる。利確が張れない
+            ことより遥かに悪いので、ここで元の stop 価格・数量で張り直す。
+            """
+            stop_po = build_stop_rearm_after_failed_oco(po)
+            if stop_po is None:
+                return
+            print(
+                f"[exit_check] !! OCO 昇格失敗 ({po.symbol}): 外した stop を "
+                f"stop={stop_po.stop_price} で張り直す (無保護を作らない)"
+            )
+            try:
+                res = submit_paper_exit_order(stop_po, dry_run=False, client=client)
+                if res.error:
+                    print(
+                        f"[exit_check] !! CRITICAL {po.symbol}: stop の張り直しにも"
+                        f" 失敗 ({res.error})。この建玉は **無保護** の可能性がある。"
+                    )
+            except Exception as exc2:  # noqa: BLE001
+                stop_po.error = str(exc2)
+                print(
+                    f"[exit_check] !! CRITICAL {po.symbol}: stop の張り直しにも"
+                    f" 失敗 ({exc2})。この建玉は **無保護** の可能性がある。"
+                )
+            rearmed.append(stop_po)
+
         for po in exits:
             try:
                 result = submit_paper_exit_order(po, dry_run=False, client=client)
                 if result.error:
-                    submit_failed += 1
+                    kind = classify_exit_submit_error(result.error)
+                    if kind == "already_protected":
+                        # 建玉が既存注文で全量予約済み = 保護は掛かっている。
+                        # 監査用に broker の生文言は skip_reason へ移し、error は
+                        # 落として下流が「失敗」と数えないようにする。
+                        result.skip_reason = f"already_protected:{result.error}"
+                        result.error = None
+                        already_protected += 1
+                    else:
+                        submit_failed += 1
+                        _rearm_stop_if_oco_upgrade_failed(result)
                 elif result.order_id:
                     submitted_ok += 1
             except Exception as exc:
-                po.error = str(exc)
-                submit_failed += 1
+                kind = classify_exit_submit_error(str(exc))
+                if kind == "already_protected":
+                    po.skip_reason = f"already_protected:{exc}"
+                    already_protected += 1
+                else:
+                    po.error = str(exc)
+                    submit_failed += 1
+                    _rearm_stop_if_oco_upgrade_failed(po)
+        # 張り直した stop も artifact に残す (無保護でないことの証跡)。
+        exits.extend(rearmed)
 
     mode = "submitted" if not dry_run else "dry_run"
     role = role_for(dry_run)
@@ -460,13 +764,33 @@ def main(argv: list[str] | None = None) -> int:
         snapshots,
         {
             "date": date_str,
+            # provenance のみ (exit 判断には未使用)。recon が「同日だが別 run の
+            # 残骸」を弾くために使う。
+            "source_signals_run_id": _signals_run_id(results_dir, date_str),
             "mode": mode,
             "count": len(exits),
             "submitted": submitted_ok,
             "failed": submit_failed,
+            # 既存の保護注文で建玉が全量予約済みだった件数 (危険ではない)。
+            "already_protected": already_protected,
             "broker_unreachable": broker_unreachable,
             "spy_high": spy_high,
             "spy_max70": spy_max70,
+            "unassigned_count": len(unassigned),
+            "unassigned_positions": unassigned,
+            # --- 保護カバレッジ (2026-08-19) ---------------------------------
+            # mode: native_resident = broker に常駐注文あり
+            #       synthetic_daily = 端株。常駐不可 → この run の日次判定のみ
+            #       orphan_default  = system 不明だが既定 stop を張った
+            #       unprotected     = 保護なし (要手当)
+            "protection_coverage": protection_coverage,
+            "protection_summary": _protection_summary(protection_coverage, date_str),
+            # exit を発注できない (上場廃止等) 建玉の件数。帰属欠落とは別問題。
+            "untradable_count": sum(
+                1
+                for u in unassigned
+                if u.get("classification") == "untradable_no_exit_possible"
+            ),
             "systems": {
                 sys: {
                     "max_holding_days": rule.max_holding_days,
@@ -488,10 +812,37 @@ def main(argv: list[str] | None = None) -> int:
     print(
         f"[exit_check] positions={len(snapshots)} exits={len(exits)} "
         f"(time={time_cnt}, breakout={breakout_cnt}, protect={protect_cnt}) "
-        f"mode={mode} submitted={submitted_ok} failed={submit_failed}"
+        f"mode={mode} submitted={submitted_ok} failed={submit_failed} "
+        f"already_protected={already_protected}"
     )
     print(f"[write] {output_path} (role={role})")
     print(f"[write] {sidecar}")
+    if unassigned:
+        untradable = [
+            u
+            for u in unassigned
+            if u.get("classification") == "untradable_no_exit_possible"
+        ]
+        others = [u for u in unassigned if u not in untradable]
+        if others:
+            syms = ", ".join(str(u.get("symbol")) for u in others)
+            print(
+                f"[WARN] ORPHAN/UNMANAGED positions (system 由来なし = exit 未生成): "
+                f"{len(others)} 件 [{syms}]. position_tracker/symbol_system_map/"
+                f"entry-coid のいずれにも無く、time/protection が一切張られていません。"
+            )
+        if untradable:
+            detail = ", ".join(
+                f"{u.get('symbol')}({u.get('market_value')})" for u in untradable
+            )
+            exposure = sum(float(u.get("market_value") or 0) for u in untradable)
+            # 帰属を直しても救えない class。手動対応が要ることを明示する。
+            print(
+                f"[WARN] UNTRADABLE positions (broker が tradable=False = exit 発注"
+                f"不能): {len(untradable)} 件 [{detail}] 合計 ${exposure:,.2f}. "
+                "system 帰属を直しても API では保護注文を出せません。手動での"
+                "対応が必要です。"
+            )
     # broker 到達不能で positions を確認できなかった場合、exit が 0 件でも「成功
     # (flat book)」と誤認させない。distinct code 3 で daily_pipeline に surface
     # する (entry 側の no_orders_generated=3 と同じ観測性方針)。市場が閉じた後の

@@ -104,6 +104,19 @@ class TestHydrateSystemTags:
         assert snap.system is None
         assert snap.entry_date is None
 
+    def test_ticker_rename_alias_resolves_canonical_entry_metadata(self):
+        """MF のように broker の現 ticker と entry ticker が異なる建玉を解決する。"""
+        snap = PositionSnapshot(symbol="MF", qty=100, side="long", avg_entry_price=4.7)
+        hydrate_system_tags(
+            [snap],
+            entry_orders_index={
+                "UBXG": {"system": "system3", "entry_date": "2026-07-13"}
+            },
+            symbol_aliases={"MF": "UBXG"},
+        )
+        assert snap.system == "system3"
+        assert snap.entry_date == "2026-07-13"
+
 
 # -------------------------------------------------------------------------
 # compute_holding_days
@@ -112,7 +125,17 @@ class TestHydrateSystemTags:
 
 class TestHoldingDays:
     def test_basic(self):
-        assert compute_holding_days("2026-07-01", "2026-07-04") == 3
+        # 2026-08-22 fix: holding days は **立会日** で数える。max_holding_days が
+        # 立会日ベースの spec (strategies/system2_strategy.py compute_exit:
+        # 「未達: 2営業日待っても…」/ system5: 「時間退出: 6営業日経過後も…」) な
+        # ので、暦日と突き合わせると週末・祝日ぶん早く手仕舞ってしまう。
+        # 2026-07-01(水) -> 2026-07-04(土) は木 07-02 の 1 立会日だけ
+        # (07-03 は独立記念日の振替休場、07-04 は土曜)。暦日なら 3。
+        assert compute_holding_days("2026-07-01", "2026-07-04") == 1
+
+    def test_weekday_span_matches_calendar(self):
+        # 月 -> 水 は週末をまたがないので暦日と一致する (回帰の据え置き確認)。
+        assert compute_holding_days("2026-08-17", "2026-08-19") == 2
 
     def test_same_day(self):
         assert compute_holding_days("2026-07-01", "2026-07-01") == 0
@@ -179,11 +202,31 @@ class TestBuildExitOrders:
         )
         assert any(e.reason == ExitReasonCode.TIME and e.side == "sell" for e in exits)
 
+    def test_renamed_position_enters_time_exit_plan_with_current_broker_symbol(self):
+        """旧 UBXG の entry 情報を使いつつ、MF を close 対象として残す。"""
+        snap = PositionSnapshot(symbol="MF", qty=100, side="long", avg_entry_price=4.7)
+        exits = build_exit_orders_from_positions(
+            [snap],
+            today="2026-08-17",
+            entry_orders_index={
+                "UBXG": {"system": "system3", "entry_date": "2026-07-13"}
+            },
+            symbol_aliases={"MF": "UBXG"},
+        )
+        time_exits = [e for e in exits if e.reason == ExitReasonCode.TIME]
+        assert len(time_exits) == 1
+        assert time_exits[0].symbol == "MF"
+        assert time_exits[0].system == "system3"
+        assert time_exits[0].entry_date == "2026-07-13"
+
     def test_system5_time_based_at_6_days(self):
+        # 「6営業日」= 立会 6 日 (strategies/system5_strategy.py compute_exit)。
+        # 2026-06-26(金) から 6 立会日後は 2026-07-07(火)
+        # (06-29,06-30,07-01,07-02,07-06 … 07-03 は休場)。
         snap = _snap("NVDA", "system5", "long", 3, 120.0, "2026-06-26")
         exits = build_exit_orders_from_positions(
             [snap],
-            today="2026-07-02",
+            today="2026-07-07",
             atr_by_symbol={"NVDA": {10: 2.0}},
         )
         te = [e for e in exits if e.reason == ExitReasonCode.TIME]
@@ -311,7 +354,21 @@ class TestBuildExitOrders:
         assert any(e.reason == ExitReasonCode.TIME for e in exits)
         assert not any(e.reason.startswith("protect_") for e in exits)
 
-    def test_position_without_system_tag_is_skipped(self):
+    def test_position_without_system_tag_gets_only_default_stop(self):
+        """system 不明ポジは strategy exit を作らない。
+
+        2026-08-19 変更: 「無管理」と「無保護」は別問題なので、下方保護の
+        protective stop **だけ** は既定値で張る (ORPHAN_DEFAULT_PROTECTION)。
+        time/close exit を捏造しない契約は従来どおり。
+        """
+        snap = PositionSnapshot(symbol="XXX", qty=1, side="long", avg_entry_price=1.0)
+        exits = build_exit_orders_from_positions([snap], today="2026-07-02")
+        assert [e.reason for e in exits] == [ExitReasonCode.PROTECT_STOP]
+        assert all(e.order_type == "stop" for e in exits)
+
+    def test_position_without_system_tag_is_skipped_when_flag_off(self, monkeypatch):
+        """可逆性: ORPHAN_DEFAULT_PROTECTION=0 で従来どおり完全 skip。"""
+        monkeypatch.setenv("ORPHAN_DEFAULT_PROTECTION", "0")
         snap = PositionSnapshot(symbol="XXX", qty=1, side="long", avg_entry_price=1.0)
         exits = build_exit_orders_from_positions([snap], today="2026-07-02")
         assert exits == []

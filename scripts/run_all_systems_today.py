@@ -95,6 +95,9 @@ if sys.platform == "win32":
 import pandas as pd
 
 from common import broker_alpaca as ba
+from common.alpaca_trading import (  # noqa: E402
+    parse_system_from_client_order_id as _parse_sys_coid,
+)
 from common.alpaca_order import submit_orders_df
 from common.cache_manager import CacheManager
 from common.dataframe_utils import round_dataframe  # noqa: E402
@@ -2077,6 +2080,58 @@ class PositionReconcileError(RuntimeError):
     """
 
 
+
+def _build_coid_symbol_system_map(client: Any) -> dict[str, str]:
+    """Alpaca の全注文 (ALL, 全件ページング) の entry coid ``system{N}-SYM-YYYYMMDD``
+    から symbol -> system を構築する (read-only)。
+
+    なぜ必要か: allocation の保有帰属 ``count_active_positions_by_system`` は従来
+    static な ``symbol_system_map.json`` のみで帰属していたが、これは stale/不完全で
+    (2026-07-31 時点 保有43件中2件しか帰属できず) available_slots が破綻し、満杯の
+    system を「空きあり」と誤認して配分し続けていた。exit/submit 境界と同じ **entry
+    coid** を信頼源にすることで held を正しく帰属する。limit=500 では古い entry が窓落ち
+    するため全件ページング。失敗時は空 dict (呼び出し側が static map に fallback)。
+    """
+    out: dict[str, str] = {}
+    if client is None:
+        return out
+    try:
+        from alpaca.trading.enums import QueryOrderStatus
+        from alpaca.trading.requests import GetOrdersRequest
+    except Exception:
+        return out
+    until = None
+    try:
+        for _page in range(40):  # 上限 40*500=20000 件で安全弁
+            req = GetOrdersRequest(
+                status=QueryOrderStatus.ALL, limit=500, until=until, direction="desc"
+            )
+            batch = list(client.get_orders(req) or [])
+            if not batch:
+                break
+            for o in batch:
+                sym = str(getattr(o, "symbol", "") or "").upper()
+                coid = str(getattr(o, "client_order_id", "") or "")
+                if not sym:
+                    continue
+                sys_tag = _parse_sys_coid(coid)
+                if sys_tag and sym not in out:
+                    out[sym] = sys_tag  # 最新 (desc 先頭) を採用
+            if len(batch) < 500:
+                break
+            oldest = None
+            for o in reversed(batch):
+                oldest = getattr(o, "submitted_at", None) or getattr(o, "created_at", None)
+                if oldest is not None:
+                    break
+            if oldest is None or oldest == until:
+                break
+            until = oldest
+    except Exception:
+        return out
+    return out
+
+
 def _fetch_positions_and_symbol_map() -> tuple[list[Any], dict[str, str]]:
     """Fetch Alpaca positions and cached symbol-to-system mapping once.
 
@@ -2097,6 +2152,23 @@ def _fetch_positions_and_symbol_map() -> tuple[list[Any], dict[str, str]]:
         symbol_system_map = load_symbol_system_map()
     except Exception:
         symbol_system_map = {}
+
+    # 保有の system 帰属は entry coid を信頼源にする (static map は stale/不完全)。
+    # coid 由来を static map に **coid 優先でマージ** して available_slots の誤算を防ぐ。
+    try:
+        coid_map = _build_coid_symbol_system_map(client)
+        if coid_map:
+            merged = dict(symbol_system_map or {})
+            for sym, sysN in coid_map.items():
+                merged[sym] = sysN
+                merged[str(sym).lower()] = sysN
+            symbol_system_map = merged
+            _log(
+                f"🔗 保有帰属を entry coid で補強: {len(coid_map)} 銘柄 "
+                "(static symbol_system_map の stale/欠落を補正)"
+            )
+    except Exception:
+        pass
 
     return positions, symbol_system_map
 
@@ -5505,6 +5577,24 @@ def compute_today_signals(  # noqa: C901  # type: ignore[reportGeneralTypeIssues
                     # Per-system debug must never break the allocation flow
                     _log(f"[ALLOC_DEBUG] Error inspecting per-system {sys_name}")
 
+        # portfolio cap (gross/net exposure) の equity 基準。既定 OFF なので
+        # (None, "disabled") が返り、finalize_allocation は従来どおり
+        # default_capital=100000.0 を分母に使う (完全後方互換)。
+        # CAP_USE_REAL_EQUITY=1 のときだけ実 equity (Alpaca read-only / snapshot) に
+        # 差し替わる。サイジング予算 (capital_long/short) には一切触らない。
+        try:
+            from common.cap_equity import resolve_cap_equity
+
+            _cap_equity, _cap_equity_src = resolve_cap_equity()
+            if _cap_equity is not None:
+                _log(
+                    f"[CAP_EQUITY] portfolio cap の equity 基準を実 equity へ: "
+                    f"{_cap_equity:,.2f} (source={_cap_equity_src})"
+                )
+        except Exception as _cap_exc:  # noqa: BLE001 - 解決失敗は従来挙動へ退避
+            _log(f"[CAP_EQUITY] 解決に失敗、従来の default_capital を使用: {_cap_exc}")
+            _cap_equity, _cap_equity_src = None, "error"
+
         final_df, allocation_summary = finalize_allocation(
             per_system,
             strategies=strategies,
@@ -5514,6 +5604,8 @@ def compute_today_signals(  # noqa: C901  # type: ignore[reportGeneralTypeIssues
             slots_short=slots_short,
             capital_long=capital_long,
             capital_short=capital_short,
+            cap_equity=_cap_equity,
+            cap_equity_source=_cap_equity_src,
             system_diagnostics=ctx.system_diagnostics,
             market_data_dict=ctx.basic_data,
             signal_date=ctx.today,

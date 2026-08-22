@@ -15,7 +15,8 @@
     6. [record]  entry fill をポーリング + 最終ポジション snapshot。
     7. [notify]  scripts/publish_execution_summary.py (非 dry-run) で ntfy 実績通知
                  (UTF-8-safe な NtfyPublisher 経由。素の str POST の latin-1 死を回避)。
-    8. [durable] logs/open_run_<date>/ に全成果物を残す。
+    8. [publish] notify が再構成した recon/pipeline を含む当日 data を Vercel へ publish。
+    9. [durable] logs/open_run_<date>/ に全成果物と DONE.lock を残す。
 
 安全ガード:
     - paper 固定 (assert_paper_env)。live/実マネーは一切扱わない。
@@ -77,9 +78,20 @@ from common.exit_artifacts import (  # noqa: E402
     ROLE_PROPOSAL,
     write_with_sidecar,
 )
+from common.order_status import (  # noqa: E402  (ROOT を通してから import)
+    is_filled,
+    is_working,
+    normalize_order_status,
+)
 
 # 段の途中で import が失敗しても runner 自体は落とさない (import は遅延)。
 PYEXE = sys.executable
+OBSERVABILITY_DEGRADED_EXIT_CODE = 4
+
+# gate() の Alpaca clock 取得リトライ。gate は exit_stage より前なので、clock の
+# 一過性エラーで ABORT すると **その日の time exit が丸ごと飛ぶ**。
+_CLOCK_FETCH_ATTEMPTS = 3
+_CLOCK_FETCH_BACKOFF_SECONDS = 2.0
 
 
 def _child_env() -> dict[str, str]:
@@ -88,6 +100,64 @@ def _child_env() -> dict[str, str]:
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
     return env
+
+
+def parse_close_response(resp: object) -> dict[str, object]:
+    """``DELETE /v2/positions`` の 1 件ぶんレスポンスを正規化する。
+
+    alpaca-py の ``ClosePositionResponse`` は ``order_id`` が **Optional**
+    (既定 None)、``body`` が必須。close は **非同期**なので、受理されても
+    top-level ``order_id`` が埋まらないまま HTTP 200 が返ることがある。
+
+    旧実装は成功条件を ``status == 200 and order_id`` にしていたため、
+    2026-08-20 は 39 件の受理済み close をすべて「失敗」に数え、
+    ``ok=0 -> market_ids=[] -> fill 監視スキップ`` まで連鎖した。
+    受理判定は **HTTP ステータスだけ**で行い、order_id は fill 監視に
+    使える時だけ拾う (成功時は ``body`` が ``Order`` なので ``body.id``
+    から復元できる)。
+
+    422 等の実エラー (INACTIVE asset など) は accepted=False のまま残す。
+    """
+    body = getattr(resp, "body", None)
+    status = getattr(resp, "status", None)
+    try:
+        http = int(status) if status is not None else None
+    except (TypeError, ValueError):
+        http = None
+
+    raw_oid = getattr(resp, "order_id", None)
+    if not raw_oid:
+        # 非同期受理では top-level が空。成功時の body は Order なので id を持つ。
+        raw_oid = getattr(body, "id", None)
+        if raw_oid is None and isinstance(body, dict):
+            raw_oid = body.get("id")
+    oid = str(raw_oid) if raw_oid else None
+
+    symbol = getattr(resp, "symbol", None)
+    if not symbol:
+        symbol = getattr(body, "symbol", None)
+
+    accepted = http is not None and 200 <= http < 300
+    error = None
+    if not accepted:
+        # FailedClosePositionDetails は message/code を持つ。
+        msg = getattr(body, "message", None)
+        if msg is None and isinstance(body, dict):
+            msg = body.get("message")
+        code = getattr(body, "code", None)
+        if code is None and isinstance(body, dict):
+            code = body.get("code")
+        error = str(msg) if msg else f"http={http}"
+        if code is not None:
+            error = f"{error} (code={code})"
+
+    return {
+        "symbol": str(symbol) if symbol else None,
+        "http_status": http,
+        "order_id": oid,
+        "accepted": accepted,
+        "error": error,
+    }
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -111,6 +181,8 @@ class Runner:
         self.results = ROOT / "results_csv"
         self.signals_json = self.results / f"today_signals_{self.compact}.json"
         self.exit_json = self.results / f"exit_orders_{self.compact}.json"
+        # flatten で close 受理済み = 建玉が消えるのを待つべき symbol 集合。
+        self.pending_flat_symbols: set[str] = set()
         self.paper_json = self.results / f"paper_orders_{self.compact}.json"
         self._log_path = self.out / "run.log"
         self.record: dict[str, object] = {
@@ -258,23 +330,52 @@ class Runner:
             return False
 
         # market-open (Alpaca clock)
-        try:
-            clock = self._client().get_clock()
-            is_open = bool(getattr(clock, "is_open", False))
-            self.record["market_is_open"] = is_open
-            self.record["clock_next_open"] = str(getattr(clock, "next_open", ""))
-            self.log(f"[gate] market_is_open={is_open}")
-        except Exception as exc:  # noqa: BLE001
-            self.log(f"[gate] clock 取得失敗: {exc}")
+        #
+        # NOTE (2026-08-22 fix): clock の取得は **単発** で、1 回でも失敗すると
+        # is_open=False -> ABORT となり、gate は exit_stage より前なので
+        # **その日の time exit が丸ごと飛ぶ**。市場が実際に開いていても API の
+        # 一過性エラーだけで手仕舞いが 1 立会日遅れる (max_holding_days=2 の
+        # System2 では致命的)。少数回リトライしてから「閉場」と結論する。
+        # 本当に閉場ならリトライしても閉場のままなので、安全側は崩れない。
+        is_open = False
+        clock_error: str | None = None
+        for attempt in range(_CLOCK_FETCH_ATTEMPTS):
+            try:
+                clock = self._client().get_clock()
+                is_open = bool(getattr(clock, "is_open", False))
+                clock_error = None
+                self.record["market_is_open"] = is_open
+                self.record["clock_next_open"] = str(getattr(clock, "next_open", ""))
+                self.log(
+                    f"[gate] market_is_open={is_open} (attempt {attempt + 1})"
+                )
+                break
+            except Exception as exc:  # noqa: BLE001
+                clock_error = str(exc)
+                self.log(
+                    f"[gate] clock 取得失敗 (attempt {attempt + 1}/"
+                    f"{_CLOCK_FETCH_ATTEMPTS}): {exc}"
+                )
+                if attempt + 1 < _CLOCK_FETCH_ATTEMPTS:
+                    time.sleep(_CLOCK_FETCH_BACKOFF_SECONDS * (attempt + 1))
+        if clock_error is not None:
             is_open = False
             self.record["market_is_open"] = None
+            # 「閉場だった」と「clock が読めなかった」は別物。取り違えると
+            # exit が飛んだ日を「休場だから正常」と誤読する。
+            self.record["clock_unavailable"] = clock_error
         if not is_open and not self.args.allow_closed:
-            self.log("[gate] market CLOSED -> ABORT (--allow-closed で無視可)")
-            self.record["abort"] = "market_closed"
-            self._ntfy_warn(
-                f"OpenAutoRun ABORT {self.date}",
-                "market closed のため自動発注を中止 (paper)。",
+            reason = "clock_unavailable" if clock_error else "market_closed"
+            self.log(f"[gate] {reason} -> ABORT (--allow-closed で無視可)")
+            self.record["abort"] = reason
+            detail = (
+                f"clock を {_CLOCK_FETCH_ATTEMPTS} 回取得できず開場判定不能"
+                f" ({clock_error}): 自動発注を中止 (paper)。**exit も飛ぶ**ので"
+                " 保有の期限超過を確認すること。"
+                if clock_error
+                else "market closed のため自動発注を中止 (paper)。"
             )
+            self._ntfy_warn(f"OpenAutoRun ABORT {self.date}", detail)
             return False
         return True
 
@@ -468,17 +569,25 @@ class Runner:
 
         ok = 0
         failed = 0
+        accepted_symbols: list[str] = []
         for r in resps or []:
-            sym = getattr(r, "symbol", None)
-            st = getattr(r, "status", None)
-            raw_oid = getattr(r, "order_id", None)
-            oid = str(raw_oid) if raw_oid else None
-            if st == 200 and oid:
+            parsed = parse_close_response(r)
+            sym = parsed["symbol"]
+            st = parsed["http_status"]
+            oid = parsed["order_id"]
+            if parsed["accepted"]:
+                # close は非同期。HTTP 2xx = 受理であって fill ではない。
+                # order_id が無くても失敗ではない (BUG 2026-08-20)。
                 ok += 1
-                market_ids.append(oid)
+                if oid:
+                    market_ids.append(oid)
+                if sym:
+                    accepted_symbols.append(str(sym).upper())
             else:
                 failed += 1
-                self.log(f"[exit] close 失敗 sym={sym} http={st}")
+                self.log(
+                    f"[exit] close 拒否 sym={sym} http={st} reason={parsed['error']}"
+                )
             exits_rows.append(
                 {
                     "symbol": sym,
@@ -486,9 +595,13 @@ class Runner:
                     "reason": "flatten_all",
                     "order_id": oid,
                     "http_status": st,
+                    "accepted": parsed["accepted"],
+                    "error": parsed["error"],
                     "dry_run": False,
                 }
             )
+        # 非同期 fill の settle 待ちに使う (order_id が無くても建玉消滅は観測できる)。
+        self.pending_flat_symbols = set(accepted_symbols)
         self.record["exit_count"] = len(exits_rows)
         self.record["flatten_ok"] = ok
         self.record["flatten_failed"] = failed
@@ -504,49 +617,92 @@ class Runner:
         write_with_sidecar(self.exit_json, payload, ROLE_EXECUTION)
         self._dump("exit_orders.json", payload)
         self.log(
-            f"[exit] flatten-all 発注: ok={ok} failed={failed} -> "
-            f"{len(market_ids)} 件を fill 監視"
+            f"[exit] flatten-all 受理: ok={ok} rejected={failed} -> "
+            f"order_id {len(market_ids)} 件 / 建玉解消待ち {len(accepted_symbols)} 件"
         )
         return market_ids
 
     def wait_exit_fills(self, order_ids: list[str]) -> None:
-        if self.dry_run or not order_ids:
+        """close の非同期 fill が settle するまで待ってから建玉を verify する。
+
+        待つ対象は 2 つ:
+          1. order_id が判る close 注文 -> status が終端になるまで poll。
+          2. order_id が返らなかった受理済み close (``pending_flat_symbols``)
+             -> **建玉そのもの**が消えるまで poll。
+
+        2 が無いと ``close_all_positions`` の非同期受理を待てず、fill 前の
+        positions を「verify 済み」として撮ってしまう (2026-08-20 の
+        ``positions 41->41``)。close の中身は一切変えない。観測の timing だけ。
+        """
+        pending_symbols = {
+            str(s).upper() for s in (self.pending_flat_symbols or set()) if s
+        }
+        if self.dry_run or (not order_ids and not pending_symbols):
             self.log("[wait] exit fill 監視スキップ (dry-run または close 0)")
             return
+
+        deadline = time.monotonic() + float(self.args.poll_timeout)
+        if order_ids:
+            self._dump("close_fills.json", self._poll_order_ids(order_ids, deadline))
+        if pending_symbols:
+            self._wait_positions_flat(pending_symbols, deadline)
+        self._snapshot_positions("positions_after_close.json")
+
+    def _poll_order_ids(self, order_ids: list[str], deadline: float) -> dict[str, str]:
+        """order_id -> 終端 status。終端化するか deadline まで poll する。"""
         from common.broker_alpaca import get_orders_status_map
 
         client = self._client()
-        deadline = time.monotonic() + float(self.args.poll_timeout)
-        working = {
-            "new",
-            "accepted",
-            "pending_new",
-            "partially_filled",
-            "held",
-            "accepted_for_bidding",
-            "pending_replace",
-            "calculated",
-            "pending_cancel",
-        }
         fills: dict[str, str] = {}
-        while time.monotonic() < deadline:
+        while True:
             smap = get_orders_status_map(client, order_ids)
             pending = []
             for oid in order_ids:
-                st = smap.get(oid)
-                s = str(st or "").lower().split(".")[-1]
-                fills[oid] = s
-                if s in working or s == "" or s == "none":
+                raw = smap.get(oid)
+                fills[oid] = normalize_order_status(raw)
+                if is_working(raw):
                     pending.append(oid)
             if not pending:
                 self.log(f"[wait] 全 exit close settled ({len(order_ids)} 件)")
                 break
+            if time.monotonic() >= deadline:
+                self.log(
+                    f"[wait] TIMEOUT ({self.args.poll_timeout}s) "
+                    f"order pending {len(pending)}/{len(order_ids)} -> 継続"
+                )
+                break
             self.log(f"[wait] pending {len(pending)}/{len(order_ids)} ... 3s")
             time.sleep(3)
-        else:
-            self.log(f"[wait] TIMEOUT ({self.args.poll_timeout}s) pending 残 -> 継続")
-        self._dump("close_fills.json", fills)
-        self._snapshot_positions("positions_after_close.json")
+        return fills
+
+    def _wait_positions_flat(self, symbols: set[str], deadline: float) -> None:
+        """受理済み close の建玉が実際に消えるまで待つ (非同期 fill の settle)。"""
+        from common.alpaca_trading import fetch_position_snapshots
+
+        client = self._client()
+        remaining = set(symbols)
+        while True:
+            try:
+                held = {
+                    str(s.symbol).upper() for s in fetch_position_snapshots(client)
+                }
+            except Exception as exc:  # noqa: BLE001 - 一時失敗は次の poll で回復
+                self.log(f"[wait] positions 取得失敗 (継続): {exc}")
+            else:
+                remaining = {s for s in symbols if s in held}
+                if not remaining:
+                    self.log(f"[wait] flatten settled: {len(symbols)} 件の建玉解消を確認")
+                    break
+            if time.monotonic() >= deadline:
+                self.log(
+                    f"[wait] TIMEOUT ({self.args.poll_timeout}s) flatten 未解消 "
+                    f"{len(remaining)}/{len(symbols)} 件: {sorted(remaining)[:10]}"
+                )
+                break
+            self.log(f"[wait] flatten pending {len(remaining)}/{len(symbols)} ... 3s")
+            time.sleep(3)
+        self.record["flatten_settled"] = len(symbols) - len(remaining)
+        self.record["flatten_unsettled"] = sorted(remaining)
 
     def entry_stage(self, eq: float | None) -> None:
         argv = [
@@ -579,6 +735,103 @@ class Runner:
             self._dump("paper_orders.json", data)
         except Exception as exc:  # noqa: BLE001
             self.log(f"[entry] paper_orders 解析失敗: {exc}")
+
+    def reconcile_entry_fills(self) -> None:
+        """submit 時点の status スナップショットを **実 fill** で上書きする。
+
+        ``paper_trading_submit`` が書けるのは submit 直後の status
+        (``pending_new``) だけで、fill は非同期に後から起きる。その JSON を
+        そのまま recon に食わせると ``entry_filled`` が構造的に 0 に固定される
+        (2026-08-20 は 47/47 が fill 済みで ``fill 0`` と報告した)。
+
+        ここで order を終端化するまで re-poll し、artifact を実状へ合わせる。
+        **観測のみ** — 発注も取消もしない。失敗しても run は継続する。
+        """
+        if self.dry_run:
+            return
+        try:
+            data = json.loads(self.paper_json.read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001 - artifact 未生成でも run は継続
+            self.log(f"[fills] paper_orders 読めず reconcile skip: {exc}")
+            return
+        orders = (data or {}).get("orders") or []
+        by_id: dict[str, list[dict]] = {}
+        for o in orders:
+            oid = o.get("order_id")
+            if oid and not o.get("error"):
+                by_id.setdefault(str(oid), []).append(o)
+        if not by_id:
+            self.log("[fills] 再突合対象の order_id が無い -> skip")
+            return
+
+        try:
+            from common.broker_alpaca import get_orders_status_map
+
+            client = self._client()
+        except Exception as exc:  # noqa: BLE001
+            self.log(f"[fills] broker 接続できず reconcile skip: {exc}")
+            return
+
+        ids = list(by_id)
+        deadline = time.monotonic() + float(self.args.poll_timeout)
+        smap: dict[str, object] = {}
+        blind = 0  # 1 件も status が引けなかった連続回数 (broker 不達の早期離脱用)
+        while True:
+            try:
+                smap = get_orders_status_map(client, ids)
+            except Exception as exc:  # noqa: BLE001 - 次の poll で回復を試す
+                self.log(f"[fills] status 取得失敗 (継続): {exc}")
+                smap = {}
+            if any(normalize_order_status(smap.get(oid)) for oid in ids):
+                blind = 0
+            else:
+                blind += 1
+                if blind >= 3:
+                    # broker が全件無応答。待っても埋まらないので観測を諦める
+                    # (poll_timeout ぶん空回りして notify/publish を遅らせない)。
+                    self.log("[fills] status が 3 回連続で 0 件 -> broker 不達とみなし中断")
+                    break
+            pending = [oid for oid in ids if is_working(smap.get(oid))]
+            if not pending:
+                self.log(f"[fills] entry order {len(ids)} 件すべて終端")
+                break
+            if time.monotonic() >= deadline:
+                self.log(
+                    f"[fills] TIMEOUT ({self.args.poll_timeout}s) "
+                    f"未終端 {len(pending)}/{len(ids)} -> 現状で記録"
+                )
+                break
+            self.log(f"[fills] pending {len(pending)}/{len(ids)} ... 3s")
+            time.sleep(3)
+
+        filled = 0
+        reconciled = 0
+        for oid, rows in by_id.items():
+            raw = smap.get(oid)
+            status = normalize_order_status(raw)
+            if not status:
+                continue
+            reconciled += 1
+            hit = is_filled(raw)
+            for row in rows:
+                row["status"] = status
+                row["status_source"] = "reconciled"
+            if hit:
+                filled += len(rows)
+
+        data["entry_filled"] = filled
+        data["status_reconciled"] = reconciled
+        try:
+            self.paper_json.write_text(
+                json.dumps(data, ensure_ascii=False, indent=2, default=str),
+                encoding="utf-8",
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.log(f"[fills] paper_orders 書き戻し失敗: {exc}")
+            return
+        self._dump("paper_orders.json", data)
+        self.record["entry_filled"] = filled
+        self.log(f"[fills] entry fill 再突合: filled={filled}/{len(ids)} 件")
 
     def _snapshot_positions(self, name: str) -> None:
         if self.dry_run:
@@ -628,7 +881,7 @@ class Runner:
             self.log(f"[equity] 取得失敗 (無視): {exc}")
             return None
 
-    def notify(self, eq: float | None) -> None:
+    def notify(self, eq: float | None) -> int:
         # publish_execution_summary は既存 recon_<date>.json を優先ロードして
         # 再ビルドしない。06:00 daily が薄シグナル(0)状態で書いた stale recon が
         # 残っていると、open-run が実発注しても ntfy が 0 と誤報する。stale を消して
@@ -639,7 +892,14 @@ class Runner:
                 stale.unlink()
                 self.log(f"[notify] stale recon を削除し再ビルド強制: {stale.name}")
             except Exception as exc:  # noqa: BLE001
-                self.log(f"[notify] stale recon 削除失敗 (無視): {exc}")
+                # ここで続行すると publish_execution_summary が残存 recon を優先し、
+                # 今夜の発注結果ではなく古い集計を正常配信してしまう。通知を失敗扱いに
+                # して main の observability degraded (rc=4) へ伝播させる。
+                self.log(f"[notify] stale recon 削除失敗: {exc}")
+                self.record["notify_status"] = "stale_recon_unlink_failed"
+                self.record["notify_stale_recon_error"] = f"{type(exc).__name__}: {exc}"
+                self.record["notify_exit_code"] = 1
+                return 1
         argv = [
             str(ROOT / "scripts" / "publish_execution_summary.py"),
             "--date",
@@ -649,9 +909,15 @@ class Runner:
             argv += ["--account-equity", str(eq)]
         if self.dry_run:
             argv += ["--dry-run"]
-        self.run_step("notify", argv)
+        try:
+            code, _out, _err = self.run_step("notify", argv)
+        except Exception as exc:  # noqa: BLE001 - publish は必ず後続させる
+            self.log(f"[notify] 実行失敗: {exc}")
+            code = 1
+        self.record["notify_exit_code"] = int(code)
+        return int(code)
 
-    def publish(self) -> None:
+    def publish(self) -> int:
         """post-entry の Alpaca snapshot を再生成し、PRIMARY worktree から Vercel
         monitor へ data/ を publish (commit+push claude/monitor-webapp)。
 
@@ -664,24 +930,42 @@ class Runner:
         """
         if self.args.no_publish:
             self.log("[publish] --no-publish: publish stage skip")
-            return
+            self.record["publish"] = "skipped_no_publish"
+            self.record["publish_exit_code"] = 0
+            return 0
         # 1) post-entry snapshot 再生成 (read-only)
-        self.run_step(
-            "snapshot",
-            [str(ROOT / "scripts" / "export_alpaca_snapshot.py"), "--date", self.date],
-        )
+        try:
+            snapshot_code, _out, _err = self.run_step(
+                "snapshot",
+                [
+                    str(ROOT / "scripts" / "export_alpaca_snapshot.py"),
+                    "--date",
+                    self.date,
+                ],
+            )
+        except Exception as exc:  # noqa: BLE001 - Vercel publish は必ず試す
+            self.log(f"[publish] snapshot 実行失敗: {exc}")
+            snapshot_code = 1
+        snapshot_code = int(snapshot_code)
+        self.record["snapshot_exit_code"] = snapshot_code
         if self.dry_run:
             self.log(
                 "[publish] dry-run: Vercel publish (commit/push) skip。snapshot のみ生成"
             )
-            return
+            self.record["publish"] = "skipped_dry_run"
+            # dry-run では外部 publish 自体を行わないため publish stage は成功扱い。
+            # snapshot の疎通結果は snapshot_exit_code に独立して残す。
+            self.record["publish_exit_code"] = 0
+            return 0
         # 2) PRIMARY worktree から data/ を publish
         primary = Path(self.args.primary_root)
         ps1 = primary / "scripts" / "publish_data_to_vercel.ps1"
         if not ps1.exists():
-            self.log(f"[publish] publish script 不在 (skip): {ps1}")
+            self.log(f"[publish] publish script 不在: {ps1}")
             self.record["publish"] = "script_missing"
-            return
+            code = snapshot_code if snapshot_code != 0 else 1
+            self.record["publish_exit_code"] = code
+            return code
         self.log(f"[publish] {ps1} -Date {self.date} (cwd={primary})")
         try:
             proc = subprocess.run(
@@ -703,9 +987,11 @@ class Runner:
                 errors="replace",
             )
         except Exception as exc:  # noqa: BLE001
-            self.log(f"[publish] publish 実行失敗 (無視): {exc}")
+            self.log(f"[publish] publish 実行失敗: {exc}")
             self.record["publish"] = f"error:{exc}"
-            return
+            code = snapshot_code if snapshot_code != 0 else 1
+            self.record["publish_exit_code"] = code
+            return code
         out = proc.stdout or ""
         err = proc.stderr or ""
         for ln in out.splitlines():
@@ -716,11 +1002,36 @@ class Runner:
         (self.out / "publish.log").write_text(
             out + "\n---STDERR---\n" + err, encoding="utf-8"
         )
-        self.log(f"[publish] publish_data_to_vercel exit={proc.returncode}")
-        self.record["publish_exit_code"] = proc.returncode
+        vercel_code = int(proc.returncode)
+        self.log(f"[publish] publish_data_to_vercel exit={vercel_code}")
+        self.record["vercel_publish_exit_code"] = vercel_code
+        # Vercel publish が失敗した場合はその code を優先。publish が成功しても
+        # snapshot が失敗していれば観測段全体は失敗として main へ伝播する。
+        code = vercel_code if vercel_code != 0 else snapshot_code
+        self.record["publish_exit_code"] = code
+        return code
 
     def finalize(self, aborted: bool) -> None:
-        self._dump("completion_recon.json", self.record)
+        def remember_write_error(field: str, path: Path, exc: Exception) -> None:
+            detail = f"{type(exc).__name__}: {exc}"
+            self.record[field] = detail
+            try:
+                self.log(f"[finalize] {path.name} 書き込み失敗: {detail}")
+            except Exception:  # noqa: BLE001 - DONE 作成後の補助ログも best-effort
+                print(f"[finalize] {path.name} 書き込み失敗: {detail}", flush=True)
+
+        # 実発注が完了した run の冪等ロックは、SUMMARY/completion の補助成果物より
+        # 先に durable 化する。後続 I/O が失敗しても rc=4 等で同じ注文を再実行させない。
+        done_path = self.out / "DONE.lock"
+        if not aborted and not self.dry_run:
+            try:
+                done_path.write_text(
+                    datetime.now(timezone.utc).isoformat(), encoding="utf-8"
+                )
+            except Exception as exc:  # noqa: BLE001 - lock failure は成功扱いにできない
+                remember_write_error("done_lock_write_error", done_path, exc)
+                raise RuntimeError(f"DONE.lock を作成できません: {done_path}") from exc
+
         lines = [
             f"# OPEN AUTO RUN {self.date} ({self.record['mode']})",
             "",
@@ -740,18 +1051,40 @@ class Runner:
                 )
             lines += [
                 f"- exit_count: {self.record.get('exit_count')}",
+            ]
+            if self.record.get("flatten_ok") is not None:
+                lines.append(
+                    f"- flatten: accepted={self.record.get('flatten_ok')} "
+                    f"rejected={self.record.get('flatten_failed')} "
+                    f"settled={self.record.get('flatten_settled')} "
+                    f"unsettled={self.record.get('flatten_unsettled')}"
+                )
+            lines += [
                 f"- entry: submitted={self.record.get('entry_submitted')} "
+                f"filled={self.record.get('entry_filled')} "
                 f"skipped={self.record.get('entry_skipped')} "
                 f"failed={self.record.get('entry_failed')} "
                 f"status={self.record.get('entry_status')}",
                 f"- sizing_equity(used): {self.record.get('sizing_equity')}",
                 f"- final_positions: {self.record.get('final_positions')}",
+                f"- observability: notify_rc={self.record.get('notify_exit_code')} "
+                f"publish_rc={self.record.get('publish_exit_code')}",
             ]
-        (self.out / "SUMMARY.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
-        if not aborted and not self.dry_run:
-            (self.out / "DONE.lock").write_text(
-                datetime.now(timezone.utc).isoformat(), encoding="utf-8"
-            )
+        summary_path = self.out / "SUMMARY.md"
+        try:
+            summary_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        except (
+            Exception
+        ) as exc:  # noqa: BLE001 - DONE 作成済み、補助成果物は best-effort
+            remember_write_error("summary_write_error", summary_path, exc)
+
+        # SUMMARY の失敗情報も completion_recon に残せるよう、最後に dump する。
+        # _dump 自体は I/O 失敗を吸収するが、警告 log 側の例外も念のため封じる。
+        completion_path = self.out / "completion_recon.json"
+        try:
+            self._dump(completion_path.name, self.record)
+        except Exception as exc:  # noqa: BLE001 - DONE 作成後は絶対に再発注させない
+            remember_write_error("completion_recon_write_error", completion_path, exc)
 
     # -- orchestration -----------------------------------------------------
     def main(self) -> int:
@@ -778,6 +1111,8 @@ class Runner:
         self.wait_exit_fills(market_ids)  # exit->entry 順の担保点
         if self.entry_allowed:
             self.entry_stage(eq)
+            # submit 時点の status は必ず未終端。recon の前に実 fill へ寄せる。
+            self.reconcile_entry_fills()
         else:
             self.log(
                 f"[entry] SKIP: {self.record.get('entry_skip_reason')} "
@@ -786,9 +1121,33 @@ class Runner:
             self.record["entry_status"] = "skipped_thin_signals"
             self.record["entry_submitted"] = 0
         self.record_stage()
-        self.publish()  # post-entry snapshot 再生成 + Vercel monitor へ data/ publish
-        self.notify(eq)
+
+        # notify が recon/pipeline を最新の注文結果から再構成し、その成果物を publish が
+        # dashboard data として配る。この順序が逆だと ntfy は最新でも dashboard は
+        # ひとつ前の pipeline のままになる。片方が失敗しても他方は必ず実行する。
+        try:
+            notify_rc = int(self.notify(eq))
+        except Exception as exc:  # noqa: BLE001 - publish を必ず後続させる
+            self.log(f"[notify] 未処理例外: {exc}")
+            notify_rc = 1
+        self.record["notify_exit_code"] = notify_rc
+
+        try:
+            publish_rc = int(self.publish())
+        except Exception as exc:  # noqa: BLE001 - DONE を必ず durable に残す
+            self.log(f"[publish] 未処理例外: {exc}")
+            publish_rc = 1
+        self.record["publish_exit_code"] = publish_rc
+
+        # 注文段は既に完了しているため、観測段の失敗時も DONE.lock を先に作る。
+        # rc=4 による再試行で発注を重複させないことが最優先。
         self.finalize(aborted=False)
+        if notify_rc != 0 or publish_rc != 0:
+            self.log(
+                "=== OPEN AUTO RUN done with observability failure "
+                f"notify={notify_rc} publish={publish_rc} ==="
+            )
+            return OBSERVABILITY_DEGRADED_EXIT_CODE
         self.log("=== OPEN AUTO RUN done ===")
         return 0
 

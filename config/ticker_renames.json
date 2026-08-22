@@ -2,7 +2,8 @@
   "schema": "ticker_renames/v1",
   "note": "ticker rename / corporate action で symbol が変わり、約定履歴が旧 symbol と新 symbol に分断された対を手で繋ぐマップ。alias(新) を canonical(旧) に寄せる。canonical 側は entry の client_order_id に system tag が載っている方を選んでいる。",
   "provenance": "手動。**ブローカー側に裏付けは無い** -- Alpaca paper の activities に corporate action (NC/CA) が一切無く、asset id も社名も一致しないため API からは断定できない。株数がちょうど打ち消し合うという状態証拠と、決裁による判断で入れている。",
-  "safety": "ここに書いても無条件では適用されない。約定履歴から独立に再構成した建玉の残差が **一意に打ち消し合う** 対だけが採用され、一意に決まらないものは reason つきで拒否される (config を書き換えても憶測の対は作れない)。",
+  "safety": "ここに書いても無条件では適用されない。build_exit_ledger は、約定履歴から独立に再構成した建玉の残差が **一意に打ち消し合う** 対だけを採用し、一意に決まらないものは reason つきで拒否する。paper_exit_check は、broker が返す保有株数が下記 qty と **一致する** 対だけを採用する (qty の無い行は証拠が無いので採用しない)。どちらの consumer も config を書き換えただけでは憶測の対を作れない。",
+  "exit_usage": "exit は broker が返す alias symbol のまま発注し、canonical(旧 symbol) は entry system/date の解決にのみ使う。現 symbol 側に entry/tracker 情報があればそちらを常に優先する。",
   "decided_at": "2026-07-27",
   "renames": [
     {

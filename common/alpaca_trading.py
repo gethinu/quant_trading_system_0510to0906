@@ -14,18 +14,20 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
 import json
 import logging
 import math
 import os
 from pathlib import Path
+import re
 from typing import Any
 
 import pandas as pd
 
 from common import broker_alpaca as ba
+from common.order_status import normalize_order_status
 from common.symbol_map import resolve_primary_system
 
 logger = logging.getLogger(__name__)
@@ -468,6 +470,68 @@ def _classify_error(exc: Exception) -> OrderSubmitError:
     return OrderSubmitError(f"{reason}: {exc}")
 
 
+def probe_asset_tradable(symbol: str, client: Any | None = None) -> bool | None:
+    """銘柄が現在 broker で取引可能かを read-only で確認する。
+
+    戻り値: True=取引可 / False=取引不可 / None=確認できず (誤断定しない)。
+    発注は行わない (get_asset の GET のみ)。
+    """
+    try:
+        if client is None:
+            from common import broker_alpaca as _ba
+
+            client = _ba.get_client()
+        cli = client
+        asset = cli.get_asset(symbol)
+    except Exception:  # noqa: BLE001 - 確認できないことを False と混同しない
+        return None
+    tradable = getattr(asset, "tradable", None)
+    if tradable is None:
+        return None
+    return bool(tradable)
+
+
+def classify_exit_submit_error(error: str | None) -> str | None:
+    """exit 発注エラーが「既に保護済み」かを判定する (pure)。
+
+    保護注文を張り直そうとすると、その建玉の株数が **既存の未約定注文で全量
+    予約済み** の場合に Alpaca が buying-power 拒否 (code 40310000) を返す:
+
+        {"available":"0","code":40310000,"existing_qty":"105","held_for_orders":"105"}
+
+    これは「保護が既に掛かっている」ことの裏返しで、危険な失敗ではない。だが
+    従来は素の failed として数えていたため、2026-08-18 の run では 23 件中 12 件が
+    failed と表示され、**本当の exit 失敗がノイズに埋もれていた**。
+
+    over-claim を避けるため、判定は保守的に:
+      code 40310000 かつ existing_qty > 0 かつ held_for_orders >= existing_qty
+    の時だけ ``"already_protected"`` を返す。部分的な予約や他の資金不足は
+    None (= 通常の失敗) のまま扱う。
+    """
+    if not error:
+        return None
+    text = str(error)
+    if "40310000" not in text:
+        return None
+
+    def _num(key: str) -> float | None:
+        m = re.search(rf'"{key}"\s*:\s*"?(-?[\d.]+)"?', text)
+        if not m:
+            return None
+        try:
+            return abs(float(m.group(1)))
+        except ValueError:
+            return None
+
+    existing = _num("existing_qty")
+    held = _num("held_for_orders")
+    if existing is None or held is None:
+        return None
+    if existing <= 0 or held < existing:
+        return None
+    return "already_protected"
+
+
 def submit_paper_order(
     symbol: str,
     qty: int,
@@ -532,7 +596,7 @@ def submit_paper_order(
         raise _classify_error(exc) from exc
 
     prepared.order_id = str(getattr(order, "id", "") or "")
-    prepared.status = str(getattr(order, "status", "") or "")
+    prepared.status = normalize_order_status(getattr(order, "status", None))
     _audit_log({"event": "submitted", **prepared.to_row()})
     logger.info(
         "Paper order submitted: %s %s x%d id=%s status=%s",
@@ -786,11 +850,22 @@ def _flatten_json_signals(json_data: dict[str, Any]) -> list[dict[str, Any]]:
                 weight = float(s.get("weight") or 0.0)
             except (TypeError, ValueError):
                 weight = 0.0
+            # spec の指値 (例 S2 = 前日終値 x 1.04) を emitter が確定できた行だけ
+            # 持つ。無い行は従来どおり成行にフォールバックする。
+            limit_price: float | None
+            try:
+                _lp = s.get("limit_price")
+                limit_price = float(_lp) if _lp is not None else None
+                if limit_price is not None and not (limit_price > 0):
+                    limit_price = None
+            except (TypeError, ValueError):
+                limit_price = None
             out.append(
                 {
                     "symbol": sym,
                     "side": side,
                     "entry_price": price,
+                    "limit_price": limit_price,
                     "weight": weight,
                     "system": norm_sys,
                 }
@@ -866,6 +941,9 @@ def plan_order_execution(
     return (EXEC_QTY, qty, round(notional_usd, 2), f"{why}→whole_share_qty={qty}")
 
 
+_TRADABLE_CACHE: dict[str, bool | None] = {}
+
+
 def get_asset_fractionable(client: Any, symbol: str) -> bool | None:
     """Alpaca asset の ``fractionable`` フラグを照会 (結果を module cache)。
 
@@ -880,11 +958,30 @@ def get_asset_fractionable(client: Any, symbol: str) -> bool | None:
     try:
         asset = client.get_asset(key)
         frac = bool(getattr(asset, "fractionable", False))
+        # 同じ asset 応答から tradable も拾っておく (追加の API 往復を作らない)。
+        tradable = getattr(asset, "tradable", None)
+        _TRADABLE_CACHE[key] = None if tradable is None else bool(tradable)
     except Exception as exc:  # noqa: BLE001
         logger.warning("get_asset(%s) 失敗、非fractionable扱い(unknown): %s", key, exc)
         frac = None
     _FRACTIONABLE_CACHE[key] = frac
     return frac
+
+
+def get_asset_tradable(client: Any, symbol: str) -> bool | None:
+    """Alpaca asset の ``tradable`` を照会 (fractionable と同じ応答を共有)。
+
+    戻り値: True=取引可 / False=取引不可 / None=不明。
+    **不明を取引不可と混同しない**: broker 到達失敗で全 entry を止めないため、
+    呼び出し側は False の時だけ skip する。
+    """
+    key = (symbol or "").upper()
+    if not key:
+        return None
+    if key not in _TRADABLE_CACHE:
+        # fractionable 照会が asset を取り、その副作用で _TRADABLE_CACHE も埋まる。
+        get_asset_fractionable(client, key)
+    return _TRADABLE_CACHE.get(key)
 
 
 def fetch_open_order_state(client: Any) -> tuple[dict[str, set[str]], set[str]]:
@@ -1221,11 +1318,28 @@ def signals_json_to_orders(
                 if qty <= 0:
                     pre_skip = f"skip:below_1_share:${notional:.2f}_@${price:.2f}"
 
+        # 注文種別は docs/systems/システム{N}.txt の「仕掛け」節を single source of
+        # truth とする _DEFAULT_SYSTEM_ORDER_TYPE に従う。
+        # ただし **limit_price が row に無ければ market へフォールバック** する
+        # (本 module 冒頭の docs-alignment コメントで明文化済の既定挙動)。指値
+        # 価格が確定していないのに limit を出すと誤発注になるため。
+        # 2026-08-22 以前はここが order_type="market" 固定で、S2 の
+        # 「翌日 前日終値+4% 以上の指値売 (LIMIT)」が live で一度も出ていなかった。
+        limit_price = s.get("limit_price")
+        order_type = _DEFAULT_SYSTEM_ORDER_TYPE.get(system, "market")
+        if order_type == "limit" and not limit_price:
+            order_type = "market"
+            limit_price = None
+        if order_type != "limit":
+            limit_price = None
         po = PreparedOrder(
             symbol=sym,
             qty=qty,
             side=side,
-            order_type="market",
+            order_type=order_type,
+            limit_price=limit_price,
+            # 指値は **DAY**。翌セッションまで残った売り指値が寝たまま約定すると
+            # その日のシグナルでない建玉を持つことになるので GTC にはしない。
             time_in_force="day",
             client_order_id=client_order_id,
             system=system,
@@ -1363,14 +1477,28 @@ def signals_json_to_orders(
             submitted.append(po)
             continue
 
+        # (2.9) broker が取引を受け付けない銘柄 (上場廃止・非対応等) は、発注して
+        #       42210000 で失敗させるより skip として分類する。失敗として数えると
+        #       「本当に失敗した entry」がノイズに埋もれる (exit 側と同じ方針)。
+        #       **不明 (None) は skip しない** — broker 到達失敗で全 entry を止めない。
+        if get_asset_tradable(client, po.symbol) is False:
+            po.skip_reason = "untradable:not_tradable_at_broker"
+            _audit_log({"event": "skip_untradable", **po.to_row()})
+            logger.info("skip (取引不可銘柄): %s", po.symbol)
+            submitted.append(po)
+            continue
+
         # (3) 実行方式を分類: long+fractionable→notional / それ以外→整数株 / 不能→skip
+        #     指値注文 (S2 の spec 指値等) は notional (成行専用) では出せないので
+        #     必ず整数株経路へ寄せる。ここで prefer_fractional を落とさないと
+        #     long の指値が黙って成行に化ける。
         fractionable = get_asset_fractionable(client, po.symbol)
         mode, qty, notional, reason = plan_order_execution(
             side=po.side,
             notional_usd=float(po.notional_usd or 0.0),
             price=price,
             fractionable=fractionable,
-            prefer_fractional=prefer_fractional,
+            prefer_fractional=prefer_fractional and po.order_type != "limit",
         )
         po.exec_mode = mode
         po.extra["fractionable"] = fractionable
@@ -1396,7 +1524,7 @@ def signals_json_to_orders(
                 )
                 order = client.submit_order(order_data=req)
                 po.order_id = str(getattr(order, "id", "") or "")
-                po.status = str(getattr(order, "status", "") or "")
+                po.status = normalize_order_status(getattr(order, "status", None))
                 _audit_log({"event": "submitted_notional", **po.to_row()})
             else:  # EXEC_QTY — 整数株 (short / 非fractionable)
                 po.qty = qty
@@ -1405,13 +1533,14 @@ def signals_json_to_orders(
                     qty,
                     po.side,
                     order_type=po.order_type,
+                    limit_price=po.limit_price,
                     time_in_force=po.time_in_force,
                     client_order_id=po.client_order_id,
                     dry_run=False,
                     client=client,
                 )
                 po.order_id = result.order_id
-                po.status = result.status
+                po.status = normalize_order_status(result.status)
                 _audit_log({"event": "submitted_qty", **po.to_row()})
             # 自注文を口座状態に反映し、同一バッチ内の後続 self-wash / 二重を防ぐ
             open_sides.setdefault(po.symbol, set()).add(po.side)
@@ -1452,6 +1581,12 @@ from common.trade_management import SYSTEM_TRADE_RULES  # noqa: E402
 _PROTECT_STOP_SUFFIX = "protect-stop"
 _PROTECT_TRAIL_SUFFIX = "protect-trail"
 _PROTECT_TARGET_SUFFIX = "protect-target"
+_PROTECT_OCO_SUFFIX = "protect-oco"
+# OCO 昇格が broker に拒否されたときに張り直す単発 stop の suffix。
+# 元の coid は再利用できない (Alpaca は client_order_id を使い回せない) ので
+# 別名にする。この coid が resting = 「昇格を一度試して失敗した建玉」の印で、
+# 以後の run は昇格を再試行せず従来の stop-only 定常状態を維持する。
+_PROTECT_STOP_REARM_SUFFIX = "protect-stop-rearm"
 _EXIT_TIME_SUFFIX = "exit-time"
 _EXIT_BREAKOUT_SUFFIX = "exit-breakout"
 # 端株 (fractional) 用 synthetic protection の coid suffix。Alpaca は端株に
@@ -1472,6 +1607,8 @@ class ExitReasonCode:
     PROTECT_STOP = "protect_stop"
     PROTECT_TRAIL = "protect_trailing"
     PROTECT_TARGET = "protect_target"
+    # stop+target を 1 本の OCO にまとめた場合の reason (PROTECT_USE_OCO=1 時のみ)。
+    PROTECT_OCO = "protect_oco"
 
 
 @dataclass(slots=True)
@@ -1564,8 +1701,16 @@ class PreparedExit:
     order_id: str | None = None
     status: str | None = None
     error: str | None = None
+    # 失敗ではないが発注しなかった理由 (例: already_protected)。error と分けることで
+    # 「本当に失敗した exit」を集計から埋もれさせない。
+    skip_reason: str | None = None
     dry_run: bool = True
     time_in_force: str = "day"
+    # この注文を出す **前に** cancel すべき resting order の client_order_id。
+    # PROTECT_USE_OCO=1 の stop -> OCO 昇格でだけ使う (単発 stop が qty を全量
+    # 予約したままだと OCO が code 40310000 で確実に拒否されるため)。
+    # dry-run では絶対に cancel しない (提案として artifact に残るだけ)。
+    cancel_client_order_ids: list[str] = field(default_factory=list)
 
     def to_row(self) -> dict[str, Any]:
         return asdict(self)
@@ -1676,6 +1821,8 @@ def hydrate_system_tags(
     *,
     tracker: dict[str, Any] | None = None,
     entry_orders_index: dict[str, dict[str, Any]] | None = None,
+    symbol_map: Mapping[str, str] | None = None,
+    symbol_aliases: Mapping[str, str] | None = None,
 ) -> list[PositionSnapshot]:
     """system / entry_date を tracker or entry order index から埋める。
 
@@ -1684,22 +1831,59 @@ def hydrate_system_tags(
          (paper_orders_*.json や fetch_entry_orders から)
       2. tracker[symbol] = {"system": ..., "entry_date": ...}
          (data/position_tracker.json、common/position_tracker.py 由来)
+      3. symbol_aliases[symbol] の旧 symbol を 1, 2 で再照合
+         (ticker rename/corporate action 後も broker の現 symbol で exit する)
+
+    ``symbol_aliases`` は **検証済みの対だけ** を渡すこと。ここでは真偽を判定せず
+    そのまま信用する (採否の判断は config を持つ呼び出し側の責務。
+    scripts/paper_exit_check.py は保有株数と config の qty 一致を条件にしている)。
 
     どちらも無い symbol は system=None のまま返す (exit_check 側で skip される)。
     """
     idx = entry_orders_index or {}
     tr = tracker or {}
+    smap = symbol_map or {}
+    aliases = {
+        str(alias).strip().upper(): str(canonical).strip().upper()
+        for alias, canonical in (symbol_aliases or {}).items()
+        if str(alias).strip() and str(canonical).strip()
+    }
+
+    def _info_for(symbol: str) -> dict[str, Any] | None:
+        return idx.get(symbol) or tr.get(symbol)
+
     for snap in snapshots:
-        info = idx.get(snap.symbol) or tr.get(snap.symbol)
-        if not isinstance(info, dict):
-            continue
-        sys_tag = info.get("system")
-        if sys_tag and not snap.system:
-            snap.system = str(sys_tag).lower()
-        ed = info.get("entry_date")
-        if ed and not snap.entry_date:
-            # accept both ISO 'YYYY-MM-DD' or 'YYYY-MM-DDT...'
-            snap.entry_date = str(ed)[:10]
+        observed_symbol = str(snap.symbol).strip().upper()
+        # 現 symbol の情報を常に優先し、rename は未解決項目だけを補う。
+        # これにより stale な手動 alias が新しい broker/entry 情報を上書きしない。
+        lookup_symbols = [observed_symbol]
+        canonical = aliases.get(observed_symbol)
+        if canonical and canonical != observed_symbol:
+            lookup_symbols.append(canonical)
+
+        for lookup_symbol in lookup_symbols:
+            info = _info_for(lookup_symbol)
+            if not isinstance(info, dict):
+                continue
+            sys_tag = info.get("system")
+            if sys_tag and not snap.system:
+                snap.system = str(sys_tag).lower()
+            ed = info.get("entry_date")
+            if ed and not snap.entry_date:
+                # accept both ISO 'YYYY-MM-DD' or 'YYYY-MM-DDT...'
+                snap.entry_date = str(ed)[:10]
+        # 3rd source: symbol_system_map (system のみ / entry_date は持たない)。
+        # tracker/entry_index が空でも durable マップから system を拾えるようにする。
+        if not snap.system:
+            for lookup_symbol in lookup_symbols:
+                m = (
+                    smap.get(lookup_symbol)
+                    or smap.get(lookup_symbol.lower())
+                    or smap.get(lookup_symbol.upper())
+                )
+                if m:
+                    snap.system = str(m).lower()
+                    break
     return snapshots
 
 
@@ -1708,25 +1892,75 @@ def hydrate_system_tags(
 # -----------------------------------------------------------------------
 
 
+def _nyse_trading_days_between(d0: date, d1: date) -> int | None:
+    """[d0, d1) の NYSE 立会日数。calendar が使えない時は None。
+
+    ``pandas_market_calendars`` は既に ``common/utils_spy`` が使っている依存
+    なので新規追加ではない。祝日 (Thanksgiving 等) を平日として数えないために
+    素の ``busday_count`` より優先する。lazy import で本 module の import
+    コストは増やさない。
+    """
+    if d1 <= d0:
+        return 0
+    try:
+        import pandas_market_calendars as mcal
+
+        sched = mcal.get_calendar("NYSE").schedule(
+            start_date=pd.Timestamp(d0), end_date=pd.Timestamp(d1)
+        )
+        days = pd.to_datetime(sched.index).normalize()
+        # [d0, d1): entry 当日は 0 日保有、d1 当日も未経過として数えない。
+        return int(((days > pd.Timestamp(d0)) & (days <= pd.Timestamp(d1))).sum())
+    except Exception:
+        return None
+
+
 def compute_holding_days(
     entry_date: str | None, today: str | None = None
 ) -> int | None:
     """entry_date (ISO 'YYYY-MM-DD') と today から holding days を計算。
 
-    parse 失敗時は None。
+    **立会日 (trading day) で数える**。parse 失敗時は None。
+
+    NOTE (2026-08-22 fix): 以前は暦日 (``(d1 - d0).days``) を返していたが、
+    突き合わせ先の ``SystemTradeRules.max_holding_days`` は立会日ベースの spec
+    である:
+
+      - ``strategies/system2_strategy.py`` compute_exit docstring:
+        「未達: 2営業日待っても利確に届かない場合は3日目の大引けで決済」
+      - 同 compute_exit のループは ``idx = entry_idx + offset`` = **bar 単位**
+        (= 立会日) で回る。
+      - ``config/config.yaml`` system2.max_hold_days: 2 (「書籍通り」)
+
+    暦日で数えると金曜エントリーの System2 は土日を 2 日と数え、月曜 (=立会 1 日)
+    に time exit が発火して **spec より 1 立会日早く** 手仕舞ってしまう。
+    立会日換算は既存の ``common/profit_protection.calculate_business_holding_days``
+    と同じ概念で、こちらは NYSE 祝日も除外する (calendar が無ければ
+    ``np.busday_count`` 相当の Mon-Fri 換算へフォールバック)。
     """
     if not entry_date:
         return None
     try:
-        d0 = datetime.fromisoformat(str(entry_date)[:10])
+        d0 = datetime.fromisoformat(str(entry_date)[:10]).date()
         if today is None:
             d1 = datetime.now(timezone.utc).date()
-            d1 = datetime(d1.year, d1.month, d1.day)
         else:
-            d1 = datetime.fromisoformat(str(today)[:10])
-        return int((d1 - d0).days)
+            d1 = datetime.fromisoformat(str(today)[:10]).date()
     except Exception:
         return None
+    if d1 <= d0:
+        return 0
+    exact = _nyse_trading_days_between(d0, d1)
+    if exact is not None:
+        return exact
+    try:
+        import numpy as np
+
+        return int(np.busday_count(d0, d1))
+    except Exception:
+        # 最終手段: 暦日 (従来挙動)。ここに落ちるのは numpy も calendar も
+        # 使えない環境だけ。
+        return int((d1 - d0).days)
 
 
 # -----------------------------------------------------------------------
@@ -1796,20 +2030,103 @@ def _build_spy_breakout_exit(
     )
 
 
+# --- protective stop の下限フロア (2026-08-19) ---------------------------
+# 旧実装は long stop を ``max(0.01, entry - mult*ATR)`` で潰していた。ATR が
+# entry price に対して過大な銘柄 (低位・高ボラ) では entry - mult*ATR が 0 以下に
+# なり、stop が **$0.01 = 実質「保護なし」** に silent に化ける (発動するのは
+# 100% 損失の手前だけ)。「注文は通ったが保護されていない」典型的な silent success。
+#
+# 代わりに entry * (1 - pct) の % ストップにフォールバックし、必ず WARNING を出す。
+# 既定 0.50 (最大想定損失 50%) の根拠: ATR stop が使えないほど volatile な銘柄に
+# S1 の 25% 級 tight stop を当てると通常ノイズで即発動して strategy を壊す。50% は
+# 「通常変動では触れないが 100% 損失は防ぐ」disaster stop として保守側に振った値。
+# PROTECT_STOP_FLOOR_PCT で調整可 (0 < pct < 1)。
+# PROTECT_STOP_FLOOR_ENABLED=0 で旧 max(0.01, ...) 挙動に戻せる (可逆)。
+_STOP_FLOOR_PCT_DEFAULT = 0.50
+
+
+def _stop_floor_enabled() -> bool:
+    """protective stop の % フロアを使うか。既定 ON、``=0`` で旧挙動へ戻す。"""
+    raw = os.getenv("PROTECT_STOP_FLOOR_ENABLED", "").strip().lower()
+    if not raw:
+        return True
+    return raw in _TRUTHY
+
+
+def _stop_floor_pct() -> float:
+    """フロア割合。未設定 / 不正値 / 範囲外は既定にフォールバックする。"""
+    raw = os.getenv("PROTECT_STOP_FLOOR_PCT", "").strip()
+    if not raw:
+        return _STOP_FLOOR_PCT_DEFAULT
+    try:
+        pct = float(raw)
+    except ValueError:
+        logger.warning(
+            "PROTECT_STOP_FLOOR_PCT=%r は数値として解釈できない → 既定 %.2f を使用。",
+            raw,
+            _STOP_FLOOR_PCT_DEFAULT,
+        )
+        return _STOP_FLOOR_PCT_DEFAULT
+    if not 0.0 < pct < 1.0:
+        logger.warning(
+            "PROTECT_STOP_FLOOR_PCT=%r は (0,1) の範囲外 → 既定 %.2f を使用。",
+            raw,
+            _STOP_FLOOR_PCT_DEFAULT,
+        )
+        return _STOP_FLOOR_PCT_DEFAULT
+    return pct
+
+
 def _stop_price_for(
     snap: PositionSnapshot, rules: Any, atr_value: float | None
 ) -> float | None:
     """ATR ベースの protective stop 価格。ATR 無し / rules 無しなら None。
 
-    long: entry - stop_dist (最低 0.01), short: entry + stop_dist。
+    long: entry - stop_dist、short: entry + stop_dist。
+    long の stop_dist が entry を食い潰す (raw stop <= 0) 場合は $0.01 に潰さず
+    ``entry * (1 - PROTECT_STOP_FLOOR_PCT)`` のフロアへ落として WARNING を出す。
     native protection (整数株) と synthetic (端株) の双方から使う共通式。
     """
     if rules is None or atr_value is None or atr_value <= 0:
         return None
     stop_dist = float(atr_value) * float(rules.stop_atr_multiplier)
-    if snap.side == "long":
-        return max(0.01, snap.avg_entry_price - stop_dist)
-    return snap.avg_entry_price + stop_dist
+    if snap.side != "long":
+        return snap.avg_entry_price + stop_dist
+
+    raw_stop = snap.avg_entry_price - stop_dist
+    if raw_stop > 0:
+        return raw_stop
+    if not _stop_floor_enabled():
+        # 明示的に無効化された場合のみ旧挙動 ($0.01 クランプ) を残す。
+        logger.warning(
+            "protect stop: %s raw stop=%.4f <= 0 だが PROTECT_STOP_FLOOR_ENABLED=0 の"
+            " ため旧挙動 ($0.01 クランプ = 実質無保護) を維持する。",
+            snap.symbol,
+            raw_stop,
+        )
+        return max(0.01, raw_stop)
+
+    pct = _stop_floor_pct()
+    floor = float(snap.avg_entry_price) * (1.0 - pct)
+    if floor <= 0:
+        # entry price 自体が壊れている。誤った stop を出すより出さない方が安全。
+        logger.warning(
+            "protect stop 生成不可: %s entry=%.4f が非正 → stop 無し (要データ調査)。",
+            snap.symbol,
+            snap.avg_entry_price,
+        )
+        return None
+    logger.warning(
+        "protect stop FLOOR 適用: %s entry=%.4f ATR*mult=%.4f → raw stop=%.4f (<=0)。"
+        " $0.01 の無保護 stop を避けて %.0f%% フロア %.4f を使用する。",
+        snap.symbol,
+        snap.avg_entry_price,
+        stop_dist,
+        raw_stop,
+        pct * 100.0,
+        floor,
+    )
+    return floor
 
 
 def _target_price_for(
@@ -1835,6 +2152,44 @@ def _target_price_for(
     return None
 
 
+# --- broker の qty 予約制約 (2026-08-19) ---------------------------------
+# Alpaca では 1 つの open order が建玉の qty を **全量** 予約する
+# (held_for_orders)。したがって同じ建玉に stop と limit(target) を同時に常駐
+# させることはできず、後から出した方は必ず
+# ``code 40310000 (insufficient qty available)`` で拒否される。
+#
+# 実測 (2026-08-18 22:50 paper / exits 23 件):
+#   protect_target 10 件拒否 … S2/S3/S5/S6 は stop が qty を握るため
+#   protect_stop    2 件拒否 … S1/S4 は前日からの trailing が qty を握るため
+#   → 毎 run 12 件が確実に拒否され、recon 上は armed に化けていた。
+#
+# 対応方針:
+#   既定 (PROTECT_USE_OCO 未設定):
+#     優先度 trailing > stop > target で **1 本だけ** 発注し、残りは送信せず
+#     ``skip_reason`` を付けた非発注提案として返す。broker 上の最終状態は従来と
+#     同一 (従来も 1 本しか通っていない) なので **挙動中立・可逆**。消えるのは
+#     「確実に拒否される API 呼び出し」と、それが armed に化ける観測ノイズだけ。
+#     ※ silent に落とすと「保護が無い」ことが観測できなくなるため、必ず
+#       skip_reason 付きで返して artifact に残す。
+#   PROTECT_USE_OCO=1:
+#     stop と target を **1 本の OCO 注文** に束ねて同時常駐させる (qty 予約は
+#     1 回)。これが本来の解だが order 種別が変わるため既定 OFF とし、paper で
+#     検証してから有効化する。
+_PROTECT_KIND_PRIORITY = ("trailing", "stop", "target")
+_PROTECT_SUFFIX_BY_KIND = {
+    "trailing": _PROTECT_TRAIL_SUFFIX,
+    "stop": _PROTECT_STOP_SUFFIX,
+    "target": _PROTECT_TARGET_SUFFIX,
+    "oco": _PROTECT_OCO_SUFFIX,
+    "stop_rearm": _PROTECT_STOP_REARM_SUFFIX,
+}
+
+
+def _protect_use_oco() -> bool:
+    """stop+target を OCO 1 本に束ねるか。既定 OFF (paper 検証後に有効化)。"""
+    return os.getenv("PROTECT_USE_OCO", "").strip().lower() in _TRUTHY
+
+
 def _build_protection_orders(
     snap: PositionSnapshot,
     rules: Any,
@@ -1842,89 +2197,257 @@ def _build_protection_orders(
     atr_value: float | None,
     existing_protect_coids: set[str],
 ) -> list[PreparedExit]:
-    """S1/S4 の trailing、S1〜S6 の stop-loss、S2/S3/S5/S6/S7 の take_profit の
-    protection order を Alpaca に対して発注する提案を返す。
+    """S1/S4 の trailing、S1〜S6 の stop-loss、S2/S3/S5/S6 の take_profit の
+    protection order 提案を返す (整数株の native 経路)。
+
+    Alpaca は 1 注文が qty を全量予約するので、同じ建玉に複数の protection を
+    常駐させられない。優先度 trailing > stop > target で 1 本だけを発注対象と
+    し、残りは ``skip_reason`` を付けた **非発注** 提案として返す
+    (``submit_paper_exit_order`` は skip_reason 付きを送信しない)。
 
     既に同 client_order_id で発注済 (existing_protect_coids に含まれる) なら skip。
     """
     if rules is None or snap.system is None:
         return []
-    proposals: list[PreparedExit] = []
     close_side = "sell" if snap.side == "long" else "buy"
     entry_date_compact = (snap.entry_date or "").replace("-", "")
+    base = f"protect-{snap.system}-{snap.symbol}-{entry_date_compact}"
 
-    # trailing stop (S1: 25%, S4: 20%)
+    def _coid(kind: str) -> str:
+        return f"{base}-{_PROTECT_SUFFIX_BY_KIND[kind]}"
+
+    # (1) 候補 leg を組む。発注可否 (qty 予約) の判断は後段でまとめて行う。
+    legs: dict[str, PreparedExit] = {}
     if getattr(rules, "use_trailing_stop", False) and rules.trailing_stop_pct > 0:
-        coid = (
-            f"protect-{snap.system}-{snap.symbol}-{entry_date_compact}-"
-            f"{_PROTECT_TRAIL_SUFFIX}"
+        legs["trailing"] = PreparedExit(
+            symbol=snap.symbol,
+            system=snap.system,
+            qty=snap.exit_qty(),
+            side=close_side,
+            order_type="trailing_stop",
+            reason=ExitReasonCode.PROTECT_TRAIL,
+            entry_date=snap.entry_date,
+            trail_percent=float(rules.trailing_stop_pct) * 100.0,
+            client_order_id=_coid("trailing"),
+            dry_run=True,
+            time_in_force="gtc",
         )
-        if coid not in existing_protect_coids:
-            proposals.append(
-                PreparedExit(
-                    symbol=snap.symbol,
-                    system=snap.system,
-                    qty=snap.exit_qty(),
-                    side=close_side,
-                    order_type="trailing_stop",
-                    reason=ExitReasonCode.PROTECT_TRAIL,
-                    entry_date=snap.entry_date,
-                    trail_percent=float(rules.trailing_stop_pct) * 100.0,
-                    client_order_id=coid,
-                    dry_run=True,
-                    time_in_force="gtc",
-                )
-            )
-
-    # stop-loss (全 system): ATR ベース。ATR 値が無いと計算できないので skip。
     stop_price = _stop_price_for(snap, rules, atr_value)
     if stop_price is not None:
-        coid = (
-            f"protect-{snap.system}-{snap.symbol}-{entry_date_compact}-"
-            f"{_PROTECT_STOP_SUFFIX}"
+        legs["stop"] = PreparedExit(
+            symbol=snap.symbol,
+            system=snap.system,
+            qty=snap.exit_qty(),
+            side=close_side,
+            order_type="stop",
+            reason=ExitReasonCode.PROTECT_STOP,
+            entry_date=snap.entry_date,
+            stop_price=round_to_alpaca_tick(stop_price),
+            client_order_id=_coid("stop"),
+            dry_run=True,
+            time_in_force="gtc",
         )
-        if coid not in existing_protect_coids:
-            proposals.append(
-                PreparedExit(
-                    symbol=snap.symbol,
-                    system=snap.system,
-                    qty=snap.exit_qty(),
-                    side=close_side,
-                    order_type="stop",
-                    reason=ExitReasonCode.PROTECT_STOP,
-                    entry_date=snap.entry_date,
-                    stop_price=round_to_alpaca_tick(stop_price),
-                    client_order_id=coid,
-                    dry_run=True,
-                    time_in_force="gtc",
-                )
-            )
-
-    # profit target (S2/S3/S6 = %, S5 = ATR)
     target_price = _target_price_for(snap, rules, atr_value)
     if target_price is not None and target_price > 0:
-        coid = (
-            f"protect-{snap.system}-{snap.symbol}-{entry_date_compact}-"
-            f"{_PROTECT_TARGET_SUFFIX}"
+        legs["target"] = PreparedExit(
+            symbol=snap.symbol,
+            system=snap.system,
+            qty=snap.exit_qty(),
+            side=close_side,
+            order_type="limit",
+            reason=ExitReasonCode.PROTECT_TARGET,
+            entry_date=snap.entry_date,
+            limit_price=round_to_alpaca_tick(target_price),
+            client_order_id=_coid("target"),
+            dry_run=True,
+            time_in_force="gtc",
         )
-        if coid not in existing_protect_coids:
-            proposals.append(
-                PreparedExit(
-                    symbol=snap.symbol,
-                    system=snap.system,
-                    qty=snap.exit_qty(),
-                    side=close_side,
-                    order_type="limit",
-                    reason=ExitReasonCode.PROTECT_TARGET,
-                    entry_date=snap.entry_date,
-                    limit_price=round_to_alpaca_tick(target_price),
-                    client_order_id=coid,
-                    dry_run=True,
-                    time_in_force="gtc",
-                )
-            )
+    if not legs:
+        return []
 
-    return proposals
+    # (2) 同種が既に open なら従来どおり静かに skip (これは正常な定常状態)。
+    #
+    # NOTE (2026-08-22): OCO は自分自身の coid を dedup 対象に入れていなかった。
+    # PROTECT_USE_OCO=1 で一度 OCO が resting になると、翌 run も legs={stop,target}
+    # のまま OCO 分岐へ入って **同じ coid を毎日再送** し、Alpaca の 422 duplicate を
+    # 毎日 1 件の「失敗」として記録してしまう (classify_exit_submit_error は 40310000
+    # しか救わない)。resting OCO は stop+target 両方を張り終えた正常な定常状態なので、
+    # 静かに skip する。
+    if _coid("oco") in existing_protect_coids:
+        return []
+    # 昇格に失敗して張り直した stop (rearm) も「stop が resting」として扱う。
+    stop_rearmed = _coid("stop_rearm") in existing_protect_coids
+    already_open = [
+        k
+        for k in _PROTECT_KIND_PRIORITY
+        if k in legs
+        and (
+            _coid(k) in existing_protect_coids or (k == "stop" and stop_rearmed)
+        )
+    ]
+    for k in already_open:
+        legs.pop(k, None)
+    if not legs:
+        return []
+
+    # (2.5) stop -> OCO 昇格 (PROTECT_USE_OCO=1 のみ)。
+    #
+    # なぜ必要か: 単発 stop が既に resting だと (2) の already_open で短絡し、
+    # OCO 分岐 (3) に **到達しない**。つまり flag を立てても既存建玉の利確は
+    # 永久に張られないままになる。2026-08-22 の paper 実測でも、flag ON/OFF で
+    # 提案 25 件が 1 行も変わらなかった (broker 側 resting = stop 17 / trail 5 /
+    # target 0 / oco 0)。
+    # 昇格は「単発 stop だけが resting」かつ「target leg も作れる」時に限る。
+    # trailing が握っている建玉 (S1/S4) は OCO 化しない = 従来どおり。
+    # ``stop_rearmed`` = 過去に昇格して broker に拒否された建玉。再試行しない
+    # (毎日 cancel -> 拒否 -> 張り直しを繰り返して保護に穴を空けないため)。
+    if (
+        _protect_use_oco()
+        and already_open == ["stop"]
+        and not stop_rearmed
+        and "target" in legs
+        and "trailing" not in legs
+    ):
+        stop_price_up = _stop_price_for(snap, rules, atr_value)
+        target_price_up = _target_price_for(snap, rules, atr_value)
+        if (
+            stop_price_up is not None
+            and target_price_up is not None
+            and target_price_up > 0
+        ):
+            oco_up = PreparedExit(
+                symbol=snap.symbol,
+                system=snap.system,
+                qty=snap.exit_qty(),
+                side=close_side,
+                order_type="oco",
+                reason=ExitReasonCode.PROTECT_OCO,
+                entry_date=snap.entry_date,
+                limit_price=round_to_alpaca_tick(target_price_up),
+                stop_price=round_to_alpaca_tick(stop_price_up),
+                client_order_id=_coid("oco"),
+                dry_run=True,
+                time_in_force="gtc",
+                # 単発 stop を先に外さないと qty 予約で OCO が拒否される。
+                cancel_client_order_ids=[_coid("stop")],
+            )
+            logger.info(
+                "protection OCO 昇格: %s の単発 stop を外して stop=%.4f /"
+                " target=%.4f の OCO へ差し替える (利確が常駐できるようになる)。",
+                snap.symbol,
+                oco_up.stop_price or 0.0,
+                oco_up.limit_price or 0.0,
+            )
+            return [oco_up]
+
+    if already_open:
+        # 別種の protection が既に qty を全量握っている → 新規 leg は必ず
+        # 40310000 で拒否される。送らずに理由付きで残す。
+        holder = already_open[0]
+        out: list[PreparedExit] = []
+        for kind in _PROTECT_KIND_PRIORITY:
+            po = legs.get(kind)
+            if po is None:
+                continue
+            po.skip_reason = f"qty_reserved:{holder}_order_already_open"
+            logger.warning(
+                "protection 抑止: %s %s は %s が qty を全量予約済のため発注しない"
+                " (送っても code 40310000 で確実に拒否される)。",
+                snap.symbol,
+                kind,
+                holder,
+            )
+            out.append(po)
+        return out
+
+    # (3) OCO (flag): stop と target を 1 本にまとめれば両方常駐できる。
+    if (
+        _protect_use_oco()
+        and "stop" in legs
+        and "target" in legs
+        and "trailing" not in legs
+    ):
+        stop_leg = legs["stop"]
+        target_leg = legs["target"]
+        oco = PreparedExit(
+            symbol=snap.symbol,
+            system=snap.system,
+            qty=snap.exit_qty(),
+            side=close_side,
+            order_type="oco",
+            reason=ExitReasonCode.PROTECT_OCO,
+            entry_date=snap.entry_date,
+            # OCO は limit_price=take_profit / stop_price=stop_loss として送る。
+            limit_price=target_leg.limit_price,
+            stop_price=stop_leg.stop_price,
+            client_order_id=f"{base}-{_PROTECT_OCO_SUFFIX}",
+            dry_run=True,
+            time_in_force="gtc",
+        )
+        logger.info(
+            "protection OCO: %s stop=%.4f / target=%.4f を 1 本の OCO で常駐させる。",
+            snap.symbol,
+            oco.stop_price or 0.0,
+            oco.limit_price or 0.0,
+        )
+        return [oco]
+
+    # (4) 既定: 優先度最上位の 1 本だけ発注し、残りは skip_reason 付きで返す。
+    winner = next(k for k in _PROTECT_KIND_PRIORITY if k in legs)
+    out = [legs[winner]]
+    for kind in _PROTECT_KIND_PRIORITY:
+        if kind == winner or kind not in legs:
+            continue
+        po = legs[kind]
+        po.skip_reason = f"qty_reserved:{winner}_takes_priority"
+        logger.warning(
+            "protection 抑止: %s %s は %s が qty を全量予約するため発注しない"
+            " (Alpaca は 1 建玉に 1 常駐注文のみ)。PROTECT_USE_OCO=1 で"
+            " stop+target の同時常駐が可能。",
+            snap.symbol,
+            kind,
+            winner,
+        )
+        out.append(po)
+    return out
+
+
+def build_stop_rearm_after_failed_oco(po: PreparedExit) -> PreparedExit | None:
+    """OCO 昇格が失敗したときに張り直す単発 stop を作る (pure)。
+
+    昇格は「resting の単発 stop を cancel してから OCO を出す」ので、OCO が
+    broker に拒否されると **建玉が無保護のまま翌 run まで放置** される。これは
+    利確が張れないことより遥かに悪い。よって昇格由来の OCO が失敗したら、
+    同じ qty / 同じ stop 価格の単発 stop を必ず張り直す。
+
+    coid は元のものを再利用できない (Alpaca は client_order_id を使い回せない)
+    ため ``-protect-stop-rearm`` を使う。この coid は次回以降の
+    ``_build_protection_orders`` で「stop は resting」かつ「昇格済で失敗」と
+    解釈され、昇格は再試行されない。
+
+    昇格由来でない OCO / stop 価格が無い場合は None (張り直す対象が無い)。
+    """
+    if po.order_type != "oco":
+        return None
+    if not (po.cancel_client_order_ids or []):
+        return None
+    if po.stop_price is None or po.stop_price <= 0:
+        return None
+    entry_date_compact = (po.entry_date or "").replace("-", "")
+    base = f"protect-{po.system}-{po.symbol}-{entry_date_compact}"
+    return PreparedExit(
+        symbol=po.symbol,
+        system=po.system,
+        qty=po.qty,
+        side=po.side,
+        order_type="stop",
+        reason=ExitReasonCode.PROTECT_STOP,
+        entry_date=po.entry_date,
+        stop_price=po.stop_price,
+        client_order_id=f"{base}-{_PROTECT_STOP_REARM_SUFFIX}",
+        dry_run=True,
+        time_in_force="gtc",
+    )
 
 
 def _build_synthetic_protection_orders(
@@ -2037,6 +2560,164 @@ def _build_synthetic_protection_orders(
 # -----------------------------------------------------------------------
 
 
+# --- orphan (system 帰属不能) の既定保護 (2026-08-19) --------------------
+# FOLD / CDTX のように system 由来がどのソースにも無い建玉は、従来 time も
+# protection も一切生成されず **完全に無保護** で放置されていた
+# (2026-08-18 時点で 2 玉 ≈ $4,286 が丸裸)。
+#
+# 「どちらに手仕舞うべきか」の方向判断は自動化しない (close はしない) が、
+# **下方保護が一切無い** 状態だけは解消する。パラメータは S1 (最も保守的な
+# long 系) の値をそのまま流用する:
+#     stop_atr_period=20 / stop_atr_multiplier=5.0 / trailing なし / target なし
+# S1 を選ぶ根拠: 既存 6 system 中で最も緩い (5 ATR) stop であり、素性の分からない
+# 建玉に tight な stop を当てて不要な手仕舞いを誘発するリスクが最も小さい。
+#
+# ATR が取れない銘柄 (delisted 等で rolling データ欠損) は entry price からの
+# % ストップ (PROTECT_STOP_FLOOR_PCT / 既定 50%) にフォールバックする。
+# ORPHAN_DEFAULT_PROTECTION=0 で無効化できる (既定 ON)。
+_ORPHAN_SYSTEM_TAG = "orphan"
+_ORPHAN_STOP_ATR_PERIOD = 20
+_ORPHAN_STOP_ATR_MULTIPLIER = 5.0
+# orphan の母集団は「上場廃止/取引停止で価格が凍っている」銘柄に偏る。凍った
+# 気配では ATR がほぼ 0 に潰れ、5*ATR stop が entry のすぐ下に張り付く。
+# 実測 (2026-08-18): FOLD は entry $14.26 に対し ATR20=0.03 (0.21%) で、
+# 5*ATR stop は $14.11 = entry の 1% 下。これは「保護」ではなく **ハエ叩き** で、
+# 最初の実約定で不本意な成行手仕舞いを誘発する (= ユーザーが明示的に避けたい
+# 「方向判断の自動化」に等しい)。
+# そこで ATR/price がこの閾値を下回る場合は ATR を **使用不能** とみなし、
+# entry からの % フロア (PROTECT_STOP_FLOOR_PCT / 既定 50%) に退避する。
+# 0.5% の根拠: 通常の株式の日次 ATR は概ね 1〜3%。0.5% 未満は halt/stale の
+# 気配とみなすのが妥当で、健全な低ボラ銘柄を巻き込みにくい。
+# ORPHAN_MIN_ATR_PCT で調整可。
+_ORPHAN_MIN_ATR_PCT_DEFAULT = 0.005
+
+
+class _OrphanRules:
+    """orphan 用の最小 protection ルール (S1 の保守的値を流用)。
+
+    ``_stop_price_for`` が参照する属性だけを持つ read-only な擬似 rules。
+    trailing / profit target / time exit は **持たない** (strategy 意図が
+    不明な建玉に利確や満期を当てるのは数字の捏造になるため)。
+    """
+
+    use_trailing_stop = False
+    trailing_stop_pct = 0.0
+    stop_atr_period = _ORPHAN_STOP_ATR_PERIOD
+    stop_atr_multiplier = _ORPHAN_STOP_ATR_MULTIPLIER
+    profit_target_type = "none"
+    profit_target_value = 0.0
+    max_holding_days = 0
+
+
+_ORPHAN_RULES = _OrphanRules()
+
+
+def _orphan_protection_enabled() -> bool:
+    """orphan への既定保護を張るか。既定 ON、``=0`` で無効化 (可逆)。"""
+    raw = os.getenv("ORPHAN_DEFAULT_PROTECTION", "").strip().lower()
+    if not raw:
+        return True
+    return raw in _TRUTHY
+
+
+def _orphan_min_atr_pct() -> float:
+    """ATR を信用する下限 (ATR/price)。未設定 / 不正値は既定へフォールバック。"""
+    raw = os.getenv("ORPHAN_MIN_ATR_PCT", "").strip()
+    if not raw:
+        return _ORPHAN_MIN_ATR_PCT_DEFAULT
+    try:
+        pct = float(raw)
+    except ValueError:
+        return _ORPHAN_MIN_ATR_PCT_DEFAULT
+    if not 0.0 <= pct < 1.0:
+        return _ORPHAN_MIN_ATR_PCT_DEFAULT
+    return pct
+
+
+def _orphan_atr_is_usable(snap: PositionSnapshot, atr_value: float | None) -> bool:
+    """ATR が stale (価格が凍っている) 気配でないか。"""
+    if atr_value is None or atr_value <= 0 or snap.avg_entry_price <= 0:
+        return False
+    return (float(atr_value) / float(snap.avg_entry_price)) >= _orphan_min_atr_pct()
+
+
+def _orphan_stop_price(
+    snap: PositionSnapshot, atr_value: float | None
+) -> float | None:
+    """orphan 用 protective stop 価格。
+
+    ATR が使える (stale でない) なら ATR ベース、そうでなければ entry からの
+    % フロアに退避する。ATR が 0 付近に潰れた銘柄で entry 直下に stop を張ると
+    不本意な手仕舞いを誘発するため。
+    """
+    if _orphan_atr_is_usable(snap, atr_value):
+        px = _stop_price_for(snap, _ORPHAN_RULES, atr_value)
+        if px is not None:
+            return px
+    elif atr_value is not None and atr_value > 0 and snap.avg_entry_price > 0:
+        logger.warning(
+            "orphan stop: %s の ATR20=%.4f は entry=%.4f の %.2f%% しかなく"
+            " stale (halt/上場廃止) の疑い → ATR stop を使わず %.0f%% フロアへ退避。",
+            snap.symbol,
+            float(atr_value),
+            snap.avg_entry_price,
+            100.0 * float(atr_value) / float(snap.avg_entry_price),
+            100.0 * _stop_floor_pct(),
+        )
+    # ATR 無し / stale でも「無保護」にはしない。
+    if snap.avg_entry_price <= 0:
+        return None
+    pct = _stop_floor_pct()
+    if snap.side == "long":
+        return snap.avg_entry_price * (1.0 - pct)
+    return snap.avg_entry_price * (1.0 + pct)
+
+
+def _build_orphan_protection_orders(
+    snap: PositionSnapshot,
+    *,
+    atr_value: float | None,
+    existing_protect_coids: set[str],
+) -> list[PreparedExit]:
+    """system 帰属不能な建玉に既定の protective stop を 1 本だけ提案する。
+
+    - 端株 orphan は Alpaca が native stop を受け付けないので張れない (呼び出し
+      側が WARN で可視化する)。
+    - coid は entry_date が無い場合 ``noentry`` で固定し、日跨ぎで安定させる
+      (日付を混ぜると毎日新しい stop を積んでしまう)。
+    """
+    if not _orphan_protection_enabled():
+        return []
+    if snap.abs_qty <= 0 or snap.is_fractional:
+        return []
+    stop_price = _orphan_stop_price(snap, atr_value)
+    if stop_price is None or stop_price <= 0:
+        return []
+    entry_tag = (snap.entry_date or "").replace("-", "") or "noentry"
+    coid = (
+        f"protect-{_ORPHAN_SYSTEM_TAG}-{snap.symbol}-{entry_tag}-"
+        f"{_PROTECT_STOP_SUFFIX}"
+    )
+    if coid in existing_protect_coids:
+        return []
+    close_side = "sell" if snap.side == "long" else "buy"
+    return [
+        PreparedExit(
+            symbol=snap.symbol,
+            system=_ORPHAN_SYSTEM_TAG,
+            qty=snap.exit_qty(),
+            side=close_side,
+            order_type="stop",
+            reason=ExitReasonCode.PROTECT_STOP,
+            entry_date=snap.entry_date,
+            stop_price=round_to_alpaca_tick(stop_price),
+            client_order_id=coid,
+            dry_run=True,
+            time_in_force="gtc",
+        )
+    ]
+
+
 def _coid_already_open(po: PreparedExit, existing_exit_coids: set[str]) -> bool:
     """既に同一 client_order_id の exit- 注文が open なら True (二重発注防止)。"""
     return bool(po.client_order_id) and po.client_order_id in existing_exit_coids
@@ -2046,7 +2727,10 @@ def build_exit_orders_from_positions(
     snapshots: list[PositionSnapshot],
     *,
     today: str,
+    unassigned_out: list[dict[str, Any]] | None = None,
     tracker: dict[str, Any] | None = None,
+    symbol_map: Mapping[str, str] | None = None,
+    symbol_aliases: Mapping[str, str] | None = None,
     entry_orders_index: dict[str, dict[str, Any]] | None = None,
     existing_protect_coids: set[str] | None = None,
     existing_exit_coids: set[str] | None = None,
@@ -2054,6 +2738,7 @@ def build_exit_orders_from_positions(
     spy_max70: float | None = None,
     atr_by_symbol: dict[str, dict[int, float]] | None = None,
     price_by_symbol: dict[str, float] | None = None,
+    protection_coverage_out: list[dict[str, Any]] | None = None,
 ) -> list[PreparedExit]:
     """position snapshots から exit 発注案を build する pure function。
 
@@ -2075,6 +2760,8 @@ def build_exit_orders_from_positions(
         snapshots,
         tracker=tracker,
         entry_orders_index=entry_orders_index,
+        symbol_map=symbol_map,
+        symbol_aliases=symbol_aliases,
     )
     existing_coids = existing_protect_coids or set()
     existing_exit = existing_exit_coids or set()
@@ -2086,10 +2773,69 @@ def build_exit_orders_from_positions(
         if snap.abs_qty <= 0:
             continue
         if not snap.system:
-            logger.debug(
-                "exit skip: %s system tag 不明 (tracker/entry_orders_index 未登録)",
-                snap.symbol,
+            # system タグ未解決 = strategy の time exit / 利確は作れない。
+            # ただし「無管理」と「無保護」は別問題なので、**下方保護だけは既定値で
+            # 張る** (2026-08-19)。方向判断が要る close は自動化しない。
+            # ※ 擬似 time exit や既定 max_hold を当てるのは数字の捏造なので行わない。
+            orphan_atr = atr_lookup.get(snap.symbol, {}).get(_ORPHAN_STOP_ATR_PERIOD)
+            orphan_protection = _build_orphan_protection_orders(
+                snap,
+                atr_value=orphan_atr,
+                existing_protect_coids=existing_coids,
             )
+            if orphan_protection:
+                prot_state = "default_stop"
+            elif snap.is_fractional:
+                prot_state = "none:fractional_native_unsupported"
+            elif not _orphan_protection_enabled():
+                prot_state = "none:disabled_by_flag"
+            else:
+                prot_state = "none:already_open_or_no_price"
+            logger.warning(
+                "exit skip (UNMANAGED): %s system タグ未解決 → strategy の"
+                " time/利確は未生成。position_tracker/entry-coid/symbol_system_map"
+                " のいずれにも無い。既定の下方保護=%s"
+                " (継続保有 or 手動 close の判断材料)。",
+                snap.symbol,
+                prot_state,
+            )
+            if protection_coverage_out is not None:
+                protection_coverage_out.append(
+                    {
+                        "symbol": snap.symbol,
+                        "system": None,
+                        "qty": snap.qty,
+                        "is_fractional": snap.is_fractional,
+                        "mode": "orphan_default"
+                        if orphan_protection
+                        else "unprotected",
+                        "resident_order": bool(orphan_protection),
+                        "detail": prot_state,
+                    }
+                )
+            out.extend(orphan_protection)
+            if unassigned_out is not None:
+                unassigned_out.append(
+                    {
+                        "symbol": snap.symbol,
+                        "qty": snap.qty,
+                        "side": snap.side,
+                        "abs_qty": snap.abs_qty,
+                        "current_price": snap.current_price,
+                        "market_value": snap.market_value,
+                        "entry_date": snap.entry_date,
+                        "holding_days": compute_holding_days(snap.entry_date, today),
+                        # system 由来がどのソースにも無い = orphan。今後の orphan が
+                        # 黙って溜まらないよう分類を明示する。
+                        #
+                        # NOTE: この関数は pure (broker I/O 無し)。「そもそも exit を
+                        # 出せない銘柄か」の判定は client を持つ呼び出し側で付与する
+                        # (paper_exit_check の refine_orphan_classifications)。
+                        "classification": "orphan_no_system_origin",
+                        # 「保護付きで継続」か「手動 close」かの判断材料。
+                        "default_protection": prot_state,
+                    }
+                )
             continue
         rules = SYSTEM_TRADE_RULES.get(snap.system)
 
@@ -2123,6 +2869,34 @@ def build_exit_orders_from_positions(
                     today=today,
                     existing_exit_coids=existing_exit,
                 )
+                # 端株は broker 常駐注文を張れない = ザラ場中は無防備で、日次
+                # 判定 (この run) の時点でしか stop/target を評価できない。
+                # 従来 debug で黙っていたため「保護されている」ように見えていた。
+                if not protection:
+                    logger.warning(
+                        "常駐保護なし (端株): %s qty=%s は Alpaca が端株に"
+                        " stop/limit/trailing を受け付けないため broker 常駐注文を"
+                        " 張れない。%s の日次 synthetic 判定に振替中"
+                        " (現値=%s / 判定時点で未突破)。",
+                        snap.symbol,
+                        snap.qty,
+                        today,
+                        cur_px,
+                    )
+                if protection_coverage_out is not None:
+                    protection_coverage_out.append(
+                        {
+                            "symbol": snap.symbol,
+                            "system": snap.system,
+                            "qty": snap.qty,
+                            "is_fractional": True,
+                            "mode": "synthetic_daily",
+                            "resident_order": False,
+                            "detail": "fired" if protection else "evaluated_no_breach",
+                            "evaluated_at": today,
+                            "current_price": cur_px,
+                        }
+                    )
             else:
                 protection = _build_protection_orders(
                     snap,
@@ -2130,6 +2904,27 @@ def build_exit_orders_from_positions(
                     atr_value=atr_value,
                     existing_protect_coids=existing_coids,
                 )
+                if protection_coverage_out is not None:
+                    resident = [q for q in protection if not q.skip_reason]
+                    protection_coverage_out.append(
+                        {
+                            "symbol": snap.symbol,
+                            "system": snap.system,
+                            "qty": snap.qty,
+                            "is_fractional": False,
+                            "mode": "native_resident",
+                            "resident_order": bool(resident),
+                            "detail": ",".join(
+                                sorted({q.reason for q in resident})
+                            )
+                            or "already_open_or_none",
+                            "suppressed": [
+                                {"reason": q.reason, "skip_reason": q.skip_reason}
+                                for q in protection
+                                if q.skip_reason
+                            ],
+                        }
+                    )
 
         # (3) 優先順位: time/breakout の close order > protection 発注。
         # 既に同一 exit- coid が open (existing_exit) なら二重発注しない。
@@ -2158,7 +2953,24 @@ def submit_paper_exit_order(
     backoff_seconds: float = 1.0,
     rate_limit_seconds: float = 0.35,
 ) -> PreparedExit:
-    """1 件の PreparedExit を Alpaca Paper に発注する。dry_run=True で送信 skip。"""
+    """1 件の PreparedExit を Alpaca Paper に発注する。dry_run=True で送信 skip。
+
+    ``skip_reason`` が付いた提案 (例: qty_reserved:* = 他の protection が qty を
+    全量予約済) は **送信しない**。送れば確実に code 40310000 で拒否されるだけで、
+    その拒否が recon 上 armed に化けて「保護が張れた」ように見えるため。
+    silent drop はせず、提案そのものはそのまま返して artifact に残す。
+    """
+    if po.skip_reason:
+        po.dry_run = dry_run
+        _audit_log({"event": "exit_skipped", **po.to_row()})
+        logger.info(
+            "exit 未送信 (skip_reason=%s): %s %s reason=%s",
+            po.skip_reason,
+            po.symbol,
+            po.order_type,
+            po.reason,
+        )
+        return po
     if po.qty <= 0:
         raise ValueError(f"exit qty は正の数: {po.qty}")
     if po.side not in ("buy", "sell"):
@@ -2184,6 +2996,14 @@ def submit_paper_exit_order(
         client = ba.get_client(paper=True)
 
     try:
+        # OCO は take_profit / stop_loss という別引数で送る必要がある
+        # (limit_price/stop_price をそのまま渡すと SDK が leg を組めない)。
+        _oco_kwargs: dict[str, Any] = {}
+        if po.order_type == "oco":
+            _oco_kwargs = {
+                "take_profit": po.limit_price,
+                "stop_loss": po.stop_price,
+            }
         order = ba.submit_order_with_retry(
             client,
             po.symbol,
@@ -2193,6 +3013,7 @@ def submit_paper_exit_order(
             limit_price=po.limit_price,
             stop_price=po.stop_price,
             trail_percent=po.trail_percent,
+            **_oco_kwargs,
             time_in_force=po.time_in_force,
             client_order_id=po.client_order_id,
             retries=retries,
@@ -2205,7 +3026,7 @@ def submit_paper_exit_order(
         raise _classify_error(exc) from exc
 
     po.order_id = str(getattr(order, "id", "") or "")
-    po.status = str(getattr(order, "status", "") or "")
+    po.status = normalize_order_status(getattr(order, "status", None))
     _audit_log({"event": "exit_submitted", **po.to_row()})
     logger.info(
         "Paper exit submitted: %s %s x%s %s id=%s status=%s reason=%s",
@@ -2319,6 +3140,7 @@ __all__ = [
     "signals_json_to_orders",
     "plan_order_execution",
     "get_asset_fractionable",
+    "get_asset_tradable",
     "fetch_open_order_state",
     "HeldPositionCounts",
     "count_held_positions_by_system",
@@ -2336,4 +3158,5 @@ __all__ = [
     "submit_paper_exit_orders",
     "fetch_existing_protect_coids",
     "fetch_existing_exit_coids",
+    "build_stop_rearm_after_failed_oco",
 ]
