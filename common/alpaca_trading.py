@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
 import json
 import logging
@@ -29,6 +29,7 @@ import pandas as pd
 from common import broker_alpaca as ba
 from common.order_status import normalize_order_status
 from common.symbol_map import resolve_primary_system
+from common.trading_days import count_trading_days
 
 logger = logging.getLogger(__name__)
 
@@ -1892,29 +1893,6 @@ def hydrate_system_tags(
 # -----------------------------------------------------------------------
 
 
-def _nyse_trading_days_between(d0: date, d1: date) -> int | None:
-    """[d0, d1) の NYSE 立会日数。calendar が使えない時は None。
-
-    ``pandas_market_calendars`` は既に ``common/utils_spy`` が使っている依存
-    なので新規追加ではない。祝日 (Thanksgiving 等) を平日として数えないために
-    素の ``busday_count`` より優先する。lazy import で本 module の import
-    コストは増やさない。
-    """
-    if d1 <= d0:
-        return 0
-    try:
-        import pandas_market_calendars as mcal
-
-        sched = mcal.get_calendar("NYSE").schedule(
-            start_date=pd.Timestamp(d0), end_date=pd.Timestamp(d1)
-        )
-        days = pd.to_datetime(sched.index).normalize()
-        # [d0, d1): entry 当日は 0 日保有、d1 当日も未経過として数えない。
-        return int(((days > pd.Timestamp(d0)) & (days <= pd.Timestamp(d1))).sum())
-    except Exception:
-        return None
-
-
 def compute_holding_days(
     entry_date: str | None, today: str | None = None
 ) -> int | None:
@@ -1934,9 +1912,12 @@ def compute_holding_days(
 
     暦日で数えると金曜エントリーの System2 は土日を 2 日と数え、月曜 (=立会 1 日)
     に time exit が発火して **spec より 1 立会日早く** 手仕舞ってしまう。
-    立会日換算は既存の ``common/profit_protection.calculate_business_holding_days``
-    と同じ概念で、こちらは NYSE 祝日も除外する (calendar が無ければ
-    ``np.busday_count`` 相当の Mon-Fri 換算へフォールバック)。
+
+    換算そのものは ``common/trading_days`` に集約してある。live のこの関数と
+    ``common/trade_management`` の ``max_exit_date`` が **同じ単位** を使うための
+    single source of truth で、ここに 2 つ目の実装は置かない
+    (``common.alpaca_trading`` は ``common.trade_management`` を import するので、
+    どちらかに置くと循環参照になる → 中立モジュールへ切り出してある)。
     """
     if not entry_date:
         return None
@@ -1948,19 +1929,7 @@ def compute_holding_days(
             d1 = datetime.fromisoformat(str(today)[:10]).date()
     except Exception:
         return None
-    if d1 <= d0:
-        return 0
-    exact = _nyse_trading_days_between(d0, d1)
-    if exact is not None:
-        return exact
-    try:
-        import numpy as np
-
-        return int(np.busday_count(d0, d1))
-    except Exception:
-        # 最終手段: 暦日 (従来挙動)。ここに落ちるのは numpy も calendar も
-        # 使えない環境だけ。
-        return int((d1 - d0).days)
+    return count_trading_days(d0, d1)
 
 
 # -----------------------------------------------------------------------
