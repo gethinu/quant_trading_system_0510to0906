@@ -249,13 +249,43 @@ cap の作り直しは別タスクとして追跡する。ここを直したこ�
 
 ## 4. テスト
 
-| ファイル | ブランチ | 内容 |
-|---|---|---|
-| `tests/test_dashboard_freshness_selfheal_order.py` (新規, 9 件) | `claude/monitor-webapp` | defer で黙る / self-heal で解消したら無通知 / 解消しなければ必ず通知 / defer 無しは即通知 / deploy_missing は defer 対象外 / pending へ積まない |
-| `tests/test_self_monitor_check.py` (拡張, +10 件) | `claude/monitor-safety-nets-20260712` | cap 飽和は OK / 4 種の capacity skip すべて OK / `untradable` は WARN / skip 理由なしは WARN / `entry_failed>0` は WARN / 生成ゼロは WARN / 同日 `results_csv` フォールバック / 別日の残骸は使わない / 成果物欠落は fail-closed |
+| ファイル | ブランチ | 増減 | 内容 |
+|---|---|---|---|
+| `tests/test_dashboard_freshness_selfheal_order.py` (新規) | `claude/monitor-webapp` | +8 | defer で黙る / self-heal で解消したら無通知 / 解消しなければ必ず通知 / 文面が新旧で区別できる / defer 無しは即通知 / deploy_missing は defer 対象外 / pending へ積まない / fresh は両パスとも静か |
+| `tests/system/test_check_dashboard_freshness.py` (拡張) | `claude/monitor-webapp` | +2 | `--defer-stale-notify` で `_notify_stale` が呼ばれない / `--post-heal` が通知側まで届く。既存の `test_notify_called_with_flag` のスタブを `**kwargs` 対応にした (keyword-only 引数が増えたため) |
+| `tests/test_self_monitor_check.py` (拡張) | `claude/monitor-safety-nets-20260712` | +10 (24→34) | cap 飽和は OK / 4 種の capacity skip すべて OK / `untradable` は WARN / skip 理由なしは WARN / `entry_failed>0` は WARN / 生成ゼロは WARN / 同日 `results_csv` フォールバック / 別日の残骸は使わない / 成果物欠落は fail-closed / flat book は異常でない |
 
 既存の `test_open_run_zero_entries_is_warn` (成果物が無い entry 0) は **WARN のまま**
 通ることを確認済み — fail-closed の回帰テストとして残している。
+
+### フルスイート回帰 (失敗 ID 集合を `comm` で突合)
+
+| ツリー / ブランチ | baseline | 修正後 | 新規失敗 | 解消 |
+|---|---|---|---|---|
+| `C:\Repos\quant_trading_system_0510to0906` (`claude/monitor-webapp`) | 226 failed / 2380 passed | 226 failed / **2390** passed | **0** | 0 |
+| `C:	mp\qts-safety-nets` (`claude/monitor-safety-nets-20260712`) | 240 failed / 2016 passed | 240 failed / **2026** passed | **0** | 0 |
+
+いずれも失敗 ID 集合は完全一致。既存の 3 件の collection error
+(`test_cache_manager_final` / `test_core_system4_enhanced` / `test_high_impact_modules`) と
+`test_app_imports.py` (import 時に `sys.exit(1)`) は本作業以前からのもので、
+両ツリー共通・`--ignore` して計測した。
+
+### 実データでの動作確認 (read-only)
+
+```
+# self_monitor (2026-08-21 の実 run に対して)
+[OK] open_run: 2026-08-21: entry_submitted=0 は正常
+     — 全 11 件が枠不足/既保有で skip (already_held=4, standing_cap=7)
+=> worst=OK          (修正前は worst=warn -> モーニングブリーフに WARN 行が出ていた)
+
+# freshness の 2 パス (Monday-morning 形状の sandbox で再現)
+PASS 1  status=stale ... -> 「通知は self-heal 後の再チェックへ委譲」  exit=2
+PASS 2  self-heal
+PASS 3  status=fresh                                                  exit=0  -> 通知なし
+
+# self-heal が落ちる 08-20 型
+PASS 1  exit=2 (委譲) / PASS 2  exit=1 / PASS 3  status=stale exit=2 -> ここで通知
+```
 
 ---
 
