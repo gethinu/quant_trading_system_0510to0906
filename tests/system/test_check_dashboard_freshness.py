@@ -172,9 +172,11 @@ class TestMainExitCodes:
         data = tmp_path / "data"
         _write_signal(results, "20260722")
         _write_signal(data, "20260721")
-        called = {"n": 0}
+        calls: list[dict] = []
+        # ``_notify_stale`` は 2026-08-22 の cry-wolf 修正で keyword-only の
+        # ``post_heal`` を取るようになった。スタブも **kwargs を受ける。
         monkeypatch.setattr(
-            cdf, "_notify_stale", lambda *_a: called.__setitem__("n", 1)
+            cdf, "_notify_stale", lambda *_a, **kw: calls.append(kw)
         )
         cdf.main(
             [
@@ -185,7 +187,56 @@ class TestMainExitCodes:
                 "--notify",
             ]
         )
-        assert called["n"] == 1
+        assert len(calls) == 1
+        assert calls[0].get("post_heal") is False
+
+    def test_notify_suppressed_by_defer_stale_notify(self, tmp_path: Path, monkeypatch):
+        """1 パス目 (self-heal 前) は検出しても通知しない (2026-08-22 cry-wolf 修正)。"""
+        results = tmp_path / "results_csv"
+        data = tmp_path / "data"
+        _write_signal(results, "20260722")
+        _write_signal(data, "20260721")
+        calls: list[dict] = []
+        monkeypatch.setattr(
+            cdf, "_notify_stale", lambda *_a, **kw: calls.append(kw)
+        )
+
+        rc = cdf.main(
+            [
+                "--results-dir",
+                str(results),
+                "--data-dir",
+                str(data),
+                "--notify",
+                "--defer-stale-notify",
+            ]
+        )
+
+        assert rc == 2, "検出そのものはやめていない"
+        assert calls == [], "self-heal 前に通知してしまっている"
+
+    def test_post_heal_flag_reaches_the_notifier(self, tmp_path: Path, monkeypatch):
+        results = tmp_path / "results_csv"
+        data = tmp_path / "data"
+        _write_signal(results, "20260722")
+        _write_signal(data, "20260721")
+        calls: list[dict] = []
+        monkeypatch.setattr(
+            cdf, "_notify_stale", lambda *_a, **kw: calls.append(kw)
+        )
+
+        cdf.main(
+            [
+                "--results-dir",
+                str(results),
+                "--data-dir",
+                str(data),
+                "--notify",
+                "--post-heal",
+            ]
+        )
+
+        assert calls == [{"post_heal": True}]
 
 
 if __name__ == "__main__":

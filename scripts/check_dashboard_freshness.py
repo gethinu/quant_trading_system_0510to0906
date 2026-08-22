@@ -26,8 +26,25 @@ job is the publish gap between "generated" and "served"; it does NOT judge wheth
 the pipeline itself ran (both dirs equally behind today is a different failure,
 covered by ``check_rolling_freshness.py`` / ``self_monitor``).
 
-Pair it with ``publish_data_to_vercel.ps1 -AutoLatest`` (the self-heal): run this
-detector FIRST to alert on the recurrence, then the self-heal to fix it.
+Two-pass contract with the self-heal (2026-08-22 cry-wolf fix)
+--------------------------------------------------------------
+Pair it with ``publish_data_to_vercel.ps1 -AutoLatest`` (the self-heal). The
+ORDER matters and used to be wrong: the detector alerted, and only afterwards did
+the self-heal run. But at 08:00 JST the gap is the NORMAL state -- the 06:00
+daily advances ``results_csv/`` without publishing, so ``origin``'s ``data/`` is
+still on yesterday until the self-heal pushes. Result: 14/14 consecutive mornings
+fired "publish が取りこぼされています" and were fresh ~10 s later. Cry wolf.
+
+The launcher now runs two passes::
+
+    1. detect  --defer-stale-notify   (log + exit code, NO stale ntfy)
+    2. self-heal  publish_data_to_vercel.ps1 -AutoLatest
+    3. re-check --notify --post-heal  (alert only if the heal did NOT fix it)
+
+The deploy watchdog (``--check-served``) stays on pass 1: it judges a *previously*
+published run against the live HTML, so it is unaffected by the self-heal -- and
+running it after a fresh push would only ever see an age-0 bundle (always within
+grace, i.e. vacuous).
 
 Exit codes
 ----------
@@ -453,17 +470,33 @@ def _send_one(item: dict) -> tuple[bool, str]:
         return False, f"{type(exc).__name__}: {exc}"
 
 
-def _notify_stale(result: dict, root: Path, now: str) -> None:
+def _notify_stale(result: dict, root: Path, now: str, *, post_heal: bool = False) -> None:
     """Fire an ntfy WARN for this gap, flushing any carried-over failures first.
 
     A send failure is NOT swallowed: the alert is queued to ``logs/`` and retried
     on every later invocation (including "fresh" ones) until it lands, so a broken
     notifier degrades into a late alert instead of a silent one.
+
+    ``post_heal`` は「self-heal (``-AutoLatest``) を走らせた **後** の再チェックで
+    まだ stale だった」ことを示す。通常運転の朝は self-heal が数秒で解消するので、
+    この経路以外から stale 通知を出してはいけない (2026-08-22 の cry-wolf 修正)。
     """
-    title = (
-        f"Dashboard STALE: served {result['data_date_str']} < "
-        f"generated {result['results_date_str']}"
-    )
+    if post_heal:
+        title = (
+            f"Dashboard STALE (self-heal 後も): served {result['data_date_str']} < "
+            f"generated {result['results_date_str']}"
+        )
+        tail = (
+            "self-heal (publish_data_to_vercel.ps1 -AutoLatest) は実行済みだが "
+            "解消しませんでした。手動確認が必要です "
+            "(bundle preflight FAIL / push 失敗 / 生成物欠落を疑う)。"
+        )
+    else:
+        title = (
+            f"Dashboard STALE: served {result['data_date_str']} < "
+            f"generated {result['results_date_str']}"
+        )
+        tail = "self-heal: publish_data_to_vercel.ps1 -AutoLatest"
     body = (
         "ダッシュボードの publish が取りこぼされています "
         "(ntfy は新しいのに中身が古い型)。\n"
@@ -471,7 +504,7 @@ def _notify_stale(result: dict, root: Path, now: str) -> None:
         f"@ {result.get('results_generated_at') or '?'}\n"
         f"served   (data/)      : {result['data_date_str']} "
         f"@ {result.get('data_generated_at') or '?'}\n"
-        "self-heal: publish_data_to_vercel.ps1 -AutoLatest"
+        f"{tail}"
     )
     _flush_pending(root, now, extra={"title": title, "body": body, "queued_at": now})
 
@@ -589,6 +622,23 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="--served-basis ref のとき git fetch を省く (offline / 高速確認用)。",
     )
+    parser.add_argument(
+        "--defer-stale-notify",
+        action="store_true",
+        help=(
+            "この pass では stale の ntfy を **送らない** (検出とログと exit code のみ)。"
+            "morning_brief.ps1 の 2 パス構成 (検出 → self-heal → 再チェック) の "
+            "1 パス目で使う。通知は self-heal 後の再チェックに委譲する。"
+        ),
+    )
+    parser.add_argument(
+        "--post-heal",
+        action="store_true",
+        help=(
+            "self-heal 実行後の再チェックであることを本文に明記する "
+            "(『self-heal 済みなのに解消しなかった』= 本物の異常)。"
+        ),
+    )
     args = parser.parse_args(argv)
 
     root = Path(args.repo_root)
@@ -667,8 +717,20 @@ def main(argv: list[str] | None = None) -> int:
             f"served {result['data_date_str']}). "
             "Run publish_data_to_vercel.ps1 -AutoLatest to self-heal."
         )
-        if args.notify:
-            _notify_stale(result, root, now)
+        # cry-wolf 対策 (2026-08-22): 08:00 の朝は **必ず** ここが stale になる。
+        # 06:00 のデイリーが results_csv を進めるだけで publish しないため、
+        # origin の data/ は前日のままだからだ。直後に走る self-heal
+        # (publish_data_to_vercel.ps1 -AutoLatest) が数秒で解消するので、この
+        # 時点の stale は「まだ治療していない」だけであって異常ではない。
+        # 通知するのは self-heal 後の再チェック (--post-heal) で **なお** stale
+        # だったときだけにする。--defer-stale-notify がその 1 パス目の指示。
+        if args.notify and not args.defer_stale_notify:
+            _notify_stale(result, root, now, post_heal=args.post_heal)
+        elif args.defer_stale_notify:
+            print(
+                "[dashboard_freshness] stale だが通知は self-heal 後の再チェックへ委譲 "
+                "(--defer-stale-notify)。self-heal で解消すれば通知しない。"
+            )
         return 2
 
     # Fresh now, but an earlier alert may never have landed. Retry it here so a
