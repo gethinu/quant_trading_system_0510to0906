@@ -266,13 +266,35 @@ class TestLimitEntry:
         assert debug["details"]["entry_source"] == "spec_limit_price"
 
 
+def _reach_limit(df: pd.DataFrame, system: str) -> pd.DataFrame:
+    """最終バーを **指値に到達する** レンジへ広げる。
+
+    main の f8fbba4 (`fix(backtest): System3/5/6 の指値エントリーを到達判定つきに`)
+    以降、backtest の ``compute_entry`` は当日バーが指値へ届いたかを
+    ``StrategyBase._limit_entry_filled`` で判定する (long は ``Low <= limit``、
+    short は ``High >= limit``)。``_frame`` の素のバー (±2%) は S3 の -7% / S5 の
+    -3% / S6 の +5% のいずれにも届かないので、指値の **値** を比べたいテストでは
+    到達するバーを作る必要がある。届かないバーが None になること自体は
+    ``test_backtest_entry_is_none_when_the_bar_never_reaches_the_limit`` が固定する。
+    """
+    spec = SPECS[system]
+    limit = round(float(df["Close"].iloc[-2]) * spec["ratio"], 2)
+    out = df.copy()
+    last = out.index[-1]
+    if spec["side"] == "long":
+        out.loc[last, "Low"] = limit - 0.05
+    else:
+        out.loc[last, "High"] = limit + 0.05
+    return out
+
+
 class TestBacktestPathUntouched:
     """``compute_entry`` (バックテスト経路) は無変更で、live 指値と同じ値を出す。"""
 
     @pytest.mark.parametrize("system", SYSTEMS)
     def test_live_limit_equals_the_backtest_limit(self, system):
         spec = SPECS[system]
-        df = _frame(prev_close=10.0, atr10=0.30)
+        df = _reach_limit(_frame(prev_close=10.0, atr10=0.30), system)
         strat = spec["cls"]()
         # entry_date の bar が df に **ある** = backtest 経路
         entry_date = df.index[-1]
@@ -283,6 +305,20 @@ class TestBacktestPathUntouched:
         assert live_limit == pytest.approx(bt_entry), (
             f"{system}: live 指値 {live_limit} が backtest 指値 {bt_entry} と不一致"
         )
+
+    @pytest.mark.parametrize("system", SYSTEMS)
+    def test_backtest_entry_is_none_when_the_bar_never_reaches_the_limit(self, system):
+        """到達しないバーは建玉にしない (main f8fbba4 の約定判定を固定する)。
+
+        live 指値の復元 (738834b) と backtest の到達判定 (f8fbba4) は別ブランチで
+        並行に入ったので、統合後に **両方** 効いていることをここで固定する。
+        """
+        df = _frame(prev_close=10.0, atr10=0.30)  # ±2% レンジ = どの指値にも未到達
+        strat = SPECS[system]["cls"]()
+        comp = strat.compute_entry(
+            df, {"symbol": "TEST", "entry_date": df.index[-1]}, 0.0
+        )
+        assert comp is None, f"{system}: 未到達バーで建玉が作られている"
 
 
 # =====================================================================
