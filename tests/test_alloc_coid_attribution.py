@@ -80,7 +80,8 @@ def test_coid_takes_precedence_over_stale_static():
     # static が誤って MF=system9 としていても coid の system3 が勝つ
     static = {"mf": "system9"}
     merged = dict(static)
-    merged["MF"] = "system3"; merged["mf"] = "system3"
+    merged["MF"] = "system3"
+    merged["mf"] = "system3"
     after = count_active_positions_by_system([_pos("MF", 10)], merged)
     assert after.get("system3") == 1 and "system9" not in after
 

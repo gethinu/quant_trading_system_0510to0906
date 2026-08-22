@@ -18,7 +18,7 @@ REPO = r"C:\Repos\quant_trading_system_0510to0906"
 sys.path.insert(0, REPO)
 
 from build_dataset import (  # noqa: E402
-    LIMIT_ENTRY, NEEDED, ROLLING, SCORE_COL, SIDE, TRADE, load_symbol,
+    NEEDED, ROLLING, SCORE_COL, TRADE, load_symbol,
     resolve_configs, setup_masks,
 )
 from common.system_setup_predicates import (  # noqa: E402

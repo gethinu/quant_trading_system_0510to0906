@@ -30,6 +30,28 @@ from common.alpaca_trading import (
     submit_paper_exit_order,
 )
 
+# --- 運用 env から独立させる -------------------------------------------------
+# ``common/broker_alpaca._load_env_once`` は最初に broker へ触れたテストの時点で
+# 運用者の ``.env`` を **プロセス全体** に読み込む (``load_dotenv``)。その .env は
+# ``PROTECT_USE_OCO=1`` のような **運用トグル** を持つため、素で走らせると
+# 「documented default を固定する」ここのテストが、先に走ったテストの有無で
+# 結果を変える (2026-08-22 の統合時に実際に order 依存で落ちた)。
+# 既定挙動を見るテストなので、保護系トグルは毎テスト明示的に落とす。
+# トグル ON 側の期待値は tests/test_protection_hardening_20260819.py が持つ。
+_OPERATOR_PROTECT_FLAGS = (
+    "PROTECT_USE_OCO",
+    "PROTECT_STOP_FLOOR_ENABLED",
+    "PROTECT_STOP_FLOOR_PCT",
+    "ORPHAN_DEFAULT_PROTECTION",
+)
+
+
+@pytest.fixture(autouse=True)
+def _documented_protection_defaults(monkeypatch):
+    for name in _OPERATOR_PROTECT_FLAGS:
+        monkeypatch.delenv(name, raising=False)
+
+
 # -------------------------------------------------------------------------
 # client_order_id parsing
 # -------------------------------------------------------------------------

@@ -88,7 +88,12 @@ def test_genuine_flat_book_returns_0_not_flagged(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(pec.ba, "get_client", lambda *a, **k: _FlatClient())
     monkeypatch.setattr(pec, "fetch_existing_protect_coids", lambda c: set())
     monkeypatch.setattr(pec, "fetch_existing_exit_coids", lambda c: set())
-    monkeypatch.setattr(pec, "_hydrate_from_alpaca_coids", lambda s, c: None)
+    monkeypatch.setattr(
+        # 2026-08-17 以降 symbol_aliases kwarg を取るので *a/**k で受ける
+        pec,
+        "_hydrate_from_alpaca_coids",
+        lambda *a, **k: None,
+    )
     rc, data = _run_main(tmp_path, monkeypatch)
     assert rc == 0
     assert data.get("broker_unreachable") is False

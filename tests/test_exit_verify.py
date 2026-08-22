@@ -44,23 +44,35 @@ def _exit(
 
 
 # --- expected time exits recompute ----------------------------------------
+# NOTE (2026-08-22): holding_days は **立会日** で数える (common/trading_days)。
+# 以前この節は暦日前提で 07-08(水) -> 07-12(日) を「4d」と書いていたが、立会日では
+# 木 07-09 / 金 07-10 の 2 日しかない (07-11 土 / 07-12 日)。日付は立会日で選ぶこと。
 def test_expected_time_exits_by_rule():
-    # S3 max 3d: 07-08 entry, today 07-12 -> 4d -> due。S1 は time-exit 無し。
+    # S3 max 3d: 07-08(水) entry, today 07-13(月) -> 木金月の 3 立会日 -> due。
+    # S1 は time-exit 無し。
     positions = [
         _pos("AAA", "system3", "2026-07-08"),
-        _pos("BBB", "system3", "2026-07-11"),  # 1d -> not due
+        _pos("BBB", "system3", "2026-07-10"),  # 金 -> 月 = 1 立会日 -> not due
         _pos("CCC", "system1", "2026-07-01"),  # S1: max_hold=0 -> never
     ]
-    due = _expected_time_exits(positions, "2026-07-12")
+    due = _expected_time_exits(positions, "2026-07-13")
     syms = {d["symbol"] for d in due}
     assert syms == {"AAA"}
 
 
 def test_expected_time_exits_boundary_equal():
     # holding_days == max_holding_days は due (>=)
-    positions = [_pos("AAA", "system2", "2026-07-10")]  # 2d == max2 -> due
-    due = _expected_time_exits(positions, "2026-07-12")
+    # S2 max 2d: 07-09(木) -> 07-13(月) は 金 07-10 / 月 07-13 の 2 立会日。
+    positions = [_pos("AAA", "system2", "2026-07-09")]
+    due = _expected_time_exits(positions, "2026-07-13")
     assert len(due) == 1
+
+
+def test_expected_time_exits_does_not_count_the_weekend():
+    """金曜エントリーが月曜に期限超過扱いされないこと (暦日換算の回帰ガード)。"""
+    positions = [_pos("AAA", "system2", "2026-07-10")]  # 金
+    assert _expected_time_exits(positions, "2026-07-13") == []  # 月 = 立会 1 日
+    assert len(_expected_time_exits(positions, "2026-07-14")) == 1  # 火 = 立会 2 日
 
 
 # --- reconcile: due but not planned ---------------------------------------
@@ -78,7 +90,7 @@ def test_due_not_planned_flagged():
             ),
         ],
     }
-    v = verify(exit_orders, "2026-07-12", status_map={})
+    v = verify(exit_orders, "2026-07-13", status_map={})
     assert v["n_expected_time_exits"] == 2
     dnp = {d["symbol"] for d in v["discrepancies"]["due_not_planned"]}
     assert dnp == {"BBB"}
@@ -100,7 +112,7 @@ def test_planned_close_without_submission_is_warned():
             | {"error": "insufficient buying power"}
         ],
     }
-    v = verify(exit_orders, "2026-07-12", status_map={})
+    v = verify(exit_orders, "2026-07-13", status_map={})
     assert v["n_planned_closes"] == 1
     assert v["n_submitted_closes"] == 0
     assert [r["symbol"] for r in v["discrepancies"]["closes_not_submitted"]] == ["AAA"]
@@ -119,7 +131,7 @@ def test_proposal_artifact_counts_every_close_as_unsubmitted():
             )
         ],
     }
-    v = verify(exit_orders, "2026-07-12", status_map={"o1": "filled"})
+    v = verify(exit_orders, "2026-07-13", status_map={"o1": "filled"})
     assert v["n_submitted_closes"] == 0
     assert v["n_warn"] == 1
 
@@ -135,7 +147,7 @@ def test_all_due_planned_and_filled_no_warn():
         ],
     }
     # live status_map が fill を返す
-    v = verify(exit_orders, "2026-07-12", status_map={"o1": "filled"})
+    v = verify(exit_orders, "2026-07-13", status_map={"o1": "filled"})
     assert v["n_filled_closes"] == 1
     assert v["n_warn"] == 0
 
@@ -232,7 +244,7 @@ def test_rejected_close_is_warn():
             )
         ],
     }
-    v = verify(exit_orders, "2026-07-12", status_map={"o1": "rejected"})
+    v = verify(exit_orders, "2026-07-13", status_map={"o1": "rejected"})
     assert len(v["discrepancies"]["closes_rejected"]) == 1
     assert v["n_warn"] >= 1
 
@@ -248,7 +260,7 @@ def test_pending_close_is_info_not_warn():
             )
         ],
     }
-    v = verify(exit_orders, "2026-07-12", status_map={"o1": "accepted"})
+    v = verify(exit_orders, "2026-07-13", status_map={"o1": "accepted"})
     assert len(v["discrepancies"]["closes_pending"]) == 1
     assert len(v["discrepancies"]["closes_unfilled_nonpending"]) == 0
     # pending だけなら n_warn に数えない
@@ -273,7 +285,7 @@ def test_protection_orders_not_counted_as_close():
             ),
         ],
     }
-    v = verify(exit_orders, "2026-07-12", status_map={"o1": "new", "o2": "new"})
+    v = verify(exit_orders, "2026-07-13", status_map={"o1": "new", "o2": "new"})
     assert v["n_planned_closes"] == 0
     assert v["n_warn"] == 0
 
@@ -286,5 +298,5 @@ def test_fractional_gap_regression():
         ],
         "exits": [],  # 端株は exit builder が abs_qty=0 で skip → 未計画
     }
-    v = verify(exit_orders, "2026-07-12", status_map={})
+    v = verify(exit_orders, "2026-07-13", status_map={})
     assert [d["symbol"] for d in v["discrepancies"]["due_not_planned"]] == ["FRAC"]

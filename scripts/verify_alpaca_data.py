@@ -25,11 +25,10 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 import json
 import math
 from pathlib import Path
-import sys
 
 SNAP_SCHEMA = "alpaca_snapshot/v1"
 LEDGER_SCHEMA = "exit_ledger/v1"

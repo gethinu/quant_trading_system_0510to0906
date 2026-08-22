@@ -249,7 +249,7 @@ def trade_sys5(d, e, n, cfg):
         return None
     target = ep + float(cfg.get("target_atr_multiple", 1.0)) * atr
     fb = int(cfg.get("fallback_exit_after_days", 6))
-    L, H, C, O = d["Low"], d["High"], d["Close"], d["Open"]
+    L, H, C, OPEN = d["Low"], d["High"], d["Close"], d["Open"]
     for off in range(1, fb + 1):
         i = e + off
         if i >= n:
@@ -259,11 +259,11 @@ def trade_sys5(d, e, n, cfg):
         if H[i] >= target:
             j = i + 1
             if j < n:
-                return ep, O[j], j
+                return ep, OPEN[j], j
             return ep, C[i], i
     j = e + fb + 1
     if j < n:
-        return ep, O[j], j
+        return ep, OPEN[j], j
     k = min(e + fb, n - 1)
     return ep, C[k], k
 
