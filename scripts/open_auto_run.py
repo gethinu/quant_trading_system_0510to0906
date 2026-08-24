@@ -529,7 +529,30 @@ class Runner:
             resps = client.close_all_positions(cancel_orders=True)
         except Exception as exc:  # noqa: BLE001
             self.log(f"[exit] close_all_positions 失敗: {exc}")
-            resps = []
+            # [] は「broker が正常に応答し、close 対象が無かった」ことを意味する。
+            # API exception を同じ値に丸めると success と誤報し、clean reset が
+            # できていない状態で entry へ進み得る。flatten-all は明示的な reset
+            # 要求なので、このケースだけ最小限 entry を fail-safe skip する。
+            error = f"{type(exc).__name__}: {exc}"
+            self.record["flatten_error"] = error
+            self.record["flatten_ok"] = 0
+            self.record["flatten_failed"] = 0
+            self.record["exit_count"] = 0
+            self.entry_allowed = False
+            self.record["entry_skip_reason"] = "flatten_error"
+            payload = {
+                "date": self.date,
+                "mode": "submitted",
+                "flatten_all": True,
+                "count": 0,
+                "submitted": 0,
+                "failed": 0,
+                "flatten_error": error,
+                "exits": [],
+            }
+            write_with_sidecar(self.exit_json, payload, ROLE_EXECUTION)
+            self._dump("exit_orders.json", payload)
+            return []
 
         ok = 0
         failed = 0
@@ -648,14 +671,17 @@ class Runner:
         while True:
             try:
                 held = {
-                    str(s.symbol).upper() for s in fetch_position_snapshots(client)
+                    str(s.symbol).upper()
+                    for s in fetch_position_snapshots(client, raise_on_error=True)
                 }
             except Exception as exc:  # noqa: BLE001 - 一時失敗は次の poll で回復
                 self.log(f"[wait] positions 取得失敗 (継続): {exc}")
             else:
                 remaining = {s for s in symbols if s in held}
                 if not remaining:
-                    self.log(f"[wait] flatten settled: {len(symbols)} 件の建玉解消を確認")
+                    self.log(
+                        f"[wait] flatten settled: {len(symbols)} 件の建玉解消を確認"
+                    )
                     break
             if time.monotonic() >= deadline:
                 self.log(
@@ -753,7 +779,9 @@ class Runner:
                 if blind >= 3:
                     # broker が全件無応答。待っても埋まらないので観測を諦める
                     # (poll_timeout ぶん空回りして notify/publish を遅らせない)。
-                    self.log("[fills] status が 3 回連続で 0 件 -> broker 不達とみなし中断")
+                    self.log(
+                        "[fills] status が 3 回連続で 0 件 -> broker 不達とみなし中断"
+                    )
                     break
             pending = [oid for oid in ids if is_working(smap.get(oid))]
             if not pending:
@@ -965,6 +993,8 @@ class Runner:
                     f"settled={self.record.get('flatten_settled')} "
                     f"unsettled={self.record.get('flatten_unsettled')}"
                 )
+            if self.record.get("flatten_error"):
+                lines.append(f"- **FLATTEN ERROR**: {self.record['flatten_error']}")
             lines += [
                 f"- entry: submitted={self.record.get('entry_submitted')} "
                 f"filled={self.record.get('entry_filled')} "

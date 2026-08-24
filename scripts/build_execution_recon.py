@@ -91,6 +91,22 @@ def _empty_side_bucket() -> dict[str, int]:
     }
 
 
+def _empty_exit_bucket() -> dict[str, int]:
+    return {"submitted": 0, "close": 0, "protect": 0}
+
+
+def _exit_is_submitted(exit_row: dict[str, Any]) -> bool:
+    """exit artifact の broker 受理を判定する。
+
+    新 schema の ``accepted`` は HTTP 2xx の受理結果であり、order_id の有無とは
+    独立している。旧 artifact には accepted がないため、その場合**のみ**従来の
+    ``order_id and not error`` を使う。
+    """
+    if "accepted" in exit_row:
+        return exit_row.get("accepted") is True
+    return bool(exit_row.get("order_id")) and not exit_row.get("error")
+
+
 def _load_json(path: Path | None) -> dict[str, Any] | None:
     if path is None or not path.exists():
         return None
@@ -116,7 +132,7 @@ def build_recon(
             "long": _empty_side_bucket(),
             "short": _empty_side_bucket(),
             "funnel": None,
-            "exit": {"submitted": 0, "close": 0, "protect": 0},
+            "exit": _empty_exit_bucket(),
         }
         for name in _SYSTEMS
     }
@@ -130,7 +146,7 @@ def build_recon(
                 "long": _empty_side_bucket(),
                 "short": _empty_side_bucket(),
                 "funnel": None,
-                "exit": {"submitted": 0, "close": 0, "protect": 0},
+                "exit": _empty_exit_bucket(),
             },
         )
 
@@ -187,21 +203,21 @@ def build_recon(
                     sb["filled"] += 1
 
     # --- exit_orders (Step5c) -------------------------------------------
+    # flatten_all は system を持たないことがある。portfolio 実績から落とさず、
+    # attribution 不明分だけを別 bucket にする (system 別集計は推測しない)。
+    unattributed_exit = _empty_exit_bucket()
     if exit_orders:
         for e in exit_orders.get("exits", []) or []:
             name = _norm_system(e.get("system"))
             bucket = _sys(name)
-            if bucket is None:
-                continue
-            ex = bucket["exit"]
-            # 送信済 (order_id あり & error なし) のみ submitted カウント
-            if e.get("order_id") and not e.get("error"):
+            ex = bucket["exit"] if bucket is not None else unattributed_exit
+            if _exit_is_submitted(e):
                 ex["submitted"] += 1
-            reason = str(e.get("reason") or "").lower()
-            if reason in _PROTECT_REASONS:
-                ex["protect"] += 1
-            else:
-                ex["close"] += 1
+                reason = str(e.get("reason") or "").lower()
+                if reason in _PROTECT_REASONS:
+                    ex["protect"] += 1
+                else:
+                    ex["close"] += 1
 
     # --- portfolio aggregate --------------------------------------------
     def _agg(field: str) -> int:
@@ -214,6 +230,9 @@ def build_recon(
     exit_submitted = sum(b["exit"]["submitted"] for b in systems.values())
     exit_close = sum(b["exit"]["close"] for b in systems.values())
     exit_protect = sum(b["exit"]["protect"] for b in systems.values())
+    exit_submitted += unattributed_exit["submitted"]
+    exit_close += unattributed_exit["close"]
+    exit_protect += unattributed_exit["protect"]
 
     portfolio_out = {
         "universe_target": universe_target,
@@ -234,6 +253,7 @@ def build_recon(
         "exit_submitted": exit_submitted,
         "exit_close": exit_close,
         "exit_protect": exit_protect,
+        "exit_unattributed_submitted": unattributed_exit["submitted"],
         "drop_breakdown": drop_breakdown,
         "account_equity": account_equity,
     }
