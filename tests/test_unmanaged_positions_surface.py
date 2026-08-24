@@ -25,10 +25,7 @@ from pathlib import Path
 
 import pytest
 
-from common.alpaca_trading import (
-    PositionSnapshot,
-    build_exit_orders_from_positions,
-)
+from common.alpaca_trading import PositionSnapshot, build_exit_orders_from_positions
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -113,12 +110,27 @@ def test_ledger_overdue_unassigned_separate_from_overdue():
     m = _load_ledger()
     snap = {
         "positions": [
-            {"symbol": "MF", "system": "unknown", "days_remaining": None,
-             "max_holding_days": 0, "exit_expected": None},
-            {"symbol": "FOLD", "system": None, "days_remaining": None,
-             "max_holding_days": 0, "exit_expected": None},
-            {"symbol": "AAPL", "system": "system1", "days_remaining": None,
-             "max_holding_days": 0, "exit_expected": None},
+            {
+                "symbol": "MF",
+                "system": "unknown",
+                "days_remaining": None,
+                "max_holding_days": 0,
+                "exit_expected": None,
+            },
+            {
+                "symbol": "FOLD",
+                "system": None,
+                "days_remaining": None,
+                "max_holding_days": 0,
+                "exit_expected": None,
+            },
+            {
+                "symbol": "AAPL",
+                "system": "system1",
+                "days_remaining": None,
+                "max_holding_days": 0,
+                "exit_expected": None,
+            },
         ]
     }
     # 未解決 2 件を別枠で数える

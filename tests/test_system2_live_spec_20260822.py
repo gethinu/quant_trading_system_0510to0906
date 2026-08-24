@@ -48,7 +48,6 @@ from common.today_signals import _compute_entry_stop
 from common.trade_management import SYSTEM_TRADE_RULES
 from strategies.system2_strategy import System2Strategy
 
-
 # =====================================================================
 # spec 定数そのものが repo にあることの固定 (invented number の検出器)
 # =====================================================================

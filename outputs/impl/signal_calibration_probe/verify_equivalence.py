@@ -3,6 +3,7 @@ the repo's own code (common/system_setup_predicates.py + strategies/*).
 
 Fails loudly on any mismatch. READ-ONLY.
 """
+
 from __future__ import annotations
 
 import os
@@ -18,13 +19,22 @@ REPO = r"C:\Repos\quant_trading_system_0510to0906"
 sys.path.insert(0, REPO)
 
 from build_dataset import (  # noqa: E402
-    NEEDED, ROLLING, SCORE_COL, TRADE, load_symbol,
-    resolve_configs, setup_masks,
+    NEEDED,
+    ROLLING,
+    SCORE_COL,
+    TRADE,
+    load_symbol,
+    resolve_configs,
+    setup_masks,
 )
+
 from common.system_setup_predicates import (  # noqa: E402
-    system1_setup_predicate_bool, system2_setup_predicate,
-    system3_setup_predicate_bool, system4_setup_predicate,
-    system5_setup_predicate, system6_setup_predicate,
+    system1_setup_predicate_bool,
+    system2_setup_predicate,
+    system3_setup_predicate_bool,
+    system4_setup_predicate,
+    system5_setup_predicate,
+    system6_setup_predicate,
 )
 
 PRED = {
@@ -48,7 +58,11 @@ STRAT_MOD = {
 
 def main():
     random.seed(11)
-    uni = [ln.strip() for ln in open(os.path.join(REPO, "data", "universe_auto.txt")) if ln.strip()]
+    uni = [
+        ln.strip()
+        for ln in open(os.path.join(REPO, "data", "universe_auto.txt"))
+        if ln.strip()
+    ]
     avail = [s for s in uni if os.path.exists(os.path.join(ROLLING, s + ".feather"))]
     sample = random.sample(avail, 220)
 
@@ -88,7 +102,9 @@ def main():
                 if mine != theirs:
                     setup_bad += 1
                     if len(bad_examples) < 10:
-                        bad_examples.append(("setup", sysname, sym, str(idx[b]), mine, theirs))
+                        bad_examples.append(
+                            ("setup", sysname, sym, str(idx[b]), mine, theirs)
+                        )
 
         # ---- entry/exit equivalence on this symbol's actual candidates
         for sysname, mask in masks.items():
@@ -112,7 +128,9 @@ def main():
                     if mine is not None:
                         trade_bad += 1
                         if len(bad_examples) < 20:
-                            bad_examples.append(("entry-None", sysname, sym, str(idx[e]), mine, None))
+                            bad_examples.append(
+                                ("entry-None", sysname, sym, str(idx[e]), mine, None)
+                            )
                     continue
                 if not np.isfinite(float(ce[1])):
                     # repo code lets a NaN ATR through and yields a NaN stop.
@@ -122,7 +140,9 @@ def main():
                 if mine is None:
                     trade_bad += 1
                     if len(bad_examples) < 20:
-                        bad_examples.append(("entry-mineNone", sysname, sym, str(idx[e]), None, ce))
+                        bad_examples.append(
+                            ("entry-mineNone", sysname, sym, str(idx[e]), None, ce)
+                        )
                     continue
                 ep_t, stop_t = float(ce[0]), float(ce[1])
                 cx = st.compute_exit(pdf, e, ep_t, stop_t)
@@ -138,14 +158,23 @@ def main():
                 if not ok:
                     trade_bad += 1
                     if len(bad_examples) < 20:
-                        bad_examples.append((
-                            "exit", sysname, sym, str(idx[e]),
-                            (ep_m, xp_m, str(idx[xi_m])), (ep_t, xp_t, str(xd_t)),
-                        ))
+                        bad_examples.append(
+                            (
+                                "exit",
+                                sysname,
+                                sym,
+                                str(idx[e]),
+                                (ep_m, xp_m, str(idx[xi_m])),
+                                (ep_t, xp_t, str(xd_t)),
+                            )
+                        )
 
     print("setup checks : %d   mismatches: %d" % (setup_checked, setup_bad))
     print("trade checks : %d   mismatches: %d" % (trade_checked, trade_bad))
-    print("nan-stop rows dropped by probe (repo would emit NaN stop): %d" % nan_stop_drops[0])
+    print(
+        "nan-stop rows dropped by probe (repo would emit NaN stop): %d"
+        % nan_stop_drops[0]
+    )
     for b in bad_examples:
         print("  MISMATCH", b)
     if setup_bad or trade_bad:

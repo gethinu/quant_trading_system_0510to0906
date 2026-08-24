@@ -39,6 +39,7 @@ from common.order_status import (  # noqa: E402
     is_working,
     normalize_order_status,
 )
+from common.publishers.execution_summary import format_execution_summary  # noqa: E402
 from scripts.build_execution_recon import build_recon  # noqa: E402
 
 
@@ -107,7 +108,9 @@ def test_200_with_order_id_is_accepted_and_id_kept():
 
 def test_order_id_recovered_from_body_order():
     """成功時の body は Order。top-level が空でも id を拾えれば fill 監視できる。"""
-    parsed = oar.parse_close_response(_close_resp("HP", 200, order_id=None, body=SimpleNamespace(id="body-oid")))
+    parsed = oar.parse_close_response(
+        _close_resp("HP", 200, order_id=None, body=SimpleNamespace(id="body-oid"))
+    )
     assert parsed["accepted"] is True
     assert parsed["order_id"] == "body-oid"
 
@@ -140,7 +143,11 @@ def test_flatten_counts_tonights_39_accepted_and_2_rejected(tmp_path, monkeypatc
         "_client",
         lambda: SimpleNamespace(close_all_positions=lambda cancel_orders=True: resps),
     )
-    monkeypatch.setattr("common.alpaca_trading.fetch_position_snapshots", lambda _c: [], raising=False)
+    monkeypatch.setattr(
+        "common.alpaca_trading.fetch_position_snapshots",
+        lambda _c, *, raise_on_error=False: [],
+        raising=False,
+    )
 
     runner._flatten_all_stage()
 
@@ -170,11 +177,14 @@ def test_wait_polls_positions_when_no_order_ids(tmp_path, monkeypatch):
         [],
     ]
 
-    def _fetch(_client):
+    def _fetch(_client, *, raise_on_error=False):
+        assert raise_on_error is True
         polls.append(1)
         return responses[min(len(polls) - 1, len(responses) - 1)]
 
-    monkeypatch.setattr("common.alpaca_trading.fetch_position_snapshots", _fetch, raising=False)
+    monkeypatch.setattr(
+        "common.alpaca_trading.fetch_position_snapshots", _fetch, raising=False
+    )
     snapped: list[str] = []
     monkeypatch.setattr(runner, "_snapshot_positions", lambda n: snapped.append(n))
     monkeypatch.setattr(oar.time, "sleep", lambda _s: None)
@@ -195,7 +205,7 @@ def test_wait_records_unsettled_on_timeout(tmp_path, monkeypatch):
     runner.pending_flat_symbols = {"ADVB"}
     monkeypatch.setattr(
         "common.alpaca_trading.fetch_position_snapshots",
-        lambda _c: [SimpleNamespace(symbol="ADVB")],
+        lambda _c, *, raise_on_error=False: [SimpleNamespace(symbol="ADVB")],
         raising=False,
     )
     monkeypatch.setattr(runner, "_snapshot_positions", lambda _n: None)
@@ -205,6 +215,137 @@ def test_wait_records_unsettled_on_timeout(tmp_path, monkeypatch):
 
     assert runner.record["flatten_settled"] == 0
     assert runner.record["flatten_unsettled"] == ["ADVB"]
+
+
+def test_wait_fetch_failure_never_reports_flatten_settled(tmp_path, monkeypatch):
+    runner = _runner(tmp_path, monkeypatch)
+    runner.pending_flat_symbols = {"ADVB"}
+    calls: list[bool] = []
+
+    def _fetch(_client, *, raise_on_error=False):
+        calls.append(raise_on_error)
+        raise RuntimeError("Alpaca unreachable")
+
+    monkeypatch.setattr(
+        "common.alpaca_trading.fetch_position_snapshots", _fetch, raising=False
+    )
+    monkeypatch.setattr(runner, "_snapshot_positions", lambda _n: None)
+
+    runner.wait_exit_fills([])
+
+    assert calls == [True]
+    assert runner.record["flatten_settled"] == 0
+    assert runner.record["flatten_unsettled"] == ["ADVB"]
+
+
+def test_snapshot_fetch_failure_does_not_write_false_flat_artifact(
+    tmp_path, monkeypatch
+):
+    runner = _runner(tmp_path, monkeypatch)
+
+    def _fetch(_client, *, raise_on_error=False):
+        assert raise_on_error is True
+        raise RuntimeError("snapshot unavailable")
+
+    monkeypatch.setattr(
+        "common.alpaca_trading.fetch_position_snapshots", _fetch, raising=False
+    )
+
+    runner._snapshot_positions("positions_after_close.json")
+
+    assert not (runner.out / "positions_after_close.json").exists()
+    assert (
+        "snapshot unavailable"
+        in runner.record["position_snapshot_errors"]["positions_after_close.json"]
+    )
+
+
+def test_flatten_api_failure_is_explicit_blocks_entry_and_degrades_run(
+    tmp_path, monkeypatch
+):
+    runner = _runner(tmp_path, monkeypatch)
+    runner.results.mkdir(parents=True, exist_ok=True)
+
+    def _close_all(**_kwargs):
+        raise RuntimeError("broker unavailable")
+
+    monkeypatch.setattr(
+        runner,
+        "_client",
+        lambda: SimpleNamespace(close_all_positions=_close_all),
+    )
+    monkeypatch.setattr(
+        "common.alpaca_trading.fetch_position_snapshots",
+        lambda _c, *, raise_on_error=False: [],
+        raising=False,
+    )
+
+    assert runner._flatten_all_stage() == []
+    assert runner.entry_allowed is False
+    assert runner.record["entry_skip_reason"] == "flatten_error"
+    payload = json.loads(runner.exit_json.read_text(encoding="utf-8"))
+    assert "broker unavailable" in payload["flatten_error"]
+
+    recon = build_recon(None, None, payload)
+    assert "broker unavailable" in recon["portfolio"]["exit_error"]
+    title, body = format_execution_summary(recon)
+    assert title.startswith("⚠️")
+    assert "exit error:" in body
+
+
+def test_main_returns_observability_degraded_when_flatten_failed(tmp_path, monkeypatch):
+    runner = _runner(tmp_path, monkeypatch)
+    monkeypatch.setattr(runner, "gate", lambda: True)
+    monkeypatch.setattr(runner, "signals", lambda: True)
+    monkeypatch.setattr(runner, "equity", lambda: 100_000.0)
+
+    def _failed_flatten():
+        runner.record["flatten_error"] = "RuntimeError: broker unavailable"
+        runner.record["entry_skip_reason"] = "flatten_error"
+        runner.entry_allowed = False
+        return []
+
+    monkeypatch.setattr(runner, "exit_stage", _failed_flatten)
+    monkeypatch.setattr(runner, "wait_exit_fills", lambda _ids: None)
+    monkeypatch.setattr(runner, "record_stage", lambda: None)
+    monkeypatch.setattr(runner, "notify", lambda _eq: 0)
+    monkeypatch.setattr(runner, "publish", lambda: 0)
+    monkeypatch.setattr(runner, "finalize", lambda aborted: None)
+
+    assert runner.main() == oar.OBSERVABILITY_DEGRADED_EXIT_CODE
+    assert runner.record["entry_status"] == "skipped_flatten_error"
+
+
+def test_recon_accepted_primary_preserves_taxonomy_and_unassigned_portfolio_count():
+    exits = {
+        "exits": [
+            {"system": "system1", "reason": "flatten_all", "accepted": True},
+            {"reason": "flatten_all", "accepted": True, "order_id": None},
+            {
+                "system": "system1",
+                "reason": "flatten_all",
+                "accepted": False,
+                "order_id": "must-not-win",
+            },
+            {"system": "system1", "reason": "time_based", "order_id": "legacy-ok"},
+            {"system": "system1", "reason": "protect_stop", "skip_reason": "reserved"},
+            {"system": "system1", "reason": "protect_target"},
+        ]
+    }
+
+    recon = build_recon(None, None, exits)
+    p = recon["portfolio"]
+    assert p["exit_submitted"] == 3
+    assert p["exit_close"] == 3
+    assert p["exit_rejected"] == 1
+    assert p["exit_suppressed"] == 1
+    assert p["exit_armed"] == 1
+    assert recon["systems"]["__unassigned__"]["exit"]["submitted"] == 1
+
+
+@pytest.mark.parametrize("raw", ["stopped", "suspended", "future_broker_status"])
+def test_status_unknown_or_ambiguous_is_kept_under_observation(raw):
+    assert is_working(raw) is True
 
 
 def test_wait_still_skips_when_nothing_to_watch(tmp_path, monkeypatch):
@@ -274,7 +415,9 @@ def test_producer_writes_bare_token_not_enum_repr():
     # 新実装。
     normalized = normalize_order_status(getattr(order, "status", None))
     assert normalized == "filled"
-    assert json.loads(json.dumps({"status": normalized}, default=str))["status"] == ("filled")
+    assert json.loads(json.dumps({"status": normalized}, default=str))["status"] == (
+        "filled"
+    )
 
 
 def _recon_inputs(status):
@@ -282,7 +425,11 @@ def _recon_inputs(status):
         "date": "2026-08-20",
         "systems": {"system1": {"signals": [{"symbol": "AAPL", "side": "BUY"}]}},
     }
-    paper = {"orders": [{"system": "system1", "side": "buy", "order_id": "o1", "status": status}]}
+    paper = {
+        "orders": [
+            {"system": "system1", "side": "buy", "order_id": "o1", "status": status}
+        ]
+    }
     return signals, paper
 
 
@@ -348,7 +495,11 @@ def test_reconcile_entry_fills_rewrites_status_from_broker(tmp_path, monkeypatch
     # そのまま recon に食わせたら fill として数えられる (end-to-end の要)。
     signals = {
         "date": "2026-08-20",
-        "systems": {"system1": {"signals": [{"symbol": f"S{i}", "side": "BUY"} for i in range(3)]}},
+        "systems": {
+            "system1": {
+                "signals": [{"symbol": f"S{i}", "side": "BUY"} for i in range(3)]
+            }
+        },
     }
     recon = build_recon(signals=signals, paper_orders=data, exit_orders=None)
     assert recon["portfolio"]["entry_filled"] == 3
@@ -408,14 +559,18 @@ def test_reconcile_entry_fills_bails_out_when_broker_is_blind(tmp_path, monkeypa
     """
     runner = _runner(tmp_path, monkeypatch, poll_timeout=9999.0)
     runner.paper_json.parent.mkdir(parents=True, exist_ok=True)
-    runner.paper_json.write_text(json.dumps({"orders": [{"side": "buy", "order_id": "o1"}]}), encoding="utf-8")
+    runner.paper_json.write_text(
+        json.dumps({"orders": [{"side": "buy", "order_id": "o1"}]}), encoding="utf-8"
+    )
     polls: list[int] = []
 
     def _blind(_client, ids):
         polls.append(1)
         return {oid: None for oid in ids}  # get_orders_status_map の失敗時の形
 
-    monkeypatch.setattr("common.broker_alpaca.get_orders_status_map", _blind, raising=False)
+    monkeypatch.setattr(
+        "common.broker_alpaca.get_orders_status_map", _blind, raising=False
+    )
     monkeypatch.setattr(oar.time, "sleep", lambda _s: None)
 
     runner.reconcile_entry_fills()

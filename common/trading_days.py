@@ -74,9 +74,7 @@ def count_trading_days(d0: date, d1: date) -> int:
         # calendar 経路と同じ **(d0, d1]** 半開区間に揃える。素の
         # ``busday_count(d0, d1)`` は ``[d0, d1)`` なので、entry 当日が営業日で
         # today が休日 (またはその逆) のときに 1 日ずれる。
-        return int(
-            np.busday_count(d0 + timedelta(days=1), d1 + timedelta(days=1))
-        )
+        return int(np.busday_count(d0 + timedelta(days=1), d1 + timedelta(days=1)))
     except Exception:  # noqa: BLE001
         # 最終手段: 暦日 (従来挙動)。ここに落ちるのは numpy も calendar も
         # 使えない環境だけ。
@@ -111,7 +109,9 @@ def add_trading_days(d0: date, n: int) -> date:
     except Exception:  # noqa: BLE001
         logger.warning(
             "NYSE calendar も numpy も使えないため max_exit_date を暦日で計算します "
-            "(%s + %d)。", d0, n
+            "(%s + %d)。",
+            d0,
+            n,
         )
         return d0 + timedelta(days=n)
 

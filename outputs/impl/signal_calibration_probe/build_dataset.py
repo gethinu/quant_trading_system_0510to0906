@@ -8,6 +8,7 @@ strategies/systemN_strategy.py compute_entry/compute_exit, using the *live*
 resolved strategy config. Equivalence against the real strategy methods is
 asserted on a random sample by verify_equivalence.py.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -79,8 +80,16 @@ def setup_masks(d):
     # system5: Close>=5, adx7>55, atr_pct>0.04, avgvol50>500k, dv50>2.5M,
     #          Close>sma100+atr10, rsi3<50
     out["system5"] = (
-        nn(close, d["adx7"], d["atr_pct"], d["sma100"], d["atr10"], d["rsi3"],
-           d["avgvolume50"], d["dollarvolume50"])
+        nn(
+            close,
+            d["adx7"],
+            d["atr_pct"],
+            d["sma100"],
+            d["atr10"],
+            d["rsi3"],
+            d["avgvolume50"],
+            d["dollarvolume50"],
+        )
         & (close >= 5.0)
         & (d["adx7"] > 55.0)
         & (d["atr_pct"] > 0.04)
@@ -107,11 +116,33 @@ SCORE_COL = {
 }
 
 NEEDED = [
-    "Open", "High", "Low", "Close", "Volume",
-    "adx7", "avgvolume50", "atr_ratio", "atr_pct", "return_6d", "uptwodays",
-    "twodayup", "drop3d", "sma25", "sma50", "sma100", "sma150", "sma200",
-    "atr10", "atr20", "atr40", "rsi3", "rsi4", "roc200", "hv50",
-    "dollarvolume20", "dollarvolume50",
+    "Open",
+    "High",
+    "Low",
+    "Close",
+    "Volume",
+    "adx7",
+    "avgvolume50",
+    "atr_ratio",
+    "atr_pct",
+    "return_6d",
+    "uptwodays",
+    "twodayup",
+    "drop3d",
+    "sma25",
+    "sma50",
+    "sma100",
+    "sma150",
+    "sma200",
+    "atr10",
+    "atr20",
+    "atr40",
+    "rsi3",
+    "rsi4",
+    "roc200",
+    "hv50",
+    "dollarvolume20",
+    "dollarvolume50",
 ]
 
 
@@ -218,7 +249,9 @@ def trade_sys3(d, e, n, cfg):
     prev_close = d["Close"][e - 1]
     if not (np.isfinite(atr) and np.isfinite(prev_close)):
         return None
-    ep = round(float(prev_close) * float(cfg.get("entry_price_ratio_vs_prev_close", 0.93)), 2)
+    ep = round(
+        float(prev_close) * float(cfg.get("entry_price_ratio_vs_prev_close", 0.93)), 2
+    )
     stop = ep - float(cfg.get("stop_atr_multiple", 2.5)) * atr
     if ep - stop <= 0:
         return None
@@ -243,7 +276,9 @@ def trade_sys5(d, e, n, cfg):
     prev_close = d["Close"][e - 1]
     if not (np.isfinite(atr) and np.isfinite(prev_close)):
         return None
-    ep = round(float(prev_close) * float(cfg.get("entry_price_ratio_vs_prev_close", 0.97)), 2)
+    ep = round(
+        float(prev_close) * float(cfg.get("entry_price_ratio_vs_prev_close", 0.97)), 2
+    )
     stop = ep - float(cfg.get("stop_atr_multiple", 3.0)) * atr
     if ep - stop <= 0:
         return None
@@ -273,7 +308,9 @@ def trade_sys6(d, e, n, cfg):
     prev_close = d["Close"][e - 1]
     if not (np.isfinite(atr) and np.isfinite(prev_close)):
         return None
-    ep = round(float(prev_close) * float(cfg.get("entry_price_ratio_vs_prev_close", 1.05)), 2)
+    ep = round(
+        float(prev_close) * float(cfg.get("entry_price_ratio_vs_prev_close", 1.05)), 2
+    )
     stop = ep + float(cfg.get("stop_atr_multiple", 3.0)) * atr
     if stop <= ep:
         return None
@@ -298,11 +335,21 @@ def trade_sys6(d, e, n, cfg):
 
 
 TRADE = {
-    "system1": trade_sys1, "system2": trade_sys2, "system3": trade_sys3,
-    "system4": trade_sys4, "system5": trade_sys5, "system6": trade_sys6,
+    "system1": trade_sys1,
+    "system2": trade_sys2,
+    "system3": trade_sys3,
+    "system4": trade_sys4,
+    "system5": trade_sys5,
+    "system6": trade_sys6,
 }
-SIDE = {"system1": 1, "system2": -1, "system3": 1, "system4": 1,
-        "system5": 1, "system6": -1}
+SIDE = {
+    "system1": 1,
+    "system2": -1,
+    "system3": 1,
+    "system4": 1,
+    "system5": 1,
+    "system6": -1,
+}
 # systems whose entry is a limit order placed away from the prior close
 LIMIT_ENTRY = {"system3": "long", "system5": "long", "system6": "short"}
 
@@ -316,9 +363,12 @@ def resolve_configs():
     from strategies.system6_strategy import System6Strategy
 
     return {
-        "system1": System1Strategy().config, "system2": System2Strategy().config,
-        "system3": System3Strategy().config, "system4": System4Strategy().config,
-        "system5": System5Strategy().config, "system6": System6Strategy().config,
+        "system1": System1Strategy().config,
+        "system2": System2Strategy().config,
+        "system3": System3Strategy().config,
+        "system4": System4Strategy().config,
+        "system5": System5Strategy().config,
+        "system6": System6Strategy().config,
     }
 
 
@@ -327,13 +377,16 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--limit-symbols", type=int, default=0)
     ap.add_argument(
-        "--max-hold", type=int, default=0,
+        "--max-hold",
+        type=int,
+        default=0,
         help="Cap the holding period at H bars (mark to market at the close of "
-             "bar e+H) and require H bars of forward data for every signal. "
-             "0 = the system's own unbounded exit rule (repo convention). "
-             "A cap makes labels comparable across time splits: System1/4 use "
-             "trailing exits with no time stop, so with a 2-year cache a large "
-             "share of late signals would otherwise be unresolved MTM rows.")
+        "bar e+H) and require H bars of forward data for every signal. "
+        "0 = the system's own unbounded exit rule (repo convention). "
+        "A cap makes labels comparable across time splits: System1/4 use "
+        "trailing exits with no time stop, so with a 2-year cache a large "
+        "share of late signals would otherwise be unresolved MTM rows.",
+    )
     args = ap.parse_args()
 
     cfgs = resolve_configs()
@@ -392,20 +445,45 @@ def main():
                     filled = bool(d["Low"][e] <= ep)
                 elif lim == "short":
                     filled = bool(d["High"][e] >= ep)
-                rows.append((
-                    system, sym, idx[s], idx[e], idx[xi], float(sc[s]),
-                    float(ep), float(xp), float(ret), int(xi - e), filled,
-                    bool(xi == n - 1),
-                ))
+                rows.append(
+                    (
+                        system,
+                        sym,
+                        idx[s],
+                        idx[e],
+                        idx[xi],
+                        float(sc[s]),
+                        float(ep),
+                        float(xp),
+                        float(ret),
+                        int(xi - e),
+                        filled,
+                        bool(xi == n - 1),
+                    )
+                )
         if k % 500 == 0:
-            print("  %d/%d rows=%d %.0fs" % (k, len(paths), len(rows), time.time() - t0),
-                  flush=True)
+            print(
+                "  %d/%d rows=%d %.0fs" % (k, len(paths), len(rows), time.time() - t0),
+                flush=True,
+            )
 
-    df = pd.DataFrame(rows, columns=[
-        "system", "symbol", "signal_date", "entry_date", "exit_date", "score",
-        "entry_price", "exit_price", "ret", "hold_bars", "limit_filled",
-        "censored_at_data_end",
-    ])
+    df = pd.DataFrame(
+        rows,
+        columns=[
+            "system",
+            "symbol",
+            "signal_date",
+            "entry_date",
+            "exit_date",
+            "score",
+            "entry_price",
+            "exit_price",
+            "ret",
+            "hold_bars",
+            "limit_filled",
+            "censored_at_data_end",
+        ],
+    )
     os.makedirs(args.out, exist_ok=True)
     fp = os.path.join(args.out, "candidates.parquet")
     df.to_parquet(fp, index=False)

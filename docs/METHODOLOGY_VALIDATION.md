@@ -17,7 +17,7 @@ existing, unchanged backtest engines:
 
 ```
  candidates_by_date ──► [ real engine ] ──► trades_df ──► summarize()  (production metrics, unchanged)
-        │                     ▲                              
+        │                     ▲
         │  CPCV folds         │ run once per fold             ┌─ moving-block bootstrap ─► Sharpe CI, P(SR≤0)
         └────────────────────►┤  (purge + embargo)  ─► OOS ──┤─ Deflated Sharpe (N trials) ─► DSR, pass/fail
                               │                               └─ survivorship audit/guard ─► biased? PIT?

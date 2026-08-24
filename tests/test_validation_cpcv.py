@@ -8,8 +8,8 @@ import numpy as np
 import pandas as pd
 
 from common.validation.cpcv import (
-    cpcv_date_folds,
     combinatorial_purged_splits,
+    cpcv_date_folds,
     filter_candidates_by_dates,
     label_end_map_from_trades,
     n_backtest_paths,
@@ -24,7 +24,9 @@ def test_path_and_combination_counts():
 
 
 def test_splits_count_and_disjoint():
-    splits = list(combinatorial_purged_splits(60, n_groups=6, k_test=2, embargo_pct=0.0))
+    splits = list(
+        combinatorial_purged_splits(60, n_groups=6, k_test=2, embargo_pct=0.0)
+    )
     assert len(splits) == 15
     for train, test, combo in splits:
         assert set(train).isdisjoint(set(test))
@@ -39,9 +41,7 @@ def test_purge_removes_overlapping_labels():
         combinatorial_purged_splits(n, n_groups=6, k_test=2, embargo_pct=0.0)
     )
     with_purge = list(
-        combinatorial_purged_splits(
-            n, n_groups=6, k_test=2, embargo_pct=0.0, t1_pos=t1
-        )
+        combinatorial_purged_splits(n, n_groups=6, k_test=2, embargo_pct=0.0, t1_pos=t1)
     )
     # Same test sets, but purged training sets are strictly smaller on average.
     tot_no = sum(len(tr) for tr, _, _ in no_purge)

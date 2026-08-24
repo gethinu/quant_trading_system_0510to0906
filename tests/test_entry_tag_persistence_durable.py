@@ -19,11 +19,11 @@ import types
 
 import pytest
 
-import common.position_tracker as pt
 from common.alpaca_trading import PositionSnapshot, hydrate_system_tags
+from common.position_age import load_entry_dates
+import common.position_tracker as pt
 from common.position_tracker import load_tracker
 from common.symbol_map import load_symbol_system_map
-from common.position_age import load_entry_dates
 
 # import target from the prod entry submitter
 from scripts.paper_trading_submit import _persist_entry_tags
@@ -31,8 +31,11 @@ from scripts.paper_trading_submit import _persist_entry_tags
 
 def _order(symbol, system=None, entry_date=None, coid=None, limit_price=10.5):
     return types.SimpleNamespace(
-        symbol=symbol, system=system, entry_date=entry_date,
-        client_order_id=coid, limit_price=limit_price,
+        symbol=symbol,
+        system=system,
+        entry_date=entry_date,
+        client_order_id=coid,
+        limit_price=limit_price,
     )
 
 
@@ -40,15 +43,20 @@ def _order(symbol, system=None, entry_date=None, coid=None, limit_price=10.5):
 def _isolated_stores(tmp_path, monkeypatch):
     # tracker: module default path -> tmp; map/entry_dates: cwd-relative -> chdir tmp
     (tmp_path / "data").mkdir()
-    monkeypatch.setattr(pt, "DEFAULT_TRACKER_PATH", tmp_path / "data" / "position_tracker.json")
+    monkeypatch.setattr(
+        pt, "DEFAULT_TRACKER_PATH", tmp_path / "data" / "position_tracker.json"
+    )
     monkeypatch.chdir(tmp_path)
     return tmp_path
 
 
 def test_persist_roundtrip_hydrate_resolves(_isolated_stores):
     # 成功 entry: MF system3, entry 2026-07-13 (coid からも導出できる形)
-    orders = [_order("MF", system="system3", entry_date="2026-07-13",
-                     coid="system3-MF-20260713")]
+    orders = [
+        _order(
+            "MF", system="system3", entry_date="2026-07-13", coid="system3-MF-20260713"
+        )
+    ]
     _persist_entry_tags(orders, date_str="2026-07-30")
 
     tr = load_tracker()
@@ -56,14 +64,26 @@ def test_persist_roundtrip_hydrate_resolves(_isolated_stores):
     ed = load_entry_dates()
     assert tr.get("MF", {}).get("system") == "system3"
     assert tr.get("MF", {}).get("entry_date", "")[:10] == "2026-07-13"
-    assert smap.get("mf") == "system3"       # loader は小文字キー
+    assert smap.get("mf") == "system3"  # loader は小文字キー
     assert ed.get("MF") == "2026-07-13"
 
     # exit 経路の resolver が persist 済みストアだけで解決できる (coid/Alpaca 不要)
-    snap = PositionSnapshot(symbol="MF", qty=100.0, side="long", avg_entry_price=10.5,
-                            market_value=1100.0, unrealized_pl=50.0, system=None, entry_date=None)
-    hydrate_system_tags([snap], tracker=load_tracker(), entry_orders_index={},
-                        symbol_map=load_symbol_system_map())
+    snap = PositionSnapshot(
+        symbol="MF",
+        qty=100.0,
+        side="long",
+        avg_entry_price=10.5,
+        market_value=1100.0,
+        unrealized_pl=50.0,
+        system=None,
+        entry_date=None,
+    )
+    hydrate_system_tags(
+        [snap],
+        tracker=load_tracker(),
+        entry_orders_index={},
+        symbol_map=load_symbol_system_map(),
+    )
     assert snap.system == "system3"
     assert snap.entry_date == "2026-07-13"
 

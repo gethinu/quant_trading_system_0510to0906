@@ -95,9 +95,7 @@ def _derive_system7_indicators(
     if "atr50" in missing:
         from ta.volatility import AverageTrueRange
 
-        x["atr50"] = AverageTrueRange(
-            high, low, close, window=50
-        ).average_true_range()
+        x["atr50"] = AverageTrueRange(high, low, close, window=50).average_true_range()
     if "min_50" in missing:
         x["min_50"] = close.rolling(window=50).min()
     if "max_70" in missing:

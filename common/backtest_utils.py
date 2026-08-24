@@ -196,9 +196,7 @@ def _simulate_trades_with_risk(
         # Candidate shapes differ per system ({symbol: payload} vs list-of-dicts
         # keyed by "entry_date" or "date"). An unrecognised shape raises
         # CandidateSchemaError instead of silently booking nothing.
-        candidates = normalize_candidates_for_date(
-            candidates, date, system=system_name
-        )
+        candidates = normalize_candidates_for_date(candidates, date, system=system_name)
 
         # update exits
         current_capital, active_positions = strategy.update_capital_with_exits(

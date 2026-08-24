@@ -22,15 +22,22 @@ from common.alpaca_trading import (
 
 def _snap(symbol, *, system=None, entry_date=None, qty=100.0, side="long"):
     return PositionSnapshot(
-        symbol=symbol, qty=qty, side=side, avg_entry_price=10.0,
-        market_value=abs(qty) * 11.0, unrealized_pl=abs(qty), system=system,
+        symbol=symbol,
+        qty=qty,
+        side=side,
+        avg_entry_price=10.0,
+        market_value=abs(qty) * 11.0,
+        unrealized_pl=abs(qty),
+        system=system,
         entry_date=entry_date,
     )
 
 
 def test_symbol_map_resolves_when_tracker_and_index_empty():
     snap = _snap("MF")
-    hydrate_system_tags([snap], tracker={}, entry_orders_index={}, symbol_map={"MF": "system3"})
+    hydrate_system_tags(
+        [snap], tracker={}, entry_orders_index={}, symbol_map={"MF": "system3"}
+    )
     assert snap.system == "system3"
 
 
@@ -52,7 +59,10 @@ def test_overdue_mf_gets_time_exit_via_symbol_map():
 def test_unknown_symbol_still_unmanaged_and_surfaced():
     out: list[dict] = []
     exits = build_exit_orders_from_positions(
-        [_snap("ZZZ")], today="2026-07-30", symbol_map={"MF": "system3"}, unassigned_out=out
+        [_snap("ZZZ")],
+        today="2026-07-30",
+        symbol_map={"MF": "system3"},
+        unassigned_out=out,
     )
     # 2026-08-19: 帰属不能でも下方保護の stop だけは張る (time/close は作らない)。
     assert all(e.reason == "protect_stop" for e in exits)

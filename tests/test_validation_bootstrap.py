@@ -5,9 +5,9 @@ from __future__ import annotations
 import numpy as np
 
 from common.validation.bootstrap import (
+    _moving_block_indices,
     moving_block_bootstrap,
     optimal_block_length,
-    _moving_block_indices,
 )
 
 

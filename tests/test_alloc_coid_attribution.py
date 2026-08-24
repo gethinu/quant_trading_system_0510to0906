@@ -49,12 +49,14 @@ def _pos(symbol, qty):
 
 
 def test_build_coid_map_parses_entry_coids():
-    client = _FakeClient([
-        _order("MF", "system3-MF-20260713"),
-        _order("AAPL", "system1-AAPL-20260728"),
-        _order("SPY", "exit-system7-SPY-20260730"),   # exit coid -> 無視
-        _order("XYZ", "manual-order"),                  # 非 entry -> 無視
-    ])
+    client = _FakeClient(
+        [
+            _order("MF", "system3-MF-20260713"),
+            _order("AAPL", "system1-AAPL-20260728"),
+            _order("SPY", "exit-system7-SPY-20260730"),  # exit coid -> 無視
+            _order("XYZ", "manual-order"),  # 非 entry -> 無視
+        ]
+    )
     m = _build_coid_symbol_system_map(client)
     assert m.get("MF") == "system3"
     assert m.get("AAPL") == "system1"
@@ -72,8 +74,10 @@ def test_coid_attribution_fixes_stale_map_undercount():
     positions = [_pos("MF", 10), _pos("AAPL", 5), _pos("AMZN", 3)]
     before = count_active_positions_by_system(positions, static)
     after = count_active_positions_by_system(positions, merged)
-    assert before.get("system1", 0) == 0 and before.get("system3", 0) == 0  # stale = 取りこぼし
-    assert after.get("system1") == 2 and after.get("system3") == 1          # coid = 正しい
+    assert (
+        before.get("system1", 0) == 0 and before.get("system3", 0) == 0
+    )  # stale = 取りこぼし
+    assert after.get("system1") == 2 and after.get("system3") == 1  # coid = 正しい
 
 
 def test_coid_takes_precedence_over_stale_static():

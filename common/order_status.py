@@ -18,7 +18,22 @@ from __future__ import annotations
 
 from typing import Any
 
-# まだ終端でない (fill/cancel 等が確定していない) status。
+# 既知の終端 status。未知 status を終端扱いすると broker 観測を早期終了して
+# settled と誤認するため、is_working はこの denylist だけを停止条件にする。
+TERMINAL_ORDER_STATUSES = frozenset(
+    {
+        "filled",
+        "done_for_day",
+        "canceled",
+        "cancelled",  # legacy artifact / broker spelling variation
+        "expired",
+        "replaced",
+        "rejected",
+    }
+)
+
+# 現在知られている non-terminal status。公開定数として残すが、判定自体は
+# terminal denylist を使う。stopped / suspended / 将来の未知値も観測を継続する。
 WORKING_ORDER_STATUSES = frozenset(
     {
         "new",
@@ -28,6 +43,7 @@ WORKING_ORDER_STATUSES = frozenset(
         "held",
         "accepted_for_bidding",
         "pending_replace",
+        "pending_review",
         "calculated",
         "pending_cancel",
     }
@@ -60,9 +76,9 @@ def normalize_order_status(raw: Any) -> str:
 
 
 def is_working(raw: Any) -> bool:
-    """まだ終端していない (再 poll する価値がある) か。"""
+    """known-terminal でなければ、まだ再 poll する価値があるとみなす。"""
     status = normalize_order_status(raw)
-    return status == "" or status in WORKING_ORDER_STATUSES
+    return status not in TERMINAL_ORDER_STATUSES
 
 
 def is_filled(raw: Any) -> bool:

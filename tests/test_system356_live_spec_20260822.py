@@ -48,8 +48,8 @@ import pytest
 import yaml
 
 from common.alpaca_trading import (
-    EXEC_QTY,
     _DEFAULT_SYSTEM_ORDER_TYPE,
+    EXEC_QTY,
     _flatten_json_signals,
     plan_order_execution,
     signals_json_to_orders,
@@ -241,7 +241,11 @@ class TestLimitEntry:
         df[atr_col] = 0.30
         debug: dict = {}
         got = _compute_entry_stop(
-            cls(), df, {"symbol": "TEST", "entry_date": _next_bday(df)}, side, debug=debug
+            cls(),
+            df,
+            {"symbol": "TEST", "entry_date": _next_bday(df)},
+            side,
+            debug=debug,
         )
         assert got is not None
         entry, _stop = got
@@ -298,13 +302,15 @@ class TestBacktestPathUntouched:
         strat = spec["cls"]()
         # entry_date の bar が df に **ある** = backtest 経路
         entry_date = df.index[-1]
-        comp = strat.compute_entry(df, {"symbol": "TEST", "entry_date": entry_date}, 0.0)
+        comp = strat.compute_entry(
+            df, {"symbol": "TEST", "entry_date": entry_date}, 0.0
+        )
         assert comp is not None, f"{system}: compute_entry が None"
         bt_entry, _bt_stop = comp
         live_limit = strat.compute_entry_limit_price(float(df["Close"].iloc[-2]))
-        assert live_limit == pytest.approx(bt_entry), (
-            f"{system}: live 指値 {live_limit} が backtest 指値 {bt_entry} と不一致"
-        )
+        assert live_limit == pytest.approx(
+            bt_entry
+        ), f"{system}: live 指値 {live_limit} が backtest 指値 {bt_entry} と不一致"
 
     @pytest.mark.parametrize("system", SYSTEMS)
     def test_backtest_entry_is_none_when_the_bar_never_reaches_the_limit(self, system):
@@ -399,7 +405,9 @@ class TestOrderEmission:
         """
         from common.alpaca_trading import SKIP_LIMIT_WITHOUT_PRICE
 
-        keep = tuple(k for k in ("sys2", "sys3", "sys5", "sys6") if k != f"sys{system[-1]}")
+        keep = tuple(
+            k for k in ("sys2", "sys3", "sys5", "sys6") if k != f"sys{system[-1]}"
+        )
         po = _orders(_json(with_limits=keep))[system]
         assert po.skip_reason is not None, system
         assert po.skip_reason.startswith(SKIP_LIMIT_WITHOUT_PRICE), system

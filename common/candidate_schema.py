@@ -125,8 +125,7 @@ def normalize_candidates_for_date(
                 f"a mapping, got {type(item).__name__}"
             )
         usable = any(
-            _coerce_timestamp(item.get(key)) is not None
-            for key in CANDIDATE_DATE_KEYS
+            _coerce_timestamp(item.get(key)) is not None for key in CANDIDATE_DATE_KEYS
         )
         if not usable:
             keys = sorted(str(k) for k in item.keys())

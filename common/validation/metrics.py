@@ -55,9 +55,7 @@ def annualized_sharpe(
     return float(np.sqrt(periods) * (r.mean() / denom))
 
 
-def per_period_sharpe(
-    returns: pd.Series | np.ndarray, risk_free: float = 0.0
-) -> float:
+def per_period_sharpe(returns: pd.Series | np.ndarray, risk_free: float = 0.0) -> float:
     """Non-annualized (per-observation) Sharpe used by PSR / DSR math."""
     r = np.asarray(returns, dtype=float)
     r = r[~np.isnan(r)]

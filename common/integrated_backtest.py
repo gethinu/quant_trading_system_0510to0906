@@ -342,9 +342,7 @@ def _run_integrated_backtest(
             # 互換性確保: {date: {symbol: payload}} と list 形式の双方に対応。
             # 認識できない形なら CandidateSchemaError で即座に落とす（黙って
             # 0 建玉になる旧挙動が System3 を全バックテストから消していた）。
-            cands = normalize_candidates_for_date(
-                cands, current_date, system=sys_name
-            )
+            cands = normalize_candidates_for_date(cands, current_date, system=sys_name)
             if not cands:
                 continue
 

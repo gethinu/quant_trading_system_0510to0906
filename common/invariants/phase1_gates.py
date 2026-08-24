@@ -128,7 +128,9 @@ def check_file_monotonic(
 ) -> GateResult:
     """累積 published-file カウンタが後退していないか。prev=None は違反でない。"""
     if prev_count is None:
-        return _finish("file_monotonic", False, cfg, f"first observation curr={curr_count}")
+        return _finish(
+            "file_monotonic", False, cfg, f"first observation curr={curr_count}"
+        )
     violated = curr_count < prev_count
     detail = f"prev={prev_count} curr={curr_count}"
     return _finish("file_monotonic", violated, cfg, detail)
@@ -156,7 +158,9 @@ def verify_alpaca_snapshot(
     if not isinstance(snapshot.get("positions"), (list, tuple)):
         return _finish("verify_alpaca_snapshot", True, cfg, "positions is not a list")
     return _finish(
-        "verify_alpaca_snapshot", False, cfg,
+        "verify_alpaca_snapshot",
+        False,
+        cfg,
         f"ok as_of={as_of} positions={len(snapshot['positions'])}",
     )
 

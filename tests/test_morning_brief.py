@@ -321,7 +321,9 @@ def test_after_the_open_a_stale_ledger_is_still_red(tmp_path):
         d, 20260820, expected_session_yyyymmdd=20260820
     )
     assert red is True
-    assert any("直近立会 (20260820) ぶん未更新" in a and "最新=20260819" in a for a in alerts)
+    assert any(
+        "直近立会 (20260820) ぶん未更新" in a and "最新=20260819" in a for a in alerts
+    )
 
 
 def test_ledger_for_the_current_session_is_green(tmp_path):

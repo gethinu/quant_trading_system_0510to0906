@@ -99,8 +99,11 @@ def main() -> int:
         "performance statements. Flagged here rather than silently reported."
     )
     L.append("")
-    L.append("| system | arm | min equity | final equity | equity crossed 0 | Sharpe interpretable |")
+    L.append(
+        "| system | arm | min equity | final equity | equity crossed 0 | Sharpe interpretable |"
+    )
     L.append("|---|---|---:|---:|---|---|")
+
     def _eqrow(name, pre, fix):
         for arm_label, d in (("pre-fix", pre), ("fixed", fix)):
             if not d or d.get("equity_min") is None:
@@ -112,6 +115,7 @@ def main() -> int:
                 f"{'**yes**' if crossed else 'no'} | "
                 f"{'**NO**' if crossed else 'yes'} |"
             )
+
     for name, blk in s["systems"].items():
         if blk.get("skipped"):
             continue
@@ -126,7 +130,9 @@ def main() -> int:
     L.append("")
 
     # ---- validation ------------------------------------------------------ #
-    L.append("### CPCV / bootstrap / Deflated Sharpe — before (pre-fix) vs after (fixed)")
+    L.append(
+        "### CPCV / bootstrap / Deflated Sharpe — before (pre-fix) vs after (fixed)"
+    )
     L.append("")
     L.append(
         "| system | arm | full-sample Sharpe | fold Sharpe mean ± std | "

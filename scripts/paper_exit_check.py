@@ -454,9 +454,7 @@ def _protection_summary(
         "by_mode": modes,
         # 常駐注文が無い = ザラ場中は無防備で日次判定に依存している玉。
         "no_resident_order": len(no_resident),
-        "no_resident_symbols": sorted(
-            str(r.get("symbol") or "") for r in no_resident
-        ),
+        "no_resident_symbols": sorted(str(r.get("symbol") or "") for r in no_resident),
         # 日次判定はこの run の時点でしか行われない (連続監視ではない)。
         "daily_evaluation_date": evaluated_at,
     }

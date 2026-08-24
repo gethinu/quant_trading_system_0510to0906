@@ -33,10 +33,17 @@ from pathlib import Path
 SNAP_SCHEMA = "alpaca_snapshot/v1"
 LEDGER_SCHEMA = "exit_ledger/v1"
 
-SNAP_TOP = {"schema", "date", "generated_at", "provider", "account",
-            "equity_curve", "summary", "positions"}
-LEDGER_TOP = {"schema", "date", "generated_at", "provider",
-              "closed_trades", "realized"}
+SNAP_TOP = {
+    "schema",
+    "date",
+    "generated_at",
+    "provider",
+    "account",
+    "equity_curve",
+    "summary",
+    "positions",
+}
+LEDGER_TOP = {"schema", "date", "generated_at", "provider", "closed_trades", "realized"}
 TRADE_COLS = {"symbol", "side", "qty", "exit_time", "realized_pl"}
 
 
@@ -72,7 +79,9 @@ def verify_snapshot(path: Path, date_str: str, errs: list[str]) -> None:
     else:
         base = _parse_ts(date_str + "T00:00:00+00:00")
         if base and abs((gen - base).total_seconds()) > 36 * 3600:
-            errs.append(f"{tag}: generated_at {gen.isoformat()} が対象日 {date_str} から 36h 超 (stale)")
+            errs.append(
+                f"{tag}: generated_at {gen.isoformat()} が対象日 {date_str} から 36h 超 (stale)"
+            )
     acct = d.get("account") or {}
     eq = acct.get("equity")
     if not isinstance(eq, (int, float)) or not eq > 0:
@@ -98,7 +107,9 @@ def verify_snapshot(path: Path, date_str: str, errs: list[str]) -> None:
             prev = t
             last_t = t
         if not broke and last_t is not None and str(last_t)[:10] != date_str:
-            errs.append(f"{tag}: equity_curve 最終 t={last_t} が対象日 {date_str} でない (当日未反映)")
+            errs.append(
+                f"{tag}: equity_curve 最終 t={last_t} が対象日 {date_str} でない (当日未反映)"
+            )
     pos = d.get("positions")
     if not isinstance(pos, list):
         errs.append(f"{tag}: positions が list でない")
@@ -148,8 +159,11 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--date", required=True, help="対象日 YYYY-MM-DD")
     ap.add_argument("--results-dir", default="results_csv")
-    ap.add_argument("--skip-ledger", action="store_true",
-                    help="exit_ledger を検証しない (snapshot のみ確認したい時)")
+    ap.add_argument(
+        "--skip-ledger",
+        action="store_true",
+        help="exit_ledger を検証しない (snapshot のみ確認したい時)",
+    )
     args = ap.parse_args(argv)
 
     dc = args.date.replace("-", "")
@@ -164,7 +178,9 @@ def main(argv=None) -> int:
         for e in errs:
             print("  - " + e)
         return 1
-    print(f"[verify] OK — {args.date}: snapshot / exit_ledger の schema・行数・連続性すべて検証通過")
+    print(
+        f"[verify] OK — {args.date}: snapshot / exit_ledger の schema・行数・連続性すべて検証通過"
+    )
     return 0
 
 

@@ -346,9 +346,7 @@ class Runner:
                 clock_error = None
                 self.record["market_is_open"] = is_open
                 self.record["clock_next_open"] = str(getattr(clock, "next_open", ""))
-                self.log(
-                    f"[gate] market_is_open={is_open} (attempt {attempt + 1})"
-                )
+                self.log(f"[gate] market_is_open={is_open} (attempt {attempt + 1})")
                 break
             except Exception as exc:  # noqa: BLE001
                 clock_error = str(exc)
@@ -506,32 +504,36 @@ class Runner:
             "[exit] --flatten-all: 全ポジションを market close + open order cancel (clean reset)"
         )
         # 事前スナップショット (dry-run でも「何を閉じるか」を durable に残す)
-        snaps: list = []
+        snaps: list | None = None
         try:
             from common.alpaca_trading import fetch_position_snapshots
 
-            snaps = fetch_position_snapshots(self._client())
+            snaps = fetch_position_snapshots(self._client(), raise_on_error=True)
         except Exception as exc:  # noqa: BLE001
             self.log(f"[exit] position 取得失敗: {exc}")
-        self._dump(
-            "positions_before_flatten.json",
-            [
-                {
-                    "symbol": s.symbol,
-                    "qty": s.qty,
-                    "side": s.side,
-                    "market_value": s.market_value,
-                    "system": s.system,
-                }
-                for s in snaps
-            ],
-        )
+            self.record["positions_before_flatten_error"] = (
+                f"{type(exc).__name__}: {exc}"
+            )
+        else:
+            self._dump(
+                "positions_before_flatten.json",
+                [
+                    {
+                        "symbol": s.symbol,
+                        "qty": s.qty,
+                        "side": s.side,
+                        "market_value": s.market_value,
+                        "system": s.system,
+                    }
+                    for s in snaps
+                ],
+            )
 
         exits_rows: list[dict] = []
         market_ids: list[str] = []
 
         if self.dry_run:
-            for s in snaps:
+            for s in snaps or []:
                 exits_rows.append(
                     {
                         "symbol": s.symbol,
@@ -565,7 +567,26 @@ class Runner:
             resps = client.close_all_positions(cancel_orders=True)
         except Exception as exc:  # noqa: BLE001
             self.log(f"[exit] close_all_positions 失敗: {exc}")
-            resps = []
+            error = f"{type(exc).__name__}: {exc}"
+            self.record["flatten_error"] = error
+            self.record["flatten_ok"] = 0
+            self.record["flatten_failed"] = 0
+            self.record["exit_count"] = 0
+            self.entry_allowed = False
+            self.record["entry_skip_reason"] = "flatten_error"
+            payload = {
+                "date": self.date,
+                "mode": "submitted",
+                "flatten_all": True,
+                "count": 0,
+                "submitted": 0,
+                "failed": 0,
+                "flatten_error": error,
+                "exits": [],
+            }
+            write_with_sidecar(self.exit_json, payload, ROLE_EXECUTION)
+            self._dump("exit_orders.json", payload)
+            return []
 
         ok = 0
         failed = 0
@@ -684,14 +705,17 @@ class Runner:
         while True:
             try:
                 held = {
-                    str(s.symbol).upper() for s in fetch_position_snapshots(client)
+                    str(s.symbol).upper()
+                    for s in fetch_position_snapshots(client, raise_on_error=True)
                 }
             except Exception as exc:  # noqa: BLE001 - 一時失敗は次の poll で回復
                 self.log(f"[wait] positions 取得失敗 (継続): {exc}")
             else:
                 remaining = {s for s in symbols if s in held}
                 if not remaining:
-                    self.log(f"[wait] flatten settled: {len(symbols)} 件の建玉解消を確認")
+                    self.log(
+                        f"[wait] flatten settled: {len(symbols)} 件の建玉解消を確認"
+                    )
                     break
             if time.monotonic() >= deadline:
                 self.log(
@@ -789,7 +813,9 @@ class Runner:
                 if blind >= 3:
                     # broker が全件無応答。待っても埋まらないので観測を諦める
                     # (poll_timeout ぶん空回りして notify/publish を遅らせない)。
-                    self.log("[fills] status が 3 回連続で 0 件 -> broker 不達とみなし中断")
+                    self.log(
+                        "[fills] status が 3 回連続で 0 件 -> broker 不達とみなし中断"
+                    )
                     break
             pending = [oid for oid in ids if is_working(smap.get(oid))]
             if not pending:
@@ -839,7 +865,7 @@ class Runner:
         try:
             from common.alpaca_trading import fetch_position_snapshots
 
-            snaps = fetch_position_snapshots(self._client())
+            snaps = fetch_position_snapshots(self._client(), raise_on_error=True)
             rows = [
                 {
                     "symbol": s.symbol,
@@ -862,6 +888,9 @@ class Runner:
             self.log(f"[record] {name}: total={len(rows)} L={longs} S={shorts}")
         except Exception as exc:  # noqa: BLE001
             self.log(f"[record] {name} 取得失敗: {exc}")
+            errors = self.record.setdefault("position_snapshot_errors", {})
+            if isinstance(errors, dict):
+                errors[name] = f"{type(exc).__name__}: {exc}"
 
     def record_stage(self) -> None:
         # entry fill が反映されるまで軽く待ってから最終ポジションを撮る
@@ -1059,6 +1088,8 @@ class Runner:
                     f"settled={self.record.get('flatten_settled')} "
                     f"unsettled={self.record.get('flatten_unsettled')}"
                 )
+            if self.record.get("flatten_error"):
+                lines.append(f"- **FLATTEN ERROR**: {self.record['flatten_error']}")
             lines += [
                 f"- entry: submitted={self.record.get('entry_submitted')} "
                 f"filled={self.record.get('entry_filled')} "
@@ -1118,7 +1149,11 @@ class Runner:
                 f"[entry] SKIP: {self.record.get('entry_skip_reason')} "
                 "(exit は実行済み)"
             )
-            self.record["entry_status"] = "skipped_thin_signals"
+            self.record["entry_status"] = (
+                "skipped_flatten_error"
+                if self.record.get("flatten_error")
+                else "skipped_thin_signals"
+            )
             self.record["entry_submitted"] = 0
         self.record_stage()
 
@@ -1142,10 +1177,11 @@ class Runner:
         # 注文段は既に完了しているため、観測段の失敗時も DONE.lock を先に作る。
         # rc=4 による再試行で発注を重複させないことが最優先。
         self.finalize(aborted=False)
-        if notify_rc != 0 or publish_rc != 0:
+        if notify_rc != 0 or publish_rc != 0 or self.record.get("flatten_error"):
             self.log(
                 "=== OPEN AUTO RUN done with observability failure "
-                f"notify={notify_rc} publish={publish_rc} ==="
+                f"notify={notify_rc} publish={publish_rc} "
+                f"flatten_error={bool(self.record.get('flatten_error'))} ==="
             )
             return OBSERVABILITY_DEGRADED_EXIT_CODE
         self.log("=== OPEN AUTO RUN done ===")

@@ -207,14 +207,10 @@ def test_monthly_roll_no_errors(system_cls, symbols, atr_flags, gap_days):
             # short systems need an up-gap (S2 filter / S6 sell limit);
             # S3/S5 need a down-gap through their buy limit
             force_gap_up_on=(
-                gap_days
-                if system_cls in (System2Strategy, System6Strategy)
-                else []
+                gap_days if system_cls in (System2Strategy, System6Strategy) else []
             ),
             force_gap_down_on=(
-                gap_days
-                if system_cls in (System3Strategy, System5Strategy)
-                else []
+                gap_days if system_cls in (System3Strategy, System5Strategy) else []
             ),
         )
         data_dict[sym] = df

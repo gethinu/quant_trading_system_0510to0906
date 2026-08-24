@@ -7,7 +7,7 @@ the project convention of keeping important decisions in durable, dated files.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 import datetime as _dt
 import json
 import logging

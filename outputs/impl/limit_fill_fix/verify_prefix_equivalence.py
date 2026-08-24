@@ -45,7 +45,7 @@ SUBJECTS = ["System3", "System5", "System6"]
 
 # Runs inside a child process so the two `strategies` packages never share an
 # interpreter (module identity would otherwise leak between arms).
-CHILD = r'''
+CHILD = r"""
 import json, os, sys, warnings, logging
 warnings.filterwarnings("ignore"); logging.getLogger("streamlit").setLevel(logging.ERROR)
 mode, root, prefix_tree, limit, normalize = sys.argv[1:6]
@@ -106,7 +106,7 @@ for st in states:
         "digest": hashlib.sha256(d.encode()).hexdigest()[:16],
     }
 print("__RESULT__" + json.dumps(out))
-'''
+"""
 
 
 def run_arm(mode, prefix_tree, limit, normalize):
@@ -169,8 +169,12 @@ def main() -> int:
     if args.out:
         with open(args.out, "w", encoding="utf-8") as fh:
             json.dump(
-                {"limit": args.limit, "normalize": args.normalize, "arms": arms,
-                 "reconstruction_exact": ok},
+                {
+                    "limit": args.limit,
+                    "normalize": args.normalize,
+                    "arms": arms,
+                    "reconstruction_exact": ok,
+                },
                 fh,
                 indent=2,
             )

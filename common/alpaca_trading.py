@@ -2365,9 +2365,7 @@ def _build_protection_orders(
         k
         for k in _PROTECT_KIND_PRIORITY
         if k in legs
-        and (
-            _coid(k) in existing_protect_coids or (k == "stop" and stop_rearmed)
-        )
+        and (_coid(k) in existing_protect_coids or (k == "stop" and stop_rearmed))
     ]
     for k in already_open:
         legs.pop(k, None)
@@ -2725,9 +2723,7 @@ def _orphan_atr_is_usable(snap: PositionSnapshot, atr_value: float | None) -> bo
     return (float(atr_value) / float(snap.avg_entry_price)) >= _orphan_min_atr_pct()
 
 
-def _orphan_stop_price(
-    snap: PositionSnapshot, atr_value: float | None
-) -> float | None:
+def _orphan_stop_price(snap: PositionSnapshot, atr_value: float | None) -> float | None:
     """orphan 用 protective stop 価格。
 
     ATR が使える (stale でない) なら ATR ベース、そうでなければ entry からの
@@ -2890,9 +2886,9 @@ def build_exit_orders_from_positions(
                         "system": None,
                         "qty": snap.qty,
                         "is_fractional": snap.is_fractional,
-                        "mode": "orphan_default"
-                        if orphan_protection
-                        else "unprotected",
+                        "mode": (
+                            "orphan_default" if orphan_protection else "unprotected"
+                        ),
                         "resident_order": bool(orphan_protection),
                         "detail": prot_state,
                     }
@@ -2998,9 +2994,7 @@ def build_exit_orders_from_positions(
                             "is_fractional": False,
                             "mode": "native_resident",
                             "resident_order": bool(resident),
-                            "detail": ",".join(
-                                sorted({q.reason for q in resident})
-                            )
+                            "detail": ",".join(sorted({q.reason for q in resident}))
                             or "already_open_or_none",
                             "suppressed": [
                                 {"reason": q.reason, "skip_reason": q.skip_reason}

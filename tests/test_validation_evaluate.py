@@ -17,9 +17,7 @@ def _synthetic_run_on_dates(drift: float, noise: float, seed: int = 0):
     rng_master = np.random.default_rng(seed)
     # pre-draw a pnl per possible date index for determinism across folds
     base_dates = pd.bdate_range("2020-01-01", periods=180)
-    pnl_by_date = {
-        d: float(rng_master.normal(drift, noise)) for d in base_dates
-    }
+    pnl_by_date = {d: float(rng_master.normal(drift, noise)) for d in base_dates}
 
     def run_on_dates(allowed) -> pd.DataFrame:
         rows = []

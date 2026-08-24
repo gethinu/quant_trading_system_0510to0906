@@ -137,6 +137,13 @@ def _empty_system_bucket() -> dict[str, Any]:
     }
 
 
+def _exit_is_submitted(exit_row: dict[str, Any]) -> bool:
+    """broker 受理を判定する。新 artifact は accepted、旧 artifact のみ ID fallback。"""
+    if "accepted" in exit_row:
+        return exit_row.get("accepted") is True
+    return bool(exit_row.get("order_id")) and not exit_row.get("error")
+
+
 # system 不明 (例: reason=flatten_all で system=null の exit) を集計から落とさず
 # 振り分ける先。per-system 内訳には出るが sysN funnel には紐付かない。
 _UNASSIGNED_SYSTEM = "__unassigned__"
@@ -286,14 +293,19 @@ def build_recon(
             if bucket is None:  # 論理上到達しないが型のため
                 continue
             ex = bucket["exit"]
-            is_submitted = bool(e.get("order_id")) and not e.get("error")
+            is_submitted = _exit_is_submitted(e)
+            # accepted が明示されている新 artifact は False/None を拒否として扱う。
+            # accepted 不在の legacy artifact は従来どおり error だけが拒否の根拠。
+            is_rejected = bool(e.get("error")) or (
+                "accepted" in e and e.get("accepted") is not True
+            )
             is_protect = str(e.get("reason") or "").lower() in _PROTECT_REASONS
             suffix = "protect" if is_protect else "close"
             if is_submitted:
                 # fired: 送信できた手仕舞い。close/protect 内訳は fired 分だけ。
                 ex["submitted"] += 1
                 ex[suffix] += 1
-            elif e.get("error"):
+            elif is_rejected:
                 # broker が拒否した。**armed に混ぜない** (armed は「保護が
                 # 張れている」と読まれるため、拒否を混ぜると失敗が成功に化ける)。
                 ex["rejected"] += 1
@@ -323,13 +335,9 @@ def build_recon(
     exit_armed_protect = sum(b["exit"]["armed_protect"] for b in systems.values())
     exit_rejected = sum(b["exit"]["rejected"] for b in systems.values())
     exit_rejected_close = sum(b["exit"]["rejected_close"] for b in systems.values())
-    exit_rejected_protect = sum(
-        b["exit"]["rejected_protect"] for b in systems.values()
-    )
+    exit_rejected_protect = sum(b["exit"]["rejected_protect"] for b in systems.values())
     exit_suppressed = sum(b["exit"]["suppressed"] for b in systems.values())
-    exit_suppressed_close = sum(
-        b["exit"]["suppressed_close"] for b in systems.values()
-    )
+    exit_suppressed_close = sum(b["exit"]["suppressed_close"] for b in systems.values())
     exit_suppressed_protect = sum(
         b["exit"]["suppressed_protect"] for b in systems.values()
     )
@@ -362,6 +370,7 @@ def build_recon(
         "exit_suppressed": exit_suppressed,
         "exit_suppressed_close": exit_suppressed_close,
         "exit_suppressed_protect": exit_suppressed_protect,
+        "exit_error": (exit_orders or {}).get("flatten_error"),
         "drop_breakdown": drop_breakdown,
         "account_equity": account_equity,
     }

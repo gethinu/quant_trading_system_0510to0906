@@ -39,7 +39,7 @@ def build_title(recon: dict[str, Any]) -> str:
     entry = _n(p.get("entry_submitted"))
     exit_ = _n(p.get("exit_submitted"))
     fail = _n(p.get("entry_failed"))
-    emoji = "⚠️" if fail > 0 else "📊"
+    emoji = "⚠️" if fail > 0 or p.get("exit_error") else "📊"
     head = f"{emoji} {mmdd} exec" if mmdd else f"{emoji} exec"
     return f"{head} sig{sig} entry{entry} exit{exit_}"
 
@@ -56,14 +56,12 @@ def build_body(recon: dict[str, Any]) -> str:
     entry = _n(p.get("entry_submitted"))
     fill = _n(p.get("entry_filled"))
     exit_sub = _n(p.get("exit_submitted"))  # fired
-    exit_close = _n(p.get("exit_close"))    # fired 分のみ
+    exit_close = _n(p.get("exit_close"))  # fired 分のみ
     exit_protect = _n(p.get("exit_protect"))  # fired 分のみ
-    exit_armed = _n(p.get("exit_armed"))    # 未発火の保護注文 (別枠)
+    exit_armed = _n(p.get("exit_armed"))  # 未発火の保護注文 (別枠)
 
     # 1 行目: 全体 funnel
-    lines.append(
-        f"Tgt {tgt_s} → sig {sig} → gen {gen} → entry {entry} → fill {fill}"
-    )
+    lines.append(f"Tgt {tgt_s} → sig {sig} → gen {gen} → entry {entry} → fill {fill}")
     # exit 行: fired (= submitted, close+protect が常に一致) と armed を分離表示。
     # 「exit 0 / protect 25」の誤解 (fired と armed の分母混在) を解消する。
     armed_suffix = f" · {exit_armed} armed" if exit_armed else ""
@@ -71,6 +69,8 @@ def build_body(recon: dict[str, Any]) -> str:
         f"exit {exit_sub} fired (close {exit_close} / protect {exit_protect})"
         f"{armed_suffix}"
     )
+    if p.get("exit_error"):
+        lines.append(f"⚠ exit error: {p['exit_error']}")
 
     # long/short 充足 + 残高
     le = _n(p.get("long_entry_submitted"))

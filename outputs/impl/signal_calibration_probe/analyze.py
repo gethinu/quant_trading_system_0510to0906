@@ -8,6 +8,7 @@ simulates a confidence gate OOS.
 
 No scipy (repo constraint: numpy + pandas + stdlib only).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -26,8 +27,8 @@ if REPO not in sys.path:
 # higher score = better, per core/system*.py rank() direction
 SCORE_ASC = {"system4": True}  # only System4 ranks ascending (low RSI4 first)
 
-MIN_OOS_ROWS = 200        # per-system floor for a verdict
-MIN_BUCKET_ROWS = 50      # floor for reporting a gated bucket
+MIN_OOS_ROWS = 200  # per-system floor for a verdict
+MIN_BUCKET_ROWS = 50  # floor for reporting a gated bucket
 N_BINS = 10
 
 
@@ -48,7 +49,7 @@ def auc_score(y: np.ndarray, s: np.ndarray) -> float:
         j = i
         while j + 1 < len(ss) and ss[j + 1] == ss[i]:
             j += 1
-        ranks[i:j + 1] = (i + j) / 2.0 + 1.0
+        ranks[i : j + 1] = (i + j) / 2.0 + 1.0
         i = j + 1
     r = np.empty(len(s), dtype=float)
     r[order] = ranks
@@ -94,7 +95,7 @@ def spearman(a: np.ndarray, b: np.ndarray) -> float:
             j = i
             while j + 1 < len(xs) and xs[j + 1] == xs[i]:
                 j += 1
-            ranks[i:j + 1] = (i + j) / 2.0 + 1.0
+            ranks[i : j + 1] = (i + j) / 2.0 + 1.0
             i = j + 1
         out = np.empty(len(x), dtype=float)
         out[order] = ranks
@@ -103,7 +104,7 @@ def spearman(a: np.ndarray, b: np.ndarray) -> float:
     ra, rb = rank(np.asarray(a, float)), rank(np.asarray(b, float))
     ra -= ra.mean()
     rb -= rb.mean()
-    den = math.sqrt(float((ra ** 2).sum()) * float((rb ** 2).sum()))
+    den = math.sqrt(float((ra**2).sum()) * float((rb**2).sum()))
     return float((ra * rb).sum() / den) if den > 0 else float("nan")
 
 
@@ -129,9 +130,16 @@ def ece(y: np.ndarray, p: np.ndarray, n_bins: int = N_BINS):
         conf = float(p[m].mean())
         acc = float(y[m].mean())
         tot += cnt / n * abs(acc - conf)
-        rows.append({"bin": b, "n": cnt, "p_lo": float(edges[b]),
-                     "p_hi": float(edges[b + 1]), "mean_pred": round(conf, 4),
-                     "obs_rate": round(acc, 4)})
+        rows.append(
+            {
+                "bin": b,
+                "n": cnt,
+                "p_lo": float(edges[b]),
+                "p_hi": float(edges[b + 1]),
+                "mean_pred": round(conf, 4),
+                "obs_rate": round(acc, 4),
+            }
+        )
     return float(tot), rows
 
 
@@ -144,8 +152,7 @@ def _sigmoid(z):
     return 1.0 / (1.0 + np.exp(-np.clip(z, -60, 60)))
 
 
-def fit_logistic(x: np.ndarray, y: np.ndarray, fit_bias: bool = True,
-                 iters: int = 400):
+def fit_logistic(x: np.ndarray, y: np.ndarray, fit_bias: bool = True, iters: int = 400):
     """Newton/IRLS logistic fit on a single feature. Returns (a, b)."""
     x = np.asarray(x, float)
     y = np.asarray(y, float)
@@ -192,9 +199,9 @@ def fit_isotonic(x: np.ndarray, y: np.ndarray):
             continue
         w = wts[i] + wts[i + 1]
         v = (vals[i] * wts[i] + vals[i + 1] * wts[i + 1]) / w
-        vals[i:i + 2] = [v]
-        wts[i:i + 2] = [w]
-        xr[i:i + 2] = [xr[i + 1]]
+        vals[i : i + 2] = [v]
+        wts[i : i + 2] = [w]
+        xr[i : i + 2] = [xr[i + 1]]
         if i > 0:
             i -= 1
     return np.asarray(xr, float), np.asarray(vals, float)
@@ -235,14 +242,20 @@ def purged_forward_split(df: pd.DataFrame, train_frac: float, embargo_pct: float
     # purge: drop train rows whose label span reaches into the test window
     n_pre = len(tr)
     tr = tr[tr["exit_date"] < oos_start]
-    return tr, te, {
-        "n_dates": int(n), "train_end": str(pd.Timestamp(train_end).date()),
-        "embargo_dates": int(embargo),
-        "oos_start": str(pd.Timestamp(oos_start).date()),
-        "oos_end": str(pd.Timestamp(dates[-1]).date()),
-        "train_rows_before_purge": int(n_pre), "train_rows_after_purge": int(len(tr)),
-        "purged_rows": int(n_pre - len(tr)),
-    }
+    return (
+        tr,
+        te,
+        {
+            "n_dates": int(n),
+            "train_end": str(pd.Timestamp(train_end).date()),
+            "embargo_dates": int(embargo),
+            "oos_start": str(pd.Timestamp(oos_start).date()),
+            "oos_end": str(pd.Timestamp(dates[-1]).date()),
+            "train_rows_before_purge": int(n_pre),
+            "train_rows_after_purge": int(len(tr)),
+            "purged_rows": int(n_pre - len(tr)),
+        },
+    )
 
 
 def block_bootstrap_auc(te: pd.DataFrame, y, s, n_boot=300, seed=7):
@@ -274,19 +287,24 @@ def gate_sim(te: pd.DataFrame, p: np.ndarray, thresholds):
             rows.append({"threshold": round(float(t), 4), "n": 0})
             continue
         r = ret[m]
-        rows.append({
-            "threshold": round(float(t), 4),
-            "n": n,
-            "kept_pct": round(100.0 * n / base_n, 1),
-            "hit_rate": round(float((r > 0).mean()), 4),
-            "mean_ret": round(float(r.mean()), 5),
-            "median_ret": round(float(np.median(r)), 5),
-            "std_ret": round(float(r.std(ddof=1)) if n > 1 else float("nan"), 5),
-            "ret_per_unit_risk": (round(float(r.mean() / r.std(ddof=1)), 4)
-                                  if n > 1 and r.std(ddof=1) > 0 else None),
-            "total_ret": round(float(r.sum()), 3),
-            "below_floor": n < MIN_BUCKET_ROWS,
-        })
+        rows.append(
+            {
+                "threshold": round(float(t), 4),
+                "n": n,
+                "kept_pct": round(100.0 * n / base_n, 1),
+                "hit_rate": round(float((r > 0).mean()), 4),
+                "mean_ret": round(float(r.mean()), 5),
+                "median_ret": round(float(np.median(r)), 5),
+                "std_ret": round(float(r.std(ddof=1)) if n > 1 else float("nan"), 5),
+                "ret_per_unit_risk": (
+                    round(float(r.mean() / r.std(ddof=1)), 4)
+                    if n > 1 and r.std(ddof=1) > 0
+                    else None
+                ),
+                "total_ret": round(float(r.sum()), 3),
+                "below_floor": n < MIN_BUCKET_ROWS,
+            }
+        )
     return rows
 
 
@@ -306,7 +324,9 @@ def analyse_system(df: pd.DataFrame, system: str, args) -> dict:
     res["n_train"] = int(len(tr))
     res["n_oos"] = int(len(te))
     res["oos_censored_pct"] = round(100.0 * float(te["censored_at_data_end"].mean()), 1)
-    res["train_base_rate"] = round(float((tr["ret"] > 0).mean()), 4) if len(tr) else None
+    res["train_base_rate"] = (
+        round(float((tr["ret"] > 0).mean()), 4) if len(tr) else None
+    )
     res["oos_base_rate"] = round(float((te["ret"] > 0).mean()), 4) if len(te) else None
     if len(tr) < 100 or len(te) < 30:
         res["skipped"] = "train<100 or oos<30 rows after purge"
@@ -335,20 +355,31 @@ def analyse_system(df: pd.DataFrame, system: str, args) -> dict:
         v = spearman(oriented(sub, system), sub["ret"].to_numpy(float))
         if np.isfinite(v):
             ics.append(v)
-    res["within_day_rank_ic_oos"] = (round(float(np.mean(ics)), 4) if ics else None)
+    res["within_day_rank_ic_oos"] = round(float(np.mean(ics)), 4) if ics else None
     res["within_day_rank_ic_n_days"] = len(ics)
     # decile table of the oriented score vs outcome (OOS)
     try:
         qq = pd.qcut(pd.Series(s_te).rank(method="first"), 10, labels=False)
-        dec = (pd.DataFrame({"d": qq, "y": y_te, "r": te["ret"].to_numpy(float)})
-               .groupby("d").agg(n=("y", "size"), hit=("y", "mean"),
-                                 mean_ret=("r", "mean"),
-                                 median_ret=("r", "median")))
+        dec = (
+            pd.DataFrame({"d": qq, "y": y_te, "r": te["ret"].to_numpy(float)})
+            .groupby("d")
+            .agg(
+                n=("y", "size"),
+                hit=("y", "mean"),
+                mean_ret=("r", "mean"),
+                median_ret=("r", "median"),
+            )
+        )
         res["oos_score_deciles"] = [
-            {"decile": int(i) + 1, "n": int(row.n), "hit_rate": round(float(row.hit), 4),
-             "mean_ret": round(float(row.mean_ret), 5),
-             "median_ret": round(float(row.median_ret), 5)}
-            for i, row in dec.iterrows()]
+            {
+                "decile": int(i) + 1,
+                "n": int(row.n),
+                "hit_rate": round(float(row.hit), 4),
+                "mean_ret": round(float(row.mean_ret), 5),
+                "median_ret": round(float(row.median_ret), 5),
+            }
+            for i, row in dec.iterrows()
+        ]
     except Exception:
         pass
 
@@ -380,15 +411,23 @@ def analyse_system(df: pd.DataFrame, system: str, args) -> dict:
     res["temperature_T"] = round(float(temp), 4) if np.isfinite(temp) else None
     res["platt_a"] = round(float(a_p), 4)
     res["platt_b"] = round(float(b_p), 4)
-    res["platt_prob_range_oos"] = [round(float(p_platt_te.min()), 4),
-                                   round(float(p_platt_te.max()), 4)]
-    res["iso_prob_range_oos"] = [round(float(p_iso_te.min()), 4),
-                                 round(float(p_iso_te.max()), 4)]
+    res["platt_prob_range_oos"] = [
+        round(float(p_platt_te.min()), 4),
+        round(float(p_platt_te.max()), 4),
+    ]
+    res["iso_prob_range_oos"] = [
+        round(float(p_iso_te.min()), 4),
+        round(float(p_iso_te.max()), 4),
+    ]
 
     cal = {}
-    for name, p in (("raw_score_percentile", p_raw_te), ("const_base_rate", p_const_te),
-                    ("temperature", p_temp_te), ("platt", p_platt_te),
-                    ("isotonic", p_iso_te)):
+    for name, p in (
+        ("raw_score_percentile", p_raw_te),
+        ("const_base_rate", p_const_te),
+        ("temperature", p_temp_te),
+        ("platt", p_platt_te),
+        ("isotonic", p_iso_te),
+    ):
         e, rel = ece(y_te, p, args.n_bins)
         cal[name] = {"ece_oos": round(e, 4), "brier_oos": round(brier(y_te, p), 4)}
         if name in ("raw_score_percentile", "platt", "isotonic"):
@@ -405,44 +444,61 @@ def analyse_system(df: pd.DataFrame, system: str, args) -> dict:
     top_n = int(args.top_n)
     te2 = te.copy()
     te2["_ord"] = oriented(te2, system)
-    te2 = (te2.sort_values(["signal_date", "_ord"], ascending=[True, False])
-              .groupby("signal_date", sort=False).head(top_n))
+    te2 = (
+        te2.sort_values(["signal_date", "_ord"], ascending=[True, False])
+        .groupby("signal_date", sort=False)
+        .head(top_n)
+    )
     if len(te2) >= 30:
         s2 = oriented(te2, system)
         y2 = (te2["ret"].to_numpy(float) > 0).astype(float)
         p2 = _sigmoid(a_p * ((f(s2) - 0.5) * 2.0) + b_p)
         a2 = auc_score(y2, s2)
         res["topn_subset"] = {
-            "top_n": top_n, "n_oos": int(len(te2)),
+            "top_n": top_n,
+            "n_oos": int(len(te2)),
             "auc_oos": round(a2, 4) if np.isfinite(a2) else None,
             "base_hit_rate": round(float(y2.mean()), 4),
             "mean_ret": round(float(te2["ret"].mean()), 5),
-            "gate": gate_sim(te2, p2, sorted({float(np.quantile(p2, q))
-                                              for q in [0.0, 0.25, 0.5, 0.75]})),
+            "gate": gate_sim(
+                te2,
+                p2,
+                sorted({float(np.quantile(p2, q)) for q in [0.0, 0.25, 0.5, 0.75]}),
+            ),
         }
     else:
-        res["topn_subset"] = {"top_n": top_n, "n_oos": int(len(te2)),
-                              "skipped": "fewer than 30 OOS rows"}
+        res["topn_subset"] = {
+            "top_n": top_n,
+            "n_oos": int(len(te2)),
+            "skipped": "fewer than 30 OOS rows",
+        }
 
     # ---- CPCV stability of AUC using the repo's own fold builder
     try:
         from common.validation.cpcv import cpcv_date_folds
+
         lab = (d.groupby("signal_date")["exit_date"].max()).to_dict()
-        folds = cpcv_date_folds(sorted(d["signal_date"].unique()),
-                               n_groups=6, k_test=2, embargo_pct=0.01,
-                               label_end_by_date=lab)
+        folds = cpcv_date_folds(
+            sorted(d["signal_date"].unique()),
+            n_groups=6,
+            k_test=2,
+            embargo_pct=0.01,
+            label_end_by_date=lab,
+        )
         aucs = []
         for fo in folds:
             sub = d[d["signal_date"].isin(fo.test_dates)]
             if len(sub) < 50:
                 continue
-            a = auc_score((sub["ret"].to_numpy(float) > 0).astype(float),
-                          oriented(sub, system))
+            a = auc_score(
+                (sub["ret"].to_numpy(float) > 0).astype(float), oriented(sub, system)
+            )
             if np.isfinite(a):
                 aucs.append(a)
         if aucs:
             res["cpcv_auc"] = {
-                "n_folds": len(aucs), "mean": round(float(np.mean(aucs)), 4),
+                "n_folds": len(aucs),
+                "mean": round(float(np.mean(aucs)), 4),
                 "std": round(float(np.std(aucs, ddof=1)), 4) if len(aucs) > 1 else None,
                 "min": round(float(np.min(aucs)), 4),
                 "max": round(float(np.max(aucs)), 4),
@@ -470,14 +526,22 @@ def main():
     df = pd.read_parquet(args.data)
     out = {
         "tag": args.tag,
-        "params": {"train_frac": args.train_frac, "embargo_pct": args.embargo_pct,
-                   "n_bins": args.n_bins, "n_boot": args.n_boot,
-                   "top_n": args.top_n, "filled_only": bool(args.filled_only),
-                   "min_oos_rows": MIN_OOS_ROWS, "min_bucket_rows": MIN_BUCKET_ROWS},
+        "params": {
+            "train_frac": args.train_frac,
+            "embargo_pct": args.embargo_pct,
+            "n_bins": args.n_bins,
+            "n_boot": args.n_boot,
+            "top_n": args.top_n,
+            "filled_only": bool(args.filled_only),
+            "min_oos_rows": MIN_OOS_ROWS,
+            "min_bucket_rows": MIN_BUCKET_ROWS,
+        },
         "dataset": {
             "rows": int(len(df)),
-            "span": [str(pd.Timestamp(df["signal_date"].min()).date()),
-                     str(pd.Timestamp(df["signal_date"].max()).date())],
+            "span": [
+                str(pd.Timestamp(df["signal_date"].min()).date()),
+                str(pd.Timestamp(df["signal_date"].max()).date()),
+            ],
         },
         "systems": [],
     }
@@ -489,11 +553,29 @@ def main():
         json.dump(out, fh, indent=2, ensure_ascii=False)
     print("wrote", args.out)
     for r in out["systems"]:
-        print(json.dumps({k: v for k, v in r.items()
-                          if k in ("system", "n_rows", "n_train", "n_oos", "auc_oos",
-                                   "auc_oos_ci95", "within_day_auc_oos",
-                                   "rank_ic_oos_vs_ret", "within_day_rank_ic_oos",
-                                   "oos_base_rate", "meets_floor", "skipped")}))
+        print(
+            json.dumps(
+                {
+                    k: v
+                    for k, v in r.items()
+                    if k
+                    in (
+                        "system",
+                        "n_rows",
+                        "n_train",
+                        "n_oos",
+                        "auc_oos",
+                        "auc_oos_ci95",
+                        "within_day_auc_oos",
+                        "rank_ic_oos_vs_ret",
+                        "within_day_rank_ic_oos",
+                        "oos_base_rate",
+                        "meets_floor",
+                        "skipped",
+                    )
+                }
+            )
+        )
 
 
 if __name__ == "__main__":

@@ -95,10 +95,10 @@ if sys.platform == "win32":
 import pandas as pd
 
 from common import broker_alpaca as ba
+from common.alpaca_order import submit_orders_df
 from common.alpaca_trading import (  # noqa: E402
     parse_system_from_client_order_id as _parse_sys_coid,
 )
-from common.alpaca_order import submit_orders_df
 from common.cache_manager import CacheManager
 from common.dataframe_utils import round_dataframe  # noqa: E402
 from common.indicator_access import get_indicator, is_true, to_float
@@ -2080,7 +2080,6 @@ class PositionReconcileError(RuntimeError):
     """
 
 
-
 def _build_coid_symbol_system_map(client: Any) -> dict[str, str]:
     """Alpaca の全注文 (ALL, 全件ページング) の entry coid ``system{N}-SYM-YYYYMMDD``
     から symbol -> system を構築する (read-only)。
@@ -2121,7 +2120,9 @@ def _build_coid_symbol_system_map(client: Any) -> dict[str, str]:
                 break
             oldest = None
             for o in reversed(batch):
-                oldest = getattr(o, "submitted_at", None) or getattr(o, "created_at", None)
+                oldest = getattr(o, "submitted_at", None) or getattr(
+                    o, "created_at", None
+                )
                 if oldest is not None:
                     break
             if oldest is None or oldest == until:

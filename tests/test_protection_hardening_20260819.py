@@ -90,7 +90,9 @@ class TestStopFloor:
         rules = SYSTEM_TRADE_RULES["system1"]
         with caplog.at_level(logging.WARNING, logger=at.logger.name):
             at._stop_price_for(snap, rules, atr_value=5.0)
-        assert any("FLOOR" in r.message or "FLOOR" in r.getMessage() for r in caplog.records)
+        assert any(
+            "FLOOR" in r.message or "FLOOR" in r.getMessage() for r in caplog.records
+        )
 
     def test_custom_floor_pct(self, monkeypatch):
         monkeypatch.setenv("PROTECT_STOP_FLOOR_PCT", "0.25")
@@ -159,9 +161,7 @@ class TestOrphanDefaultProtection:
         monkeypatch.delenv("ORPHAN_DEFAULT_PROTECTION", raising=False)
         out: list[dict] = []
         snap = _snap(symbol="FOLD", system=None, entry=10.0, entry_date=None)
-        build_exit_orders_from_positions(
-            [snap], today="2026-08-19", unassigned_out=out
-        )
+        build_exit_orders_from_positions([snap], today="2026-08-19", unassigned_out=out)
         assert len(out) == 1
         assert out[0]["symbol"] == "FOLD"
         assert out[0]["classification"] == "orphan_no_system_origin"
@@ -216,7 +216,10 @@ class TestOrphanDefaultProtection:
 def _s2_short():
     """S2 (short, stop_atr_period=10 mult=3.0, target 4%)、time exit 未満の保有。"""
     return _snap(
-        symbol="ESTC", system="system2", side="short", entry=100.0,
+        symbol="ESTC",
+        system="system2",
+        side="short",
+        entry=100.0,
         entry_date="2026-08-19",
     )
 
@@ -369,18 +372,14 @@ class TestReconArmedVsRejected:
         assert p["exit_rejected"] == 0
 
     def test_genuine_unsent_still_counts_as_armed(self):
-        r = _recon(
-            [{"system": "system1", "reason": "protect_stop", "order_id": None}]
-        )
+        r = _recon([{"system": "system1", "reason": "protect_stop", "order_id": None}])
         p = r["portfolio"]
         assert p["exit_armed"] == 1
         assert p["exit_rejected"] == 0
         assert p["exit_suppressed"] == 0
 
     def test_submitted_unchanged(self):
-        r = _recon(
-            [{"system": "system1", "reason": "protect_stop", "order_id": "o1"}]
-        )
+        r = _recon([{"system": "system1", "reason": "protect_stop", "order_id": "o1"}])
         p = r["portfolio"]
         assert p["exit_submitted"] == 1
         assert p["exit_protect"] == 1
@@ -392,9 +391,7 @@ class TestReconArmedVsRejected:
             {"system": "system1", "reason": "protect_stop", "order_id": f"o{i}"}
             for i in range(10)
         ]
-        rows.append(
-            {"system": "system1", "reason": "time_based", "order_id": "t1"}
-        )
+        rows.append({"system": "system1", "reason": "time_based", "order_id": "t1"})
         rows += [
             {
                 "system": "system2",
@@ -419,9 +416,7 @@ class TestReconArmedVsRejected:
         assert p["exit_armed"] == 0
 
     def test_oco_reason_counts_as_protect(self):
-        r = _recon(
-            [{"system": "system2", "reason": "protect_oco", "order_id": "o1"}]
-        )
+        r = _recon([{"system": "system2", "reason": "protect_oco", "order_id": "o1"}])
         assert r["portfolio"]["exit_protect"] == 1
 
 
@@ -540,8 +535,9 @@ class TestOrphanStaleAtrGuard:
         """planner 経由でも FOLD に entry 直下の stop を張らないこと。"""
         monkeypatch.delenv("ORPHAN_DEFAULT_PROTECTION", raising=False)
         monkeypatch.delenv("ORPHAN_MIN_ATR_PCT", raising=False)
-        snap = _snap(symbol="FOLD", system=None, qty=143.0, entry=14.26,
-                     entry_date=None)
+        snap = _snap(
+            symbol="FOLD", system=None, qty=143.0, entry=14.26, entry_date=None
+        )
         exits = build_exit_orders_from_positions(
             [snap], today="2026-08-19", atr_by_symbol={"FOLD": {20: 0.03}}
         )

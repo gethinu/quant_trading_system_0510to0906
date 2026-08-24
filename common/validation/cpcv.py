@@ -96,7 +96,7 @@ def combinatorial_purged_splits(
         test_pos = np.concatenate([groups[g] for g in combo])
         train_mask = np.ones(n_samples, dtype=bool)
         train_mask[test_pos] = False
-        for (b0, b1) in _contiguous_blocks(sorted(test_pos.tolist())):
+        for b0, b1 in _contiguous_blocks(sorted(test_pos.tolist())):
             emb_end = min(n_samples - 1, b1 + embargo)
             train_positions = np.where(train_mask)[0]
             if train_positions.size:
@@ -143,9 +143,7 @@ def cpcv_date_folds(
         raise ValueError(f"only {n} unique dates for n_groups={n_groups}")
 
     if label_end_by_date:
-        ends = pd.to_datetime(
-            [label_end_by_date.get(d, d) for d in di]
-        )
+        ends = pd.to_datetime([label_end_by_date.get(d, d) for d in di])
         # position of the last signal date <= label end
         t1_pos = np.searchsorted(di.values, ends.values, side="right") - 1
         t1_pos = np.maximum(t1_pos, np.arange(n))

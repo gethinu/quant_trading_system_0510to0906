@@ -76,7 +76,10 @@ def _run_trades_mode(args) -> int:
 
 
 def _run_integrated_mode(args) -> int:
-    from common.integrated_backtest import build_system_states, run_integrated_backtest  # noqa: F401
+    from common.integrated_backtest import (  # noqa: F401
+        build_system_states,
+        run_integrated_backtest,
+    )
     from common.validation.evaluate import make_integrated_runner, run_cpcv_evaluation
     from common.validation.survivorship import survivorship_guard
 
@@ -123,7 +126,9 @@ def _run_integrated_mode(args) -> int:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--trades", help="evaluate an existing trades CSV")
-    p.add_argument("--integrated", action="store_true", help="run CPCV on the integrated engine")
+    p.add_argument(
+        "--integrated", action="store_true", help="run CPCV on the integrated engine"
+    )
     p.add_argument("--symbols", help="comma-separated symbols (integrated mode)")
     p.add_argument("--limit", type=int, default=0, help="cap number of symbols")
     p.add_argument("--capital", type=float, default=100000.0)
@@ -134,7 +139,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--n-boot", dest="n_boot", type=int, default=2000)
     p.add_argument("--seed", type=int, default=12345)
     p.add_argument("--label", default="")
-    p.add_argument("--force", action="store_true", help="run even if VALIDATION_ENABLED is unset")
+    p.add_argument(
+        "--force", action="store_true", help="run even if VALIDATION_ENABLED is unset"
+    )
     return p
 
 

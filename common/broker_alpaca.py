@@ -157,9 +157,7 @@ def _load_env_once() -> None:
             if loaded is None:
                 loaded = cand
 
-    have_keys = bool(
-        os.getenv("APCA_API_KEY_ID") and os.getenv("APCA_API_SECRET_KEY")
-    )
+    have_keys = bool(os.getenv("APCA_API_KEY_ID") and os.getenv("APCA_API_SECRET_KEY"))
     # 非 silent 診断: 次の host run が「なぜ生成できた/できない」を即判別できる。
     # 秘密値は出さない (パスとキー有無のみ)。
     print(

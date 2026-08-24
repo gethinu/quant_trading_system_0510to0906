@@ -41,8 +41,8 @@ def test_dsr_deflates_with_more_trials():
     rng = np.random.default_rng(3)
     r = rng.normal(0.0008, 0.01, 1000)  # modest positive drift
     d1 = D.deflated_sharpe_ratio(r, 1)
-    d50 = D.deflated_sharpe_ratio(r, 50, sr_variance=0.1 ** 2)
-    d1000 = D.deflated_sharpe_ratio(r, 1000, sr_variance=0.1 ** 2)
+    d50 = D.deflated_sharpe_ratio(r, 50, sr_variance=0.1**2)
+    d1000 = D.deflated_sharpe_ratio(r, 1000, sr_variance=0.1**2)
     assert d1.deflated_sharpe >= d50.deflated_sharpe >= d1000.deflated_sharpe
     assert d1.n_trials == 1 and d1000.n_trials == 1000
 
@@ -50,7 +50,7 @@ def test_dsr_deflates_with_more_trials():
 def test_dsr_pure_noise_not_significant():
     rng = np.random.default_rng(7)
     r = rng.normal(0.0, 0.01, 800)  # zero-mean noise
-    d = D.deflated_sharpe_ratio(r, 100, sr_variance=0.1 ** 2)
+    d = D.deflated_sharpe_ratio(r, 100, sr_variance=0.1**2)
     assert not d.passed
     assert d.deflated_sharpe < 0.95
 

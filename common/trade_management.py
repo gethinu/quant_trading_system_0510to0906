@@ -450,11 +450,11 @@ class TradeManager:
             max_exit_date = None
             if rules.max_holding_days > 0:
                 # signal_date は datetime / pd.Timestamp / date のいずれも来うる。
-                _sd = signal_date.date() if hasattr(signal_date, "date") else signal_date
-                _exit_day = add_trading_days(_sd, int(rules.max_holding_days))
-                max_exit_date = datetime(
-                    _exit_day.year, _exit_day.month, _exit_day.day
+                _sd = (
+                    signal_date.date() if hasattr(signal_date, "date") else signal_date
                 )
+                _exit_day = add_trading_days(_sd, int(rules.max_holding_days))
+                max_exit_date = datetime(_exit_day.year, _exit_day.month, _exit_day.day)
 
             # Create entry record
             entry = TradeEntry(

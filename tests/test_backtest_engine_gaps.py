@@ -30,10 +30,7 @@ from common.candidate_schema import (
     normalize_candidates_for_date,
     resolve_entry_bar,
 )
-from common.integrated_backtest import (
-    SystemState,
-    run_integrated_backtest,
-)
+from common.integrated_backtest import SystemState, run_integrated_backtest
 from common.system_common import normalize_ohlc_frame
 
 CAPITAL = 100_000.0

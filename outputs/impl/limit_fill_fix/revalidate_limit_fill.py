@@ -43,7 +43,9 @@ import warnings
 warnings.filterwarnings("ignore")
 logging.getLogger("streamlit").setLevel(logging.ERROR)
 
-_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), *[".."] * 3))
+_ROOT = os.path.abspath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), *[".."] * 3)
+)
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
@@ -164,7 +166,9 @@ def trade_stats(trades, capital=None):
         "total_pnl": round(float(pnl.sum()), 2),
     }
     if "entry_price" in trades.columns and "shares" in trades.columns:
-        cost = trades["entry_price"].astype(float).abs() * trades["shares"].astype(float)
+        cost = trades["entry_price"].astype(float).abs() * trades["shares"].astype(
+            float
+        )
         r = np.where(cost > 0, pnl / cost.replace(0, np.nan), np.nan)
         r = r[~np.isnan(r)]
         if r.size:

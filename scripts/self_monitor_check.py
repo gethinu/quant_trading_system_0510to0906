@@ -283,9 +283,7 @@ def check_publish(
         "dashboard_data_date": dash_date,
     }
     if not committed_iso:
-        return CheckResult(
-            "publish", "warn", f"{ref} の commit を取得できない", data
-        )
+        return CheckResult("publish", "warn", f"{ref} の commit を取得できない", data)
     try:
         ct = datetime.fromisoformat(committed_iso)
         age = (datetime.now(tz=ct.tzinfo) - ct).total_seconds() / 3600.0

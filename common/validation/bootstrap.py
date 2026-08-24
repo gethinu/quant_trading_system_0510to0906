@@ -11,7 +11,7 @@ Pure numpy; deterministic given a seed.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 
 import numpy as np
 
@@ -25,9 +25,7 @@ def optimal_block_length(n: int) -> int:
     return max(1, int(round(n ** (1.0 / 3.0))))
 
 
-def _moving_block_indices(
-    n: int, block: int, rng: np.random.Generator
-) -> np.ndarray:
+def _moving_block_indices(n: int, block: int, rng: np.random.Generator) -> np.ndarray:
     """Indices for one moving-block resample of length ~n (circular blocks)."""
     if n <= 0:
         return np.empty(0, dtype=int)
@@ -47,7 +45,7 @@ class BootstrapResult:
     ci_low: float
     ci_high: float
     ci_level: float
-    p_value_le_zero: float   # P(bootstrapped statistic <= 0)
+    p_value_le_zero: float  # P(bootstrapped statistic <= 0)
     n_boot: int
     block_length: int
     n_obs: int
@@ -83,7 +81,9 @@ def moving_block_bootstrap(
         stat_fn = lambda x: float(np.mean(x)) if x.size else 0.0  # noqa: E731
     elif statistic == "total_return":
         name = "total_return"
-        stat_fn = lambda x: float(np.prod(1.0 + x) - 1.0) if x.size else 0.0  # noqa: E731
+        stat_fn = lambda x: (  # noqa: E731
+            float(np.prod(1.0 + x) - 1.0) if x.size else 0.0
+        )
     elif callable(statistic):
         name = getattr(statistic, "__name__", "custom")
         stat_fn = statistic
@@ -95,9 +95,17 @@ def moving_block_bootstrap(
 
     if n < 2:
         return BootstrapResult(
-            statistic=name, point_estimate=point, mean=point, std=0.0,
-            ci_low=point, ci_high=point, ci_level=ci_level,
-            p_value_le_zero=float("nan"), n_boot=0, block_length=block, n_obs=n,
+            statistic=name,
+            point_estimate=point,
+            mean=point,
+            std=0.0,
+            ci_low=point,
+            ci_high=point,
+            ci_level=ci_level,
+            p_value_le_zero=float("nan"),
+            n_boot=0,
+            block_length=block,
+            n_obs=n,
         )
 
     rng = np.random.default_rng(seed)

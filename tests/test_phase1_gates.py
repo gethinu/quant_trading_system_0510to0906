@@ -63,26 +63,35 @@ def test_snapshot_freshness_bounds():
 
 # --- (a) file monotonic -----------------------------------------------------
 def test_file_monotonic_first_and_regression():
-    assert not check_file_monotonic(None, 5, ENFORCE).violated       # 初回
-    assert not check_file_monotonic(5, 5, ENFORCE).violated          # 据え置き
-    assert not check_file_monotonic(5, 7, ENFORCE).violated          # 増加
-    assert check_file_monotonic(7, 4, ENFORCE).violated              # 後退 = 違反
+    assert not check_file_monotonic(None, 5, ENFORCE).violated  # 初回
+    assert not check_file_monotonic(5, 5, ENFORCE).violated  # 据え置き
+    assert not check_file_monotonic(5, 7, ENFORCE).violated  # 増加
+    assert check_file_monotonic(7, 4, ENFORCE).violated  # 後退 = 違反
 
 
 # --- (b) verify alpaca_snapshot --------------------------------------------
 def test_verify_snapshot_ok():
-    snap = {"as_of": "2026-08-06", "account_equity": 10120,
-            "positions": [{"symbol": "SPY"}]}
+    snap = {
+        "as_of": "2026-08-06",
+        "account_equity": 10120,
+        "positions": [{"symbol": "SPY"}],
+    }
     r = verify_alpaca_snapshot(snap, "20260806", ENFORCE)
     assert not r.violated and r.ok
 
 
-@pytest.mark.parametrize("snap,why", [
-    (None, "missing"),
-    ({"as_of": "2026-08-06", "positions": []}, "missing account_equity key"),
-    ({"as_of": "2026-08-05", "account_equity": 1, "positions": []}, "stale as_of"),
-    ({"as_of": "2026-08-06", "account_equity": 1, "positions": "nope"}, "positions not list"),
-])
+@pytest.mark.parametrize(
+    "snap,why",
+    [
+        (None, "missing"),
+        ({"as_of": "2026-08-06", "positions": []}, "missing account_equity key"),
+        ({"as_of": "2026-08-05", "account_equity": 1, "positions": []}, "stale as_of"),
+        (
+            {"as_of": "2026-08-06", "account_equity": 1, "positions": "nope"},
+            "positions not list",
+        ),
+    ],
+)
 def test_verify_snapshot_rejects(snap, why):
     r = verify_alpaca_snapshot(snap, "20260806", ENFORCE)
     assert r.violated, why
@@ -99,7 +108,9 @@ def _run_pipeline(universe, min_price, want_setup):
 
 def test_pipeline_it_funnel_is_monotonic():
     universe = [{"symbol": f"S{i}", "price": i} for i in range(1, 21)]  # 20 銘柄
-    rolling, filtered, setup = _run_pipeline(universe, min_price=10, want_setup={"S15", "S18"})
+    rolling, filtered, setup = _run_pipeline(
+        universe, min_price=10, want_setup={"S15", "S18"}
+    )
     assert rolling == 20 and filtered == 11 and setup == 2
     r = check_funnel_monotonic(rolling, filtered, setup, ENFORCE)
     assert not r.violated and r.ok
@@ -115,8 +126,8 @@ def test_pipeline_it_detects_broken_funnel():
 def test_warn_mode_records_but_does_not_block():
     p = {"exit_submitted": 14, "exit_close": 5, "exit_protect": 25}
     r = check_measurement_invariant(p, WARN)
-    assert r.violated is True          # 事実は保持
-    assert r.ok is True                # だが執行は止めない
+    assert r.violated is True  # 事実は保持
+    assert r.ok is True  # だが執行は止めない
     assert r.is_warn and not r.is_blocking
 
 
@@ -128,20 +139,22 @@ def test_off_mode_does_not_evaluate():
 
 def test_staged_rollout_per_gate():
     # measurement だけ ENFORCE、他は WARN に個別昇格できる
-    cfg = GateConfig(default=GateMode.WARN,
-                     modes={"measurement_invariant": GateMode.ENFORCE})
+    cfg = GateConfig(
+        default=GateMode.WARN, modes={"measurement_invariant": GateMode.ENFORCE}
+    )
     bad = {"exit_submitted": 14, "exit_close": 5, "exit_protect": 25}
     m = check_measurement_invariant(bad, cfg)
     s = check_served_today("20260731", "20260806", cfg)
-    assert m.is_blocking          # 昇格済 → ブロック
-    assert s.is_warn              # 既定 WARN → 握り潰し (まだ)
+    assert m.is_blocking  # 昇格済 → ブロック
+    assert s.is_warn  # 既定 WARN → 握り潰し (まだ)
 
 
 # --- fail-closed 集約 + (d) silent-WARN 監視 --------------------------------
 def test_report_ok_blocks_on_any_enforce_violation():
     good = check_served_today("20260806", "20260806", ENFORCE)
     bad = check_measurement_invariant(
-        {"exit_submitted": 14, "exit_close": 5, "exit_protect": 25}, ENFORCE)
+        {"exit_submitted": 14, "exit_close": 5, "exit_protect": 25}, ENFORCE
+    )
     rep = evaluate_gates([good, bad])
     assert rep.ok is False
     assert len(rep.blocking) == 1
@@ -152,21 +165,23 @@ def test_report_ok_blocks_on_any_enforce_violation():
 def test_report_surfaces_silent_warnings_for_monitoring():
     # (d) WARN で握り潰された違反も report.warnings で必ず可視化される
     bad = check_measurement_invariant(
-        {"exit_submitted": 14, "exit_close": 5, "exit_protect": 25}, WARN)
+        {"exit_submitted": 14, "exit_close": 5, "exit_protect": 25}, WARN
+    )
     rep = evaluate_gates([bad])
-    assert rep.ok is True                 # 執行は続く
-    assert len(rep.warnings) == 1         # が silent にはならない
+    assert rep.ok is True  # 執行は続く
+    assert len(rep.warnings) == 1  # が silent にはならない
     assert "measurement_invariant" in rep.summary()
-    raise_if_blocked(rep)                 # WARN のみ → 投げない
+    raise_if_blocked(rep)  # WARN のみ → 投げない
 
 
 def test_report_summary_tags_each_gate():
     results = [
-        check_served_today("20260806", "20260806", ENFORCE),      # OK
-        check_measurement_invariant({"exit_submitted": 1, "exit_close": 1,
-                                     "exit_protect": 0}, ENFORCE),  # OK
-        check_file_monotonic(7, 4, ENFORCE),                       # BLOCK
-        check_snapshot_freshness(0.0, 10_000.0, 300, WARN),        # WARN
+        check_served_today("20260806", "20260806", ENFORCE),  # OK
+        check_measurement_invariant(
+            {"exit_submitted": 1, "exit_close": 1, "exit_protect": 0}, ENFORCE
+        ),  # OK
+        check_file_monotonic(7, 4, ENFORCE),  # BLOCK
+        check_snapshot_freshness(0.0, 10_000.0, 300, WARN),  # WARN
     ]
     summary = evaluate_gates(results).summary()
     assert "[OK]" in summary and "[BLOCK]" in summary and "[WARN]" in summary

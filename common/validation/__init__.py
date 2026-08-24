@@ -30,11 +30,11 @@ Design rules (see docs/methodology_upgrade):
 from __future__ import annotations
 
 from common.validation.flags import (
-    validation_enabled,
-    cpcv_enabled,
     bootstrap_enabled,
+    cpcv_enabled,
     dsr_enabled,
     survivorship_guard_mode,
+    validation_enabled,
 )
 
 __all__ = [
