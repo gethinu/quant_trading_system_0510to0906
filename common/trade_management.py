@@ -15,12 +15,14 @@ all 7 trading systems with their specific rule sets.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 from enum import Enum
 import logging
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
+
+from common.trading_days import add_trading_days
 
 logger = logging.getLogger(__name__)
 
@@ -439,10 +441,20 @@ class TradeManager:
             # Calculate position value
             position_value = shares * abs(entry_price)
 
-            # Calculate maximum exit date for time-based management
+            # Calculate maximum exit date for time-based management.
+            # max_holding_days は **立会日** ベースの spec (bar 単位で回る
+            # strategies/system{N}_strategy.py compute_exit と同じ単位) なので、
+            # 暦日を足すと週末・祝日ぶん早い日付になる。live 側の
+            # common/alpaca_trading.compute_holding_days と同じ
+            # common/trading_days を使い、単位を 1 つに揃える (2026-08-22)。
             max_exit_date = None
             if rules.max_holding_days > 0:
-                max_exit_date = signal_date + timedelta(days=rules.max_holding_days)
+                # signal_date は datetime / pd.Timestamp / date のいずれも来うる。
+                _sd = (
+                    signal_date.date() if hasattr(signal_date, "date") else signal_date
+                )
+                _exit_day = add_trading_days(_sd, int(rules.max_holding_days))
+                max_exit_date = datetime(_exit_day.year, _exit_day.month, _exit_day.day)
 
             # Create entry record
             entry = TradeEntry(

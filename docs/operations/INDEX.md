@@ -38,6 +38,14 @@
 - **生成**: `scripts/run_all_systems_today.py` 実行時
 - **用途**: フィルター通過数と候補数の日次監視
 
+## 📌 保留タスク (ユーザー判断待ち)
+
+### [朝の口座 read-only 再計測パス](../tasks/2026-08-20_morning_account_remeasure.md)
+
+- `26385b0` 以降、`exit_ledger` / `alpaca_snapshot` の更新は 22:35 の `open_auto_run` 1 系統のみ
+- 夜間 run が落ちた日は口座計測がまる 1 日凍る (朝の catch-up が無い)
+- 2026-08-20 parked。着手前に「ユーザーへのオープンな問い」を確認すること
+
 ## 🔗 関連リンク
 
 - [システム概要](../systems/) - 各システム仕様

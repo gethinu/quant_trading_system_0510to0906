@@ -26,7 +26,7 @@ import json
 
 import pytest
 
-from common.publishers.ntfy import NtfyPublisher, _mask_topic
+from common.publishers.ntfy import NtfyPublisher, _latin1_safe_headers, _mask_topic
 
 SECRET_TOPIC = "super-secret-abcdef1234567890"
 
@@ -112,3 +112,101 @@ def test_publish_result_dry_run_with_no_topic_is_marked_dry_run() -> None:
     # Still no accidental leak of an empty-string-looking topic in detail.
     dumped = json.dumps(result.as_dict())
     assert '://ntfy.sh/"' not in dumped  # rough sanity — no bare endpoint
+
+
+def test_latin1_guard_keeps_transport_alive_for_emoji_title(monkeypatch) -> None:
+    captured: dict = {}
+
+    class Response:
+        status_code = 202
+        text = "accepted"
+
+    def fake_post(url, *, data, headers, timeout):
+        for value in headers.values():
+            value.encode("latin-1")
+        captured.update(
+            {"url": url, "data": data, "headers": headers, "timeout": timeout}
+        )
+        return Response()
+
+    monkeypatch.setattr("requests.post", fake_post)
+    pub = NtfyPublisher(topic=SECRET_TOPIC)
+    result = pub.send_text("⚠️ 08-13 execution summary", "日本語本文")
+
+    assert result.ok is True
+    assert result.detail == "accepted"
+    assert captured["headers"]["X-Title"] == "08-13 execution summary"
+    assert SECRET_TOPIC not in result.target
+
+
+def test_latin1_guard_is_noop_for_valid_headers() -> None:
+    headers = {"X-Title": "Execution 12", "X-Priority": "4"}
+    assert _latin1_safe_headers(headers) == headers
+
+
+def test_dry_run_url_parse_failure_fails_closed(monkeypatch) -> None:
+    import urllib.parse
+
+    def broken_urlsplit(_endpoint):
+        raise ValueError("bad url")
+
+    monkeypatch.setattr(urllib.parse, "urlsplit", broken_urlsplit)
+    result = NtfyPublisher(topic=SECRET_TOPIC).send(_sample_payload(), dry_run=True)
+    assert SECRET_TOPIC not in result.detail
+    assert json.loads(result.detail)["endpoint"] == "<invalid-endpoint>"
+
+
+def test_nonretryable_response_does_not_leak_provider_body(monkeypatch, caplog) -> None:
+    class Response:
+        status_code = 403
+        text = f"denied endpoint=https://ntfy.sh/{SECRET_TOPIC}"
+
+    monkeypatch.setattr("requests.post", lambda *_args, **_kwargs: Response())
+
+    result = NtfyPublisher(topic=SECRET_TOPIC).send_text("summary", "body")
+
+    dumped = json.dumps(result.as_dict()) + caplog.text
+    assert result.ok is False
+    assert result.detail == "http_403"
+    assert SECRET_TOPIC not in dumped
+    assert Response.text not in dumped
+
+
+def test_retryable_final_attempt_has_no_sleep_or_secret_leak(
+    monkeypatch, caplog
+) -> None:
+    class Response:
+        status_code = 503
+        text = f"retry endpoint=https://ntfy.sh/{SECRET_TOPIC}"
+
+    sleeps: list[int] = []
+    monkeypatch.setattr("requests.post", lambda *_args, **_kwargs: Response())
+    monkeypatch.setattr("common.publishers.ntfy.time.sleep", sleeps.append)
+
+    result = NtfyPublisher(topic=SECRET_TOPIC).send_text("summary", "body")
+
+    dumped = json.dumps(result.as_dict()) + caplog.text
+    assert result.ok is False
+    assert result.detail == "retryable_503"
+    assert sleeps == [1, 2, 4]
+    assert SECRET_TOPIC not in dumped
+    assert Response.text not in dumped
+
+
+def test_transport_exception_does_not_leak_topic_and_skips_final_sleep(
+    monkeypatch, caplog
+) -> None:
+    def fake_post(*_args, **_kwargs):
+        raise RuntimeError(f"request failed at https://ntfy.sh/{SECRET_TOPIC}")
+
+    sleeps: list[int] = []
+    monkeypatch.setattr("requests.post", fake_post)
+    monkeypatch.setattr("common.publishers.ntfy.time.sleep", sleeps.append)
+
+    result = NtfyPublisher(topic=SECRET_TOPIC).send_text("summary", "body")
+
+    dumped = json.dumps(result.as_dict()) + caplog.text
+    assert result.ok is False
+    assert result.detail == "exception:RuntimeError"
+    assert sleeps == [1, 2, 4]
+    assert SECRET_TOPIC not in dumped

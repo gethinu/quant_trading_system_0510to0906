@@ -18,24 +18,22 @@ from __future__ import annotations
 
 from typing import Any
 
-# 既知の終端 status。Alpaca は status を追加し得るため、ここは working の
-# allowlist ではなく terminal の denylist にする。未知値を終端扱いすると、実際に
-# broker の観測を続けるべき注文を「settled」と誤認するためである。
+# 既知の終端 status。未知 status を終端扱いすると broker 観測を早期終了して
+# settled と誤認するため、is_working はこの denylist だけを停止条件にする。
 TERMINAL_ORDER_STATUSES = frozenset(
     {
         "filled",
         "done_for_day",
         "canceled",
-        "cancelled",  # legacy artifacts / broker spelling variation
+        "cancelled",  # legacy artifact / broker spelling variation
         "expired",
         "replaced",
         "rejected",
     }
 )
 
-# 現在 Alpaca が返し得る non-terminal status。公開定数として残すのは呼び出し側の
-# 可読性のためで、is_working の判定には使わない。例えば stopped / suspended や
-# 将来追加される未知 status は、明示的な終端確認が取れるまで poll を継続する。
+# 現在知られている non-terminal status。公開定数として残すが、判定自体は
+# terminal denylist を使う。stopped / suspended / 将来の未知値も観測を継続する。
 WORKING_ORDER_STATUSES = frozenset(
     {
         "new",
@@ -78,11 +76,7 @@ def normalize_order_status(raw: Any) -> str:
 
 
 def is_working(raw: Any) -> bool:
-    """まだ終端していない (再 poll する価値がある) か。
-
-    known-terminal だけを停止条件にし、未知 status は observability を優先して
-    working とする。これは発注を増やさず、poll の誤早期終了だけを防ぐ。
-    """
+    """known-terminal でなければ、まだ再 poll する価値があるとみなす。"""
     status = normalize_order_status(raw)
     return status not in TERMINAL_ORDER_STATUSES
 

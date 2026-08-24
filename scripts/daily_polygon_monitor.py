@@ -521,7 +521,7 @@ def build_pipeline_report(
             "final_signals": _fnl(sysname, "Entry"),
         }
 
-    return {
+    report = {
         "date": target_date,
         "provider": "polygon_grouped_daily",
         "schema": "signal_pipeline/v1",
@@ -533,6 +533,31 @@ def build_pipeline_report(
             "ratio_of_prev = count / previous phase; ratio_of_universe = count / Tgt.",
         ],
     }
+
+    # --- Exit phase の配線 (未計測を消す) ------------------------------------
+    # Exit (本日手仕舞い発火) は exit 執行 *後* にしか確定しないため、この
+    # build 時点 (Step3) では通常まだ recon が無く count=null (未計測) になる。
+    # 同日の recon_YYYYMMDD.json が既にあれば (再実行時など) ここで opportunistic に
+    # 埋める。first-run では Step5d の publish_execution_summary が同じ recon から
+    # 上書きするので、いずれの経路でも ntfy と同一 source に揃う。
+    if signals_dir is not None:
+        try:
+            from scripts.build_execution_recon import patch_pipeline_exit
+
+            recon_path = signals_dir / f"recon_{target_date.replace('-', '')}.json"
+            if recon_path.exists():
+                recon = json.loads(recon_path.read_text(encoding="utf-8"))
+                _, n_filled, status = patch_pipeline_exit(report, recon)
+                logger.info(
+                    "pipeline Exit 配線 (build-time, recon=%s): filled=%d status=%s",
+                    recon_path.name,
+                    n_filled,
+                    status,
+                )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("pipeline Exit 配線 (build-time) 失敗 (無視): %s", exc)
+
+    return report
 
 
 def compute_delta(current: CoverageReport, previous_path: Path | None) -> None:

@@ -23,7 +23,9 @@
     3. [publish]   Vercel publish が成功したか。monitor-webapp ブランチに当日 commit があるか
                    (git log)。古ければ dashboard 固着の疑い → CRIT。
     4. [open_run]  オープン自動発注 run が走り entry が fill したか。
-                   最新 logs/open_run_<date>/completion_recon.json + paper_orders_*.json。
+                   最新 logs/open_run_<YYYYMMDD>/completion_recon.json + paper_orders_*.json。
+                   one-shot ツールが残す `_<suffix>` 付き sidecar dir は **除外** する
+                   (canonical 名だけが nightly。詳細は _latest_open_run_dir)。
                    abort(market_closed) は良性、それ以外の abort / entry 0 は WARN。
 
 Exit codes: 0=全 OK, 2=WARN あり, 3=CRIT あり。
@@ -191,15 +193,70 @@ def check_signals(results_dir: Path, min_signals: int) -> CheckResult:
     )
 
 
+# publish_data_to_vercel.ps1 は `git commit-tree` で **origin tip** に commit を作り
+# `<sha>:refs/heads/<branch>` へ直接 push する。local の working tree / branch ref は
+# 意図的に一切触らない (2026-07-30 の root-cause fix)。よって local branch の commit
+# 時刻を publish の鮮度とみなすと、publish が正常でも age が伸び続けて **毎日** CRIT
+# になる (2026-08-19: origin は当日 08:00 に配信済みなのに「151.1h 前」と誤報した)。
+# publish 自身の verify と同じ origin ref を基準にする。
+_PUBLISH_REMOTE = "origin"
+
+
+def _resolve_publish_ref(repo_root: Path, branch: str) -> tuple[str, str]:
+    """(判定に使う ref, basis) を返す。origin が引けなければ local へ安全に退避。"""
+    remote_ref = f"{_PUBLISH_REMOTE}/{branch}"
+    subprocess.run(
+        ["git", "-C", str(repo_root), "fetch", "--quiet", _PUBLISH_REMOTE, branch],
+        capture_output=True,
+        text=True,
+    )
+    probe = subprocess.run(
+        ["git", "-C", str(repo_root), "rev-parse", "--verify", "--quiet", remote_ref],
+        capture_output=True,
+        text=True,
+    )
+    if probe.returncode == 0 and probe.stdout.strip():
+        return remote_ref, "origin"
+    return branch, "local-fallback"
+
+
+def _dashboard_date_from_ref(repo_root: Path, ref: str) -> int | None:
+    """ref に **コミット済** の data/ から最新 today_signals 日付を読む。"""
+    rel = "apps/dashboards/alpaca-next/data"
+    proc = subprocess.run(
+        ["git", "-C", str(repo_root), "ls-tree", "--name-only", ref, rel + "/"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if proc.returncode != 0:
+        return None
+    prefix, suffix = "today_signals_", ".json"
+    best: int | None = None
+    for line in proc.stdout.splitlines():
+        name = line.strip().rsplit("/", 1)[-1]
+        if not name.startswith(prefix) or not name.endswith(suffix):
+            continue
+        digits = name[len(prefix) : -len(suffix)]
+        if len(digits) != 8 or not digits.isdigit():
+            continue
+        n = int(digits)
+        if best is None or n > best:
+            best = n
+    return best
+
+
 def check_publish(
     repo_root: Path, branch: str, max_age_hours: float, data_dir: Path
 ) -> CheckResult:
     """monitor-webapp ブランチの最新 commit 時刻で Vercel publish の当日実行を判定。"""
     committed_iso: str | None = None
     subject: str | None = None
+    ref, basis = _resolve_publish_ref(repo_root, branch)
     try:
         proc = subprocess.run(
-            ["git", "-C", str(repo_root), "log", "-1", "--format=%cI\x1f%s", branch],
+            ["git", "-C", str(repo_root), "log", "-1", "--format=%cI\x1f%s", ref],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -212,18 +269,21 @@ def check_publish(
             "publish", "warn", f"git log 取得失敗: {exc}", {"branch": branch}
         )
 
-    # 副: dashboard data dir の最新ファイル日付も参考に
-    dash_path, dash_date = _latest_dated_json(data_dir, "today_signals")
+    # 副: 配信済み data/ の最新日付も参考に。ローカルの data/ は publish が触らないので
+    # ref から読む (読めなければ従来どおりローカルを見る)。
+    dash_date = _dashboard_date_from_ref(repo_root, ref)
+    if dash_date is None:
+        _, dash_date = _latest_dated_json(data_dir, "today_signals")
     data = {
         "branch": branch,
+        "ref": ref,
+        "basis": basis,
         "last_commit_iso": committed_iso,
         "last_commit_subject": subject,
         "dashboard_data_date": dash_date,
     }
     if not committed_iso:
-        return CheckResult(
-            "publish", "warn", f"{branch} の commit を取得できない", data
-        )
+        return CheckResult("publish", "warn", f"{ref} の commit を取得できない", data)
     try:
         ct = datetime.fromisoformat(committed_iso)
         age = (datetime.now(tz=ct.tzinfo) - ct).total_seconds() / 3600.0
@@ -236,24 +296,51 @@ def check_publish(
         return CheckResult(
             "publish",
             "crit",
-            f"{branch} 最新 commit が {age:.1f}h 前 (> {max_age_hours:.0f}h): "
+            f"{ref} 最新 commit が {age:.1f}h 前 (> {max_age_hours:.0f}h): "
             "Vercel publish 停止/ダッシュ固着の疑い",
             data,
         )
     return CheckResult(
-        "publish", "ok", f"{branch} を {age:.1f}h 前に更新 ('{subject}')", data
+        "publish", "ok", f"{ref} を {age:.1f}h 前に更新 ('{subject}')", data
     )
+
+
+# nightly のオープン自動発注は成果物を必ず `logs/open_run_<YYYYMMDD>` (8 桁ちょうど)
+# へ書く (scripts/open_auto_run.py の Runner.out)。一方 one-shot の手動ツールは同じ日の
+# 成果物を別けて残すため `open_run_<YYYYMMDD>_<suffix>` という **sidecar** を作る
+# (例: oneshot_flatten_20260820.ps1 の `open_run_${Compact}_oneshot_flatten`)。
+# 名前順 sorted() だと suffix 付きが canonical の **後ろ** に並ぶので sidecar を掴んで
+# しまう。2026-08-20 はそれで本番 run (entry_submitted=47) が sidecar の
+# entry_submitted=0 / skipped_thin_signals に隠され、「実 run だが entry_submitted=0」と
+# 偽陰性 WARN を出した。mtime 順も sidecar が nightly より後に走れば同じ罠を踏むので、
+# このチェックが見たい nightly = canonical 名のものだけを対象にする。
+_CANONICAL_OPEN_RUN_RE = re.compile(r"^open_run_(\d{8})$")
+
+
+def _latest_open_run_dir(logs_dir: Path) -> Path | None:
+    """nightly の canonical `open_run_<YYYYMMDD>` のうち最新日を返す (sidecar は除外)。
+
+    日付はゼロ埋め 8 桁なので辞書順 == 時系列順。該当が無ければ None。
+    """
+    canonical = [
+        d
+        for d in logs_dir.glob("open_run_*")
+        if _CANONICAL_OPEN_RUN_RE.match(d.name) and d.is_dir()
+    ]
+    if not canonical:
+        return None
+    return max(canonical, key=lambda d: d.name)
 
 
 def check_open_run(
     logs_dir: Path, results_dir: Path, max_age_hours: float
 ) -> CheckResult:
     """最新 open_run_<date> の completion_recon で自動発注 run の実行/約定を判定。"""
-    dirs = sorted(logs_dir.glob("open_run_*"), reverse=True)
-    dirs = [d for d in dirs if d.is_dir()]
-    if not dirs:
-        return CheckResult("open_run", "info", "open_run_* ディレクトリがまだ無い")
-    newest = dirs[0]
+    newest = _latest_open_run_dir(logs_dir)
+    if newest is None:
+        return CheckResult(
+            "open_run", "info", "open_run_<YYYYMMDD> ディレクトリがまだ無い"
+        )
     recon = _load_json(newest / "completion_recon.json") or {}
     done = (newest / "DONE.lock").exists()
     age = _mtime_age_hours(newest / "completion_recon.json") or _mtime_age_hours(newest)

@@ -18,6 +18,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 
+from common.backtest_context import backtest_context as _backtest_context
 from common.cache_format import round_dataframe
 from common.utils import get_cached_data, safe_filename
 from config.settings import get_settings
@@ -269,6 +270,36 @@ def fetch_data(
 
 
 def prepare_backtest_data(
+    strategy,
+    symbols,
+    system_name: str = "SystemX",
+    spy_df: pd.DataFrame | None = None,
+    ui_manager=None,
+    use_process_pool: bool = False,
+    enable_debug_logs: bool = True,
+    fast_mode: bool = False,
+    **kwargs,
+):
+    """バックテスト用のデータ準備＋候補抽出。
+
+    backtest コンテキストを張るので、today 実行専用の高速パス（System6 の
+    latest_only 強制など）はここでは効かない。live はこの関数を通らない。
+    """
+    with _backtest_context():
+        return _prepare_backtest_data(
+            strategy,
+            symbols,
+            system_name=system_name,
+            spy_df=spy_df,
+            ui_manager=ui_manager,
+            use_process_pool=use_process_pool,
+            enable_debug_logs=enable_debug_logs,
+            fast_mode=fast_mode,
+            **kwargs,
+        )
+
+
+def _prepare_backtest_data(
     strategy,
     symbols,
     system_name: str = "SystemX",

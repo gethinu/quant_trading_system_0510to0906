@@ -388,9 +388,17 @@ def generate_candidates_system6(
     # 条件:
     #   - 呼び出しで latest_only=False でも、環境変数 system6_force_latest_only が True
     #   - env.full_scan_today が False （明示 full 走査要求がない）
+    #   - backtest コンテキスト外（バックテスト/検証は履歴が必要なので強制しない）
     #   - include_diagnostics は影響なし（fast path も診断返却対応済み）
+    #
+    # 2026-08-21: backtest コンテキスト判定を追加。従来は today 実行と
+    # バックテストを区別できず、SYSTEM6_FORCE_LATEST_ONLY の既定 True が
+    # バックテストでも System6 を最新 1 日へ潰していた（履歴が作れない）。
+    # live は common.backtest_context に入らないので判定は常に False になり、
+    # 強制 latest_only の挙動は従来どおり。
     try:  # 環境依存のため失敗しても安全に継続
         # 遅延インポートで初期化コスト最小化
+        from common.backtest_context import in_backtest_context
         from config.environment import get_env_config
 
         env = get_env_config()
@@ -404,6 +412,7 @@ def generate_candidates_system6(
             and getattr(env, "system6_force_latest_only", False)
             and not getattr(env, "full_scan_today", False)
             and not running_pytest
+            and not in_backtest_context()
         ):
             latest_only = True  # 強制切替
             if logger:

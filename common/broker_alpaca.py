@@ -3,11 +3,13 @@ from __future__ import annotations
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
 import os
+from pathlib import Path
+import sys
 import time
 from typing import Any
 import uuid
 
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 
 # F2 P0#8 audit fix (2026-07-03):
 # ``submit_order_with_retry`` は以前、client_order_id 未指定でも retry を
@@ -107,9 +109,63 @@ def _require_sdk() -> None:
         )
 
 
+_ENV_LOADED = False
+
+
 def _load_env_once() -> None:
-    # 設定側で読み込み済みでも harm はない
-    load_dotenv(dotenv_path=os.path.join(os.getcwd(), ".env"), override=False)
+    """`.env` から Alpaca キーを読み込む (read-only・発注には一切触れない)。
+
+    2026-08-04 fix (human #9): 旧実装は ``load_dotenv(os.getcwd()/.env)`` と
+    **CWD 相対**で .env を探していた。.env は .gitignore 済で各 worktree には
+    存在しないため、publish の RefreshAccount / daily_pipeline が「.env を持たない
+    CWD」からこの関数を呼ぶと ``APCA_*`` が未ロードのまま ``get_client`` が例外を
+    投げ、生成器 (export_alpaca_snapshot / build_exit_ledger) が exit!=0 →
+    publish が WARN に握り潰し → snapshot/exit_ledger/account が **無言で欠落**
+    していた (silent 失敗)。対策:
+      1. CWD ではなく「確実に .env が在る場所」を優先順で探索する。
+      2. どこから読んだか / キーが在るかを **必ず 1 行 stderr に出す** (silent 禁止)。
+    優先順: ``QTS_DOTENV`` (明示) > このファイルの repo root > CWD 直下 >
+    CWD からの上方探索。
+    """
+    global _ENV_LOADED
+    if _ENV_LOADED:
+        return
+
+    candidates: list[Path] = []
+    override = os.getenv("QTS_DOTENV")
+    if override:
+        candidates.append(Path(override))
+    # このファイルが属する repo root (= どの CWD/worktree から呼ばれても不変)。
+    candidates.append(Path(__file__).resolve().parents[1] / ".env")
+    # 従来挙動 (CWD 直下) を後方互換で維持。
+    candidates.append(Path.cwd() / ".env")
+    # CWD からの上方探索 (サブディレクトリ実行の保険)。
+    found = find_dotenv(usecwd=True)
+    if found:
+        candidates.append(Path(found))
+
+    loaded: Path | None = None
+    seen: set[str] = set()
+    for cand in candidates:
+        key = str(cand)
+        if key in seen:
+            continue
+        seen.add(key)
+        if cand.is_file():
+            # override=False: 先に見つかった .env / 既存 env var を優先。
+            load_dotenv(dotenv_path=str(cand), override=False)
+            if loaded is None:
+                loaded = cand
+
+    have_keys = bool(os.getenv("APCA_API_KEY_ID") and os.getenv("APCA_API_SECRET_KEY"))
+    # 非 silent 診断: 次の host run が「なぜ生成できた/できない」を即判別できる。
+    # 秘密値は出さない (パスとキー有無のみ)。
+    print(
+        f"[broker_alpaca] dotenv={loaded if loaded else 'NONE'} "
+        f"apca_keys={'present' if have_keys else 'MISSING'}",
+        file=sys.stderr,
+    )
+    _ENV_LOADED = True
 
 
 def get_client(
@@ -223,6 +279,10 @@ def submit_order(
             stop_loss=StopLossRequest(
                 stop_price=stop_loss,
             ),  # type: ignore[call-arg]
+            # 2026-08-19: OCO 分岐だけ client_order_id を渡し忘れており、
+            # 再送で冪等 dedup (422 duplicate) が効かず二重発注し得た。
+            # 他の order_type と同じく冪等キーを付ける。
+            **_coid,
         )
     elif order_type == "bracket":
         # BRACKET (OTOCO): entry (market or limit) と同時に take_profit / stop_loss の
@@ -484,6 +544,49 @@ def cancel_open_orders_for_symbols(client, symbols: Iterable[str]) -> dict[str, 
             result["canceled"] += 1
             touched.append(sym)
     result["symbols"] = sorted(set(touched))
+    return result
+
+
+def cancel_open_orders_by_client_order_ids(
+    client, client_order_ids: Iterable[str]
+) -> dict[str, Any]:
+    """指定 client_order_id の未約定注文だけを cancel する (GET -> 個別 cancel by id)。
+
+    ``cancel_open_orders_for_symbols`` の symbol スコープよりさらに狭い。
+    PROTECT_USE_OCO=1 の「単発 stop -> OCO 昇格」で、その建玉の *その stop 1 本* だけを
+    外すために使う。同じ銘柄に載っている他の注文 (ユーザーの手動注文等) には触らない。
+
+    - 個別 cancel の失敗は握り潰し (best-effort)。返り値でカウントを返す。
+    - paper / read-then-cancel。position 自体は触らない。
+    """
+    want = {str(c).strip() for c in client_order_ids if str(c).strip()}
+    result: dict[str, Any] = {"canceled": 0, "coids": [], "want": sorted(want)}
+    if not want:
+        return result
+    try:
+        open_orders = get_open_orders(client)
+    except Exception:
+        return result
+    touched: list[str] = []
+    for o in open_orders or []:
+        coid = str(getattr(o, "client_order_id", "") or "")
+        if coid not in want:
+            continue
+        oid = getattr(o, "id", None)
+        if oid is None:
+            continue
+        for meth in ("cancel_order_by_id", "cancel_order"):
+            fn = getattr(client, meth, None)
+            if fn is None:
+                continue
+            try:
+                fn(oid)
+                result["canceled"] += 1
+                touched.append(coid)
+                break
+            except Exception:
+                continue
+    result["coids"] = sorted(set(touched))
     return result
 
 

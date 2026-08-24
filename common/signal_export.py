@@ -162,10 +162,15 @@ def _row_signal(row: Any, system_key: str) -> dict[str, Any]:
     if reason is not None:
         reason = str(reason)
     score = _to_float(_first(row, "score"))
+    # spec の指値 (例 System2 = 前日終値 x 1.04) が確定している時だけ入る。
+    # None の行は成行のまま = 従来挙動 (common/alpaca_trading.py の
+    # 「limit_price が row に無い場合の runtime fallback は現状維持」に従う)。
+    limit_price = _to_float(_first(row, "limit_price"))
     return {
         "symbol": str(symbol) if symbol is not None else None,
         "side": side,
         "entry_price": entry_price,
+        "limit_price": limit_price,
         "rank": rank,
         "reason": reason,
         "score": score,
@@ -326,6 +331,7 @@ def build_signals_json(
                     "symbol": s["symbol"],
                     "side": s["side"],
                     "entry_price": s["entry_price"],
+                    "limit_price": s.get("limit_price"),
                     "weight": _weight(s),
                     "rank": s["rank"] if s.get("rank") is not None else i,
                     "reason": s["reason"],
@@ -397,6 +403,21 @@ def build_signals_json(
                 if elapsed_seconds is not None
                 else None
             ),
+            # Delivery はこの run_id 固有の状態。夜間の再生成時に朝 run の成功表示を
+            # 引き継がないよう、publish 試行前は構造化 field を not_attempted で
+            # 初期化する (payload は毎回新規 dict なので朝の値は自然に消える)。
+            #
+            # legacy scalar ``publish_status`` は **ここでは書かない**。既存の
+            # dashboard (SignalsSection.tsx) は `publish_status ? ...` の真値判定で
+            # failed/partial 以外を成功色 (bg-ok) に落とすため、"not_attempted" を
+            # 入れると「未試行」が緑の成功として表示される。field 不在なら badge
+            # 自体が出ないので、consumer 更新前でも誤表示にならない。実際に publish
+            # を試行した時だけ publish_signals が両表現を同時に書き戻す。
+            "publish_delivery": {
+                "state": "not_attempted",
+                "attempted_at": None,
+                "channels": {},
+            },
             # F2 P0#6: subscribers が abort と flat book を区別できるよう明示。
             # 既定 "ok" は真の flat book / 正常了、"aborted" は pipeline 側の
             # 停止 (stale cache 等)。abort_reason は運用側 log 収集用。

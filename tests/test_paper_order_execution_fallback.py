@@ -184,6 +184,10 @@ def _signals_json():
                         "symbol": "SHORTX",
                         "side": "sell",
                         "entry_price": 10.0,
+                        # S2 は spec 上 limit (前日終値 +4%)。2026-08-22 以降、
+                        # 指値 system の行に limit_price が無いと skip されるので
+                        # 明示する (このテストが見たいのは execution routing)。
+                        "limit_price": 10.4,
                         "weight": 1.0,
                     },  # short -> qty
                 ]

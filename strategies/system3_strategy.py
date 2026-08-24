@@ -217,7 +217,40 @@ class System3Strategy(AlpacaOrderMixin, StrategyBase):
         stop_price = entry_price - stop_mult * atr
         if entry_price - stop_price <= 0:
             return None
+        # 指値（前日終値×0.93）は当日バーが到達しなければ約定しない。
+        # 到達していない候補は建玉にしない（勝率の過大評価を防ぐ）。
+        if not self._limit_entry_filled(df, entry_idx, entry_price, "long"):
+            return None
         return entry_price, stop_price
+
+    def compute_entry_limit_price(self, prev_close: float) -> float | None:
+        """spec の指値買い価格 = 前日終値 x entry_price_ratio_vs_prev_close。
+
+        docs/systems/システム3.txt「仕掛け」:
+            「前日の終値の7%下に指値注文を入れる。」
+
+        値の出所 (いずれも既存の repo 内 spec。ここで新しい数字は作らない):
+          - ``config/config.yaml`` system3.entry_price_ratio_vs_prev_close: 0.93
+          - ``common/trade_management.py`` system3:
+                entry_type=LIMIT / entry_price_offset_pct=-7.0 /
+                entry_reference="close"  (1 + (-7.0/100) = 0.93)
+          - ``common/alpaca_trading.py`` の docs-alignment コメント:
+                「S3 = 前日終値-7% 指値買 (LIMIT)」
+
+        ``compute_entry`` (バックテスト経路) は entry_date の bar が df にある前提で
+        同じ ratio を掛ける。**翌日の指値を今日出す live 経路には entry_date の bar
+        がまだ無い** ため (``df.index.get_loc`` が失敗して None を返す)、こちらは
+        prev_close だけから spec そのままの指値を返す。丸めは ``compute_entry``
+        と同じ 2 桁。
+        """
+        try:
+            pc = float(prev_close)
+        except (TypeError, ValueError):
+            return None
+        if not (pc > 0):
+            return None
+        ratio = float(self.config.get("entry_price_ratio_vs_prev_close", 0.93))
+        return round(pc * ratio, 2)
 
     def compute_exit(
         self,

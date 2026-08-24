@@ -42,8 +42,13 @@ from typing import Any, Callable, Mapping, Optional, cast
 import pandas as pd
 
 from common.batch_processing import process_symbols_batch
+from common.indicator_access import get_indicator
 from common.system_candidates_utils import set_diagnostics_after_ranking
-from common.system_common import check_precomputed_indicators, get_total_days
+from common.system_common import (
+    check_precomputed_indicators,
+    get_total_days,
+    normalize_ohlc_frame,
+)
 from common.system_constants import REQUIRED_COLUMNS
 from common.system_setup_predicates import (
     system1_setup_predicate,
@@ -62,13 +67,54 @@ MIN_ROC200 = 0.0  # Minimum ROC200 for momentum confirmation
 # ============================================================================
 # Helper Functions
 # ============================================================================
+def _resolve_column(df: pd.DataFrame, name: str) -> pd.Series | None:
+    """Resolve a column by canonical name, tolerating case/alias variation.
+
+    2026-08-21: ``_apply_filter_conditions`` used to read ``df.get("Close")``
+    with a hard-coded capital C. Frames in the ``load_base_cache`` shape carry
+    all-lowercase columns, so ``Close`` came back ``None``, was coerced to 0.0,
+    and ``filter``/``setup`` collapsed to False on every row - silently, for
+    rows whose real Close satisfies the System1 filter.
+
+    The canonical row predicate
+    (``common.system_setup_predicates.system1_setup_predicate``) already reads
+    the very same fields through ``common.indicator_access.get_indicator``.
+    Routing the column path through the same resolver means the column route
+    and the row route can no longer disagree about which column they read.
+
+    ``get_indicator`` prefers the exact/canonical name, so frames that already
+    carry ``Close`` (every live frame does - see
+    ``common/today_data_loader._normalize_ohlcv`` and ``_rename_ohlcv`` below)
+    resolve to byte-identical values.
+    """
+    try:
+        value = get_indicator(df, name)
+    except Exception:
+        value = None
+    if value is not None:
+        return cast(pd.Series, value)
+    # get_indicator short-circuits on a zero-row frame; fall back to a plain
+    # case-insensitive column scan so the column set still resolves there.
+    try:
+        for col in df.columns:
+            if isinstance(col, str) and col.lower() == name.lower():
+                return df[col]
+    except Exception:
+        pass
+    return None
+
+
 def _apply_filter_conditions(df: pd.DataFrame) -> pd.DataFrame:
     """Apply System1 filter: Close>=MIN_PRICE & DollarVolume20>MIN_DOLLAR_VOLUME_20.
+
+    Column names are resolved case-insensitively via ``_resolve_column`` so the
+    same frame yields the same ``filter`` whether its OHLCV columns arrived
+    capitalised (live / rolling cache) or lowercase (``load_base_cache``).
 
     Preserves existing 'filter' column if present for test compatibility.
 
     Args:
-        df: DataFrame with Close and dollarvolume20 columns
+        df: DataFrame with Close (any case) and dollarvolume20 columns
 
     Returns:
         DataFrame with 'filter' boolean column added/updated
@@ -77,7 +123,7 @@ def _apply_filter_conditions(df: pd.DataFrame) -> pd.DataFrame:
 
     # Coerce to numeric to avoid runtime/type issues
     try:
-        _val_close = x.get("Close")
+        _val_close = _resolve_column(x, "Close")
         if _val_close is None:
             _close = pd.Series(0.0, index=x.index)
         else:
@@ -86,7 +132,7 @@ def _apply_filter_conditions(df: pd.DataFrame) -> pd.DataFrame:
         _close = pd.Series(0.0, index=x.index)
 
     try:
-        _val_dv = x.get("dollarvolume20")
+        _val_dv = _resolve_column(x, "dollarvolume20")
         if _val_dv is None:
             _dv = pd.Series(0.0, index=x.index)
         else:
@@ -433,6 +479,55 @@ def _compute_indicators_frame(df: pd.DataFrame) -> pd.DataFrame:
     return x
 
 
+def _resolve_entry_dates_bulk(
+    all_dates: list[pd.Timestamp],
+) -> dict[Any, Any]:
+    """Map every signal date to its next NYSE trading day in one calendar call.
+
+    ``common.utils_spy.resolve_signal_entry_date`` rebuilds an NYSE schedule on
+    every call (~250 ms measured), and the full-scan branch needs one entry date
+    per signal date - a decade of history would spend hours inside the calendar.
+    Building the schedule once and binary-searching it gives the identical
+    answer ("first NYSE session strictly after the signal date") in one shot.
+
+    Backtest-only: the live/today path uses the latest_only branch, which
+    resolves a single date and never reaches here. Falls back to the per-date
+    helper if the bulk path is unavailable.
+    """
+    originals = list(all_dates)
+    if not originals:
+        return {}
+
+    from common.utils_spy import resolve_signal_entry_date
+
+    try:
+        import pandas_market_calendars as mcal
+
+        stamps = pd.DatetimeIndex(pd.to_datetime(originals)).normalize()
+        schedule = mcal.get_calendar("NYSE").schedule(
+            start_date=stamps.min(),
+            end_date=stamps.max() + pd.Timedelta(days=10),
+        )
+        sessions = pd.DatetimeIndex(pd.to_datetime(schedule.index)).normalize()
+        try:
+            sessions = sessions.tz_localize(None)
+        except Exception:
+            pass  # already tz-naive
+        positions = sessions.searchsorted(stamps, side="right")
+        return {
+            original: (sessions[pos] if pos < len(sessions) else pd.NaT)
+            for original, pos in zip(originals, positions)
+        }
+    except Exception:
+        resolved: dict[Any, Any] = {}
+        for original in originals:
+            try:
+                resolved[original] = resolve_signal_entry_date(original)
+            except Exception:
+                resolved[original] = pd.NaT
+        return resolved
+
+
 def _compute_indicators(symbol: str) -> tuple[str, pd.DataFrame | None]:
     """Check precomputed indicators and apply System1-specific filters.
 
@@ -460,11 +555,19 @@ def _compute_indicators(symbol: str) -> tuple[str, pd.DataFrame | None]:
         if "roc200" not in df.columns:
             return symbol, None
 
-        # Apply System1-specific filters and setup using helper functions
-        # for consistency across all systems. If required columns are missing,
-        # helpers set conservative defaults (False) to avoid accidental passes
-        # while still keeping the symbol in prepared data for ranking by roc200.
-        x = df.copy()
+        # Normalize the frame the same way System2-6 receive theirs.
+        #
+        # 2026-08-21: load_base_cache returns an integer index plus all-lowercase
+        # columns. Without this normalization the batch (non fast-path) route
+        # produced frames that (a) had no date index, so every backtest engine's
+        # `df.index.get_loc(entry_date)` missed and System1 booked zero trades,
+        # and (b) had no "Close", so `_apply_filter_conditions` coerced Close to
+        # 0.0 and `filter`/`setup` were False on every row.
+        #
+        # live impact: none. The daily run calls prepare_data with
+        # reuse_indicators=True + latest_only=True (common/today_signals.py) and
+        # returns from the fast path well before this batch route.
+        x = normalize_ohlc_frame(df)
         x = _apply_filter_conditions(x)
         x = _apply_setup_conditions(x)
 
@@ -1472,8 +1575,13 @@ def generate_candidates_system1(
     if log_callback:
         log_callback(f"System1: Generating candidates for {len(all_dates)} dates")
 
+    # entry_date depends only on the signal date, so resolve every one of them up
+    # front instead of rebuilding an NYSE schedule per candidate.
+    entry_date_by_signal_date = _resolve_entry_dates_bulk(all_dates)
+
     for i, date in enumerate(all_dates):
         date_candidates: list[dict] = []
+        entry_dt = entry_date_by_signal_date.get(date)
 
         for symbol, df in prepared_dict.items():
             if df is None or date not in df.index:
@@ -1549,8 +1657,13 @@ def generate_candidates_system1(
 
                 diag["final_pass"] += 1
 
+            # Acceptance mirrors the latest_only (live) branch above, which
+            # takes the setup column when it is True and otherwise falls back to
+            # the canonical predicate. Without the fallback this backtest-only
+            # branch is hostage to the setup column, which is False on every row
+            # whenever the prepared frame lacks an upper-case "Close".
             setup_flag = bool(row.get("setup", False))
-            if not setup_flag:
+            if not setup_flag and not bool(system1_setup_predicate(row)):
                 continue
 
             roc200_val = _to_float(row.get("roc200"))
@@ -1564,11 +1677,7 @@ def generate_candidates_system1(
                 {
                     "symbol": symbol,
                     "date": date,
-                    "entry_date": (
-                        __import__(
-                            "common.utils_spy", fromlist=["resolve_signal_entry_date"]
-                        ).resolve_signal_entry_date(date)
-                    ),
+                    "entry_date": entry_dt,
                     "roc200": roc200_val,
                     "close": 0.0 if math.isnan(close_val) else close_val,
                     "sma200": 0.0 if math.isnan(sma200_val) else sma200_val,

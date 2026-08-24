@@ -51,10 +51,18 @@ function renderRich(summary: string): React.ReactNode[] {
         );
         rest = rest.slice(m[0].length);
       } else {
+        // next<=0 は「以降に bold ペアが無い (=-1)」か「閉じ側の無い ** で始まる
+        // (=0)」のどちらか。後者を rest.slice(0) で戻すと rest が一切進まず無限ループ
+        // になり、nodes が無限に伸びて build 時 static 生成が OOM で落ちる
+        // (AI narrator が ** を奇数個で書いた日に再現)。残りは verbatim で出して打ち切る。
         const next = rest.indexOf('**');
-        const chunk = next === -1 ? rest : rest.slice(0, next);
-        nodes.push(<span key={`t${idx}-${key++}`}>{chunk}</span>);
-        rest = next === -1 ? '' : rest.slice(next);
+        if (next <= 0) {
+          nodes.push(<span key={`t${idx}-${key++}`}>{rest}</span>);
+          rest = '';
+        } else {
+          nodes.push(<span key={`t${idx}-${key++}`}>{rest.slice(0, next)}</span>);
+          rest = rest.slice(next);
+        }
       }
     }
     return (

@@ -125,6 +125,11 @@ pytest tests/test_entry_exit_integration.py -v
 | System6 | Limit (Short) | prev_close×1.05 | Entry + ATR10×3 | ✅ PASS |
 | System7 | Market (Short: SPY) | Open | Entry + ATR50×3 | ✅ PASS |
 
+> **指値エントリーの約定判定 (2026-08-20 追加)**: System3/5/6 の Limit エントリーは
+> 「当日バーが指値を通過した場合のみ約定」する。到達しなければ `compute_entry` は
+> `None` を返し建玉は作られない。2026-08-20 以前は無条件約定でバックテスト勝率が
+> 過大だった → `docs/BACKTEST_LIMIT_FILL_FIX_20260820.md`
+
 ### Exit（手仕舞い）機能（最新）
 
 | システム | Exit Trigger | Exit Timing | テスト結果 |

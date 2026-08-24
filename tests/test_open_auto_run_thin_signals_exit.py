@@ -91,8 +91,8 @@ def runner(tmp_path, monkeypatch):
         monkeypatch.setattr(r, "equity", lambda: 100_000.0)
         monkeypatch.setattr(r, "wait_exit_fills", lambda ids: None)
         monkeypatch.setattr(r, "record_stage", lambda: None)
-        monkeypatch.setattr(r, "publish", lambda: None)
-        monkeypatch.setattr(r, "notify", lambda eq: None)
+        monkeypatch.setattr(r, "publish", lambda: 0)
+        monkeypatch.setattr(r, "notify", lambda eq: 0)
 
         def _exit_stage():
             rec.calls.append("exit")
@@ -239,12 +239,45 @@ def test_env_flag_parses_truthy_values(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_exit_check_script_does_not_read_signals_json():
-    """paper_exit_check.py が today_signals を読まないことを固定する。
+def test_exit_check_script_reads_signals_only_for_provenance():
+    """exit **判断** が today_signals に依存しないことを固定する (A1 の前提)。
 
-    「薄シグナルでも exit を通してよい」根拠そのもの。ここが崩れたら A1 の前提が
-    崩れるので、依存が入り込んだ時点で落とす。
+    2026-08-17 の 8976bba (`feat(obs): stamp signals run_id ...`) で
+    ``paper_exit_check`` は recon 突合用の provenance として run_id **だけ** を
+    読むようになった。したがって「文字列 today_signals が出てこないこと」では
+    もう固定できない (A1 の契約はそこではない)。代わりに構造で固定する:
+
+      1. today_signals を読む関数は provenance 用の ``_signals_run_id`` 1 つだけ。
+      2. その戻り値は artifact の meta にしか流れず、exit の生成 / 発注を
+         gate しない (= 呼び出しは 1 箇所、結果は分岐条件に使われない)。
+
+    ここが崩れたら「薄シグナルでも exit を通してよい」根拠が崩れるので落とす。
     """
+    import ast
+
     src = (ROOT / "scripts" / "paper_exit_check.py").read_text(encoding="utf-8")
-    assert "today_signals" not in src
-    assert "signals_json" not in src
+    tree = ast.parse(src)
+
+    # (1) today_signals を読む関数は _signals_run_id だけ
+    readers = sorted(
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef)
+        and "today_signals" in (ast.get_source_segment(src, node) or "")
+    )
+    assert readers == ["_signals_run_id"], readers
+
+    # (2) 呼び出しは 1 箇所で、結果が if / while の条件に入っていない
+    calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "_signals_run_id"
+    ]
+    assert len(calls) == 1, [ast.dump(c) for c in calls]
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.If, ast.While)):
+            test_src = ast.get_source_segment(src, node.test) or ""
+            assert "_signals_run_id" not in test_src, test_src
+            assert "signals_run_id" not in test_src, test_src

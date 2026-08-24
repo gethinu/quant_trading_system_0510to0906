@@ -30,6 +30,28 @@ from common.alpaca_trading import (
     submit_paper_exit_order,
 )
 
+# --- 運用 env から独立させる -------------------------------------------------
+# ``common/broker_alpaca._load_env_once`` は最初に broker へ触れたテストの時点で
+# 運用者の ``.env`` を **プロセス全体** に読み込む (``load_dotenv``)。その .env は
+# ``PROTECT_USE_OCO=1`` のような **運用トグル** を持つため、素で走らせると
+# 「documented default を固定する」ここのテストが、先に走ったテストの有無で
+# 結果を変える (2026-08-22 の統合時に実際に order 依存で落ちた)。
+# 既定挙動を見るテストなので、保護系トグルは毎テスト明示的に落とす。
+# トグル ON 側の期待値は tests/test_protection_hardening_20260819.py が持つ。
+_OPERATOR_PROTECT_FLAGS = (
+    "PROTECT_USE_OCO",
+    "PROTECT_STOP_FLOOR_ENABLED",
+    "PROTECT_STOP_FLOOR_PCT",
+    "ORPHAN_DEFAULT_PROTECTION",
+)
+
+
+@pytest.fixture(autouse=True)
+def _documented_protection_defaults(monkeypatch):
+    for name in _OPERATOR_PROTECT_FLAGS:
+        monkeypatch.delenv(name, raising=False)
+
+
 # -------------------------------------------------------------------------
 # client_order_id parsing
 # -------------------------------------------------------------------------
@@ -104,6 +126,19 @@ class TestHydrateSystemTags:
         assert snap.system is None
         assert snap.entry_date is None
 
+    def test_ticker_rename_alias_resolves_canonical_entry_metadata(self):
+        """MF のように broker の現 ticker と entry ticker が異なる建玉を解決する。"""
+        snap = PositionSnapshot(symbol="MF", qty=100, side="long", avg_entry_price=4.7)
+        hydrate_system_tags(
+            [snap],
+            entry_orders_index={
+                "UBXG": {"system": "system3", "entry_date": "2026-07-13"}
+            },
+            symbol_aliases={"MF": "UBXG"},
+        )
+        assert snap.system == "system3"
+        assert snap.entry_date == "2026-07-13"
+
 
 # -------------------------------------------------------------------------
 # compute_holding_days
@@ -112,7 +147,17 @@ class TestHydrateSystemTags:
 
 class TestHoldingDays:
     def test_basic(self):
-        assert compute_holding_days("2026-07-01", "2026-07-04") == 3
+        # 2026-08-22 fix: holding days は **立会日** で数える。max_holding_days が
+        # 立会日ベースの spec (strategies/system2_strategy.py compute_exit:
+        # 「未達: 2営業日待っても…」/ system5: 「時間退出: 6営業日経過後も…」) な
+        # ので、暦日と突き合わせると週末・祝日ぶん早く手仕舞ってしまう。
+        # 2026-07-01(水) -> 2026-07-04(土) は木 07-02 の 1 立会日だけ
+        # (07-03 は独立記念日の振替休場、07-04 は土曜)。暦日なら 3。
+        assert compute_holding_days("2026-07-01", "2026-07-04") == 1
+
+    def test_weekday_span_matches_calendar(self):
+        # 月 -> 水 は週末をまたがないので暦日と一致する (回帰の据え置き確認)。
+        assert compute_holding_days("2026-08-17", "2026-08-19") == 2
 
     def test_same_day(self):
         assert compute_holding_days("2026-07-01", "2026-07-01") == 0
@@ -179,11 +224,31 @@ class TestBuildExitOrders:
         )
         assert any(e.reason == ExitReasonCode.TIME and e.side == "sell" for e in exits)
 
+    def test_renamed_position_enters_time_exit_plan_with_current_broker_symbol(self):
+        """旧 UBXG の entry 情報を使いつつ、MF を close 対象として残す。"""
+        snap = PositionSnapshot(symbol="MF", qty=100, side="long", avg_entry_price=4.7)
+        exits = build_exit_orders_from_positions(
+            [snap],
+            today="2026-08-17",
+            entry_orders_index={
+                "UBXG": {"system": "system3", "entry_date": "2026-07-13"}
+            },
+            symbol_aliases={"MF": "UBXG"},
+        )
+        time_exits = [e for e in exits if e.reason == ExitReasonCode.TIME]
+        assert len(time_exits) == 1
+        assert time_exits[0].symbol == "MF"
+        assert time_exits[0].system == "system3"
+        assert time_exits[0].entry_date == "2026-07-13"
+
     def test_system5_time_based_at_6_days(self):
+        # 「6営業日」= 立会 6 日 (strategies/system5_strategy.py compute_exit)。
+        # 2026-06-26(金) から 6 立会日後は 2026-07-07(火)
+        # (06-29,06-30,07-01,07-02,07-06 … 07-03 は休場)。
         snap = _snap("NVDA", "system5", "long", 3, 120.0, "2026-06-26")
         exits = build_exit_orders_from_positions(
             [snap],
-            today="2026-07-02",
+            today="2026-07-07",
             atr_by_symbol={"NVDA": {10: 2.0}},
         )
         te = [e for e in exits if e.reason == ExitReasonCode.TIME]
@@ -311,7 +376,21 @@ class TestBuildExitOrders:
         assert any(e.reason == ExitReasonCode.TIME for e in exits)
         assert not any(e.reason.startswith("protect_") for e in exits)
 
-    def test_position_without_system_tag_is_skipped(self):
+    def test_position_without_system_tag_gets_only_default_stop(self):
+        """system 不明ポジは strategy exit を作らない。
+
+        2026-08-19 変更: 「無管理」と「無保護」は別問題なので、下方保護の
+        protective stop **だけ** は既定値で張る (ORPHAN_DEFAULT_PROTECTION)。
+        time/close exit を捏造しない契約は従来どおり。
+        """
+        snap = PositionSnapshot(symbol="XXX", qty=1, side="long", avg_entry_price=1.0)
+        exits = build_exit_orders_from_positions([snap], today="2026-07-02")
+        assert [e.reason for e in exits] == [ExitReasonCode.PROTECT_STOP]
+        assert all(e.order_type == "stop" for e in exits)
+
+    def test_position_without_system_tag_is_skipped_when_flag_off(self, monkeypatch):
+        """可逆性: ORPHAN_DEFAULT_PROTECTION=0 で従来どおり完全 skip。"""
+        monkeypatch.setenv("ORPHAN_DEFAULT_PROTECTION", "0")
         snap = PositionSnapshot(symbol="XXX", qty=1, side="long", avg_entry_price=1.0)
         exits = build_exit_orders_from_positions([snap], today="2026-07-02")
         assert exits == []

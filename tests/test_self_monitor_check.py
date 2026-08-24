@@ -19,6 +19,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts.self_monitor_check import (  # noqa: E402
+    _latest_open_run_dir,
     check_daily,
     check_data_advance,
     check_open_run,
@@ -210,9 +211,206 @@ def test_open_run_none_when_no_dirs(tmp_path: Path):
     assert r.status == "info"
 
 
+# --- open_run: one-shot sidecar dir を nightly と取り違えない (2026-08-20 の偽 WARN) ---
+def _nightly_and_sidecar(tmp_path: Path) -> Path:
+    """08-20 の実データと同じ構図: canonical nightly + `_oneshot_flatten` sidecar。"""
+    logs = tmp_path / "logs"
+    _write(
+        logs / "open_run_20260820" / "completion_recon.json",
+        {
+            "date": "2026-08-20",
+            "mode": "paper_submit",
+            "entry_submitted": 47,
+            "entry_status": "ok",
+        },
+    )
+    (logs / "open_run_20260820" / "DONE.lock").write_text("x", encoding="utf-8")
+    # sidecar は 22:30 の flatten が残す退避 dir。entry を出さないのが正常なので
+    # entry_submitted=0 / skipped_thin_signals は「異常」ではない。
+    _write(
+        logs / "open_run_20260820_oneshot_flatten" / "completion_recon.json",
+        {
+            "date": "2026-08-20",
+            "mode": "paper_submit",
+            "entry_submitted": 0,
+            "entry_status": "skipped_thin_signals",
+        },
+    )
+    return logs
+
+
+def test_latest_open_run_dir_skips_oneshot_sidecar(tmp_path: Path):
+    logs = _nightly_and_sidecar(tmp_path)
+    # 名前順 sorted(reverse=True) だと sidecar が先頭に来る = 旧実装が踏んだ罠。
+    assert sorted(p.name for p in logs.iterdir())[-1] == (
+        "open_run_20260820_oneshot_flatten"
+    )
+    assert _latest_open_run_dir(logs).name == "open_run_20260820"
+
+
+def test_open_run_ignores_oneshot_sidecar_and_stays_ok(tmp_path: Path):
+    logs = _nightly_and_sidecar(tmp_path)
+    r = check_open_run(logs, tmp_path / "results_csv", max_age_hours=96)
+    assert r.data["dir"] == "open_run_20260820"
+    assert r.data["entry_submitted"] == 47
+    assert r.status == "ok"
+
+
+def test_open_run_sidecar_from_a_later_date_does_not_win(tmp_path: Path):
+    """sidecar だけが最新日でも nightly の canonical 最新日を選ぶ (mtime 順の穴も塞ぐ)。"""
+    logs = _nightly_and_sidecar(tmp_path)
+    _write(
+        logs / "open_run_20260821_oneshot_flatten" / "completion_recon.json",
+        {"date": "2026-08-21", "mode": "paper_submit", "entry_submitted": 0},
+    )
+    assert _latest_open_run_dir(logs).name == "open_run_20260820"
+
+
+def test_open_run_info_when_only_sidecars_exist(tmp_path: Path):
+    logs = tmp_path / "logs"
+    _write(
+        logs / "open_run_20260820_oneshot_flatten" / "completion_recon.json",
+        {"date": "2026-08-20", "mode": "paper_submit", "entry_submitted": 0},
+    )
+    assert _latest_open_run_dir(logs) is None
+    r = check_open_run(logs, tmp_path / "results_csv", max_age_hours=96)
+    assert r.status == "info"
+
+
+def test_open_run_ignores_non_dir_and_malformed_names(tmp_path: Path):
+    logs = tmp_path / "logs"
+    _write(
+        logs / "open_run_20260819" / "completion_recon.json",
+        {"date": "2026-08-19", "mode": "paper_submit", "entry_submitted": 12},
+    )
+    (logs / "open_run_20260820").write_text("not a dir", encoding="utf-8")
+    (logs / "open_run_2026082").mkdir()  # 7 桁 = 日付として不正
+    assert _latest_open_run_dir(logs).name == "open_run_20260819"
+
+
 # --- publish (git 無しの tmp dir では warn へフォールバック) ----------------
 def test_publish_warn_when_not_a_git_repo(tmp_path: Path):
     r = check_publish(
         tmp_path, "claude/monitor-webapp", max_age_hours=26, data_dir=tmp_path
     )
     assert r.status == "warn"
+
+
+# --- publish の判定基準は origin ref (2026-08-19 の毎日 CRIT 誤警報の回帰) ------
+# publish_data_to_vercel.ps1 は commit-tree で origin tip にだけ commit を載せ、
+# local の branch ref を進めない。local を見ていると publish が正常でも age が伸び
+# 続けて毎日 CRIT になっていた。ここでは「local は 8 日前 / origin は今」という
+# 実際の構図を本物の git remote で再現する。
+def _git_ok(root, *args):
+    import subprocess
+
+    subprocess.run(
+        ["git", "-C", str(root), *args], capture_output=True, text=True, check=True
+    )
+
+
+def _make_publish_repo(tmp_path: Path):
+    """(work, branch): local branch は 8 日前、origin/<branch> は今。"""
+    import subprocess
+
+    branch = "claude/monitor-webapp"
+    bare = tmp_path / "origin.git"
+    subprocess.run(
+        ["git", "init", "--bare", "--quiet", str(bare)], capture_output=True, check=True
+    )
+    work = tmp_path / "work"
+    subprocess.run(
+        ["git", "clone", "--quiet", str(bare), str(work)],
+        capture_output=True,
+        check=True,
+    )
+    _git_ok(work, "config", "user.email", "t@example.com")
+    _git_ok(work, "config", "user.name", "t")
+    _git_ok(work, "checkout", "--quiet", "-b", branch)
+
+    data = work / "apps" / "dashboards" / "alpaca-next" / "data"
+    data.mkdir(parents=True)
+    (data / "today_signals_20260811.json").write_text("{}", encoding="utf-8")
+    old = "2026-08-11T00:00:00+09:00"
+    env_old = ["-c", "user.name=t", "-c", "user.email=t@example.com"]
+    import os
+
+    e = dict(os.environ, GIT_AUTHOR_DATE=old, GIT_COMMITTER_DATE=old)
+    _git_ok(work, "add", "-A")
+    subprocess.run(
+        ["git", "-C", str(work), *env_old, "commit", "--quiet", "-m", "old"],
+        capture_output=True,
+        text=True,
+        check=True,
+        env=e,
+    )
+    stale = subprocess.run(
+        ["git", "-C", str(work), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+    # 新しい publish 相当 (今) を作って origin へ push
+    (data / "today_signals_20260819.json").write_text("{}", encoding="utf-8")
+    _git_ok(work, "add", "-A")
+    _git_ok(work, "commit", "--quiet", "-m", "publish 08-19")
+    _git_ok(work, "push", "--quiet", "origin", branch)
+
+    # local branch だけ古い commit に戻す = publish が local を進めない状況
+    _git_ok(work, "reset", "--hard", "--quiet", stale)
+    return work, branch
+
+
+def test_publish_judges_origin_ref_not_stale_local_branch(tmp_path: Path):
+    work, branch = _make_publish_repo(tmp_path)
+    r = check_publish(work, branch, max_age_hours=26, data_dir=work / "nope")
+    assert r.status == "ok", r.detail
+    assert r.data["basis"] == "origin"
+    assert r.data["ref"] == "origin/" + branch
+    # 副シグナルも origin の tree から読む
+    assert r.data["dashboard_data_date"] == 20260819
+
+
+def test_publish_local_basis_would_have_been_crit(tmp_path: Path):
+    """同じリポを local branch で測ると CRIT。= 直前まで出ていた誤警報そのもの。"""
+    import subprocess
+
+    work, branch = _make_publish_repo(tmp_path)
+    out = subprocess.run(
+        ["git", "-C", str(work), "log", "-1", "--format=%cI", branch],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    from datetime import datetime
+
+    ct = datetime.fromisoformat(out)
+    age_h = (datetime.now(tz=ct.tzinfo) - ct).total_seconds() / 3600.0
+    assert age_h > 26  # local を見ていれば必ず閾値超え = 毎日 CRIT
+
+
+def test_publish_falls_back_to_local_without_origin(tmp_path: Path):
+    """origin が無いリポでは従来どおり local branch で判定する。"""
+    import subprocess
+
+    work = tmp_path / "solo"
+    work.mkdir()
+    subprocess.run(
+        ["git", "init", "--quiet", str(work)], capture_output=True, check=True
+    )
+    _git_ok(work, "config", "user.email", "t@example.com")
+    _git_ok(work, "config", "user.name", "t")
+    (work / "f.txt").write_text("x", encoding="utf-8")
+    _git_ok(work, "add", "-A")
+    _git_ok(work, "commit", "--quiet", "-m", "only")
+    head = subprocess.run(
+        ["git", "-C", str(work), "rev-parse", "--abbrev-ref", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+    r = check_publish(work, head, max_age_hours=26, data_dir=work)
+    assert r.data["basis"] == "local-fallback"
+    assert r.status == "ok"

@@ -11,6 +11,18 @@ import re
 import sys
 from typing import Dict, List
 
+# --- Windows console (cp932) safety -------------------------------------
+# Force UTF-8 on stdout/stderr so emoji / non-ASCII output does not raise
+# UnicodeEncodeError under Windows' default cp932 code page (the crash that
+# blocked pre-push). reconfigure() exists on Python 3.7+; guard for streams
+# that don't support it (e.g. already-wrapped or redirected streams).
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+# ------------------------------------------------------------------------
+
 # プロジェクトルール定義
 RULES = {
     "direct_csv_read": {

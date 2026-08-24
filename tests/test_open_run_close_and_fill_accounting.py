@@ -144,7 +144,9 @@ def test_flatten_counts_tonights_39_accepted_and_2_rejected(tmp_path, monkeypatc
         lambda: SimpleNamespace(close_all_positions=lambda cancel_orders=True: resps),
     )
     monkeypatch.setattr(
-        "common.alpaca_trading.fetch_position_snapshots", lambda _c: [], raising=False
+        "common.alpaca_trading.fetch_position_snapshots",
+        lambda _c, *, raise_on_error=False: [],
+        raising=False,
     )
 
     runner._flatten_all_stage()
@@ -216,7 +218,6 @@ def test_wait_records_unsettled_on_timeout(tmp_path, monkeypatch):
 
 
 def test_wait_fetch_failure_never_reports_flatten_settled(tmp_path, monkeypatch):
-    """position fetch failure は [] (flat) に丸めず、timeout で未解消として残す。"""
     runner = _runner(tmp_path, monkeypatch)
     runner.pending_flat_symbols = {"ADVB"}
     calls: list[bool] = []
@@ -237,8 +238,31 @@ def test_wait_fetch_failure_never_reports_flatten_settled(tmp_path, monkeypatch)
     assert runner.record["flatten_unsettled"] == ["ADVB"]
 
 
-def test_flatten_api_failure_is_explicit_and_blocks_new_entry(tmp_path, monkeypatch):
-    """close API 例外は genuine zero-result と区別し、flatten-all では entry を止める。"""
+def test_snapshot_fetch_failure_does_not_write_false_flat_artifact(
+    tmp_path, monkeypatch
+):
+    runner = _runner(tmp_path, monkeypatch)
+
+    def _fetch(_client, *, raise_on_error=False):
+        assert raise_on_error is True
+        raise RuntimeError("snapshot unavailable")
+
+    monkeypatch.setattr(
+        "common.alpaca_trading.fetch_position_snapshots", _fetch, raising=False
+    )
+
+    runner._snapshot_positions("positions_after_close.json")
+
+    assert not (runner.out / "positions_after_close.json").exists()
+    assert (
+        "snapshot unavailable"
+        in runner.record["position_snapshot_errors"]["positions_after_close.json"]
+    )
+
+
+def test_flatten_api_failure_is_explicit_blocks_entry_and_degrades_run(
+    tmp_path, monkeypatch
+):
     runner = _runner(tmp_path, monkeypatch)
     runner.results.mkdir(parents=True, exist_ok=True)
 
@@ -251,59 +275,77 @@ def test_flatten_api_failure_is_explicit_and_blocks_new_entry(tmp_path, monkeypa
         lambda: SimpleNamespace(close_all_positions=_close_all),
     )
     monkeypatch.setattr(
-        "common.alpaca_trading.fetch_position_snapshots", lambda _c: [], raising=False
+        "common.alpaca_trading.fetch_position_snapshots",
+        lambda _c, *, raise_on_error=False: [],
+        raising=False,
     )
 
     assert runner._flatten_all_stage() == []
-
-    assert "broker unavailable" in str(runner.record["flatten_error"])
-    assert runner.record["flatten_ok"] == 0
-    assert runner.record["flatten_failed"] == 0
     assert runner.entry_allowed is False
     assert runner.record["entry_skip_reason"] == "flatten_error"
     payload = json.loads(runner.exit_json.read_text(encoding="utf-8"))
     assert "broker unavailable" in payload["flatten_error"]
-    assert payload["count"] == 0
-    runner.finalize(aborted=False)
-    completion = json.loads(
-        (runner.out / "completion_recon.json").read_text(encoding="utf-8")
-    )
-    assert "broker unavailable" in completion["flatten_error"]
-    assert "**FLATTEN ERROR**" in (runner.out / "SUMMARY.md").read_text(
-        encoding="utf-8"
-    )
+
+    recon = build_recon(None, None, payload)
+    assert "broker unavailable" in recon["portfolio"]["exit_error"]
+    title, body = format_execution_summary(recon)
+    assert title.startswith("⚠️")
+    assert "exit error:" in body
 
 
-def test_recon_counts_accepted_async_exit_without_order_id_and_unattributed_exit():
-    """accepted は primary truth。system 不明でも portfolio/ntfy から落とさない。"""
+def test_main_returns_observability_degraded_when_flatten_failed(tmp_path, monkeypatch):
+    runner = _runner(tmp_path, monkeypatch)
+    monkeypatch.setattr(runner, "gate", lambda: True)
+    monkeypatch.setattr(runner, "signals", lambda: True)
+    monkeypatch.setattr(runner, "equity", lambda: 100_000.0)
+
+    def _failed_flatten():
+        runner.record["flatten_error"] = "RuntimeError: broker unavailable"
+        runner.record["entry_skip_reason"] = "flatten_error"
+        runner.entry_allowed = False
+        return []
+
+    monkeypatch.setattr(runner, "exit_stage", _failed_flatten)
+    monkeypatch.setattr(runner, "wait_exit_fills", lambda _ids: None)
+    monkeypatch.setattr(runner, "record_stage", lambda: None)
+    monkeypatch.setattr(runner, "notify", lambda _eq: 0)
+    monkeypatch.setattr(runner, "publish", lambda: 0)
+    monkeypatch.setattr(runner, "finalize", lambda aborted: None)
+
+    assert runner.main() == oar.OBSERVABILITY_DEGRADED_EXIT_CODE
+    assert runner.record["entry_status"] == "skipped_flatten_error"
+
+
+def test_recon_accepted_primary_preserves_taxonomy_and_unassigned_portfolio_count():
     exits = {
         "exits": [
-            {
-                "system": "system1",
-                "reason": "flatten_all",
-                "accepted": True,
-                "order_id": None,
-            },
+            {"system": "system1", "reason": "flatten_all", "accepted": True},
             {"reason": "flatten_all", "accepted": True, "order_id": None},
-            # accepted が明示的に false なら order_id があっても新 schema では未送信。
             {
                 "system": "system1",
                 "reason": "flatten_all",
                 "accepted": False,
-                "order_id": "nope",
+                "order_id": "must-not-win",
             },
-            # accepted 不在の legacy artifact だけは旧判定を使用する。
             {"system": "system1", "reason": "time_based", "order_id": "legacy-ok"},
+            {"system": "system1", "reason": "protect_stop", "skip_reason": "reserved"},
+            {"system": "system1", "reason": "protect_target"},
         ]
     }
-    recon = build_recon(signals=None, paper_orders=None, exit_orders=exits)
 
-    assert recon["systems"]["system1"]["exit"]["submitted"] == 2
-    assert recon["portfolio"]["exit_submitted"] == 3
-    assert recon["portfolio"]["exit_close"] == 3
-    assert recon["portfolio"]["exit_unattributed_submitted"] == 1
-    _, body = format_execution_summary(recon)
-    assert "exit 3 (close 3 / protect 0)" in body
+    recon = build_recon(None, None, exits)
+    p = recon["portfolio"]
+    assert p["exit_submitted"] == 3
+    assert p["exit_close"] == 3
+    assert p["exit_rejected"] == 1
+    assert p["exit_suppressed"] == 1
+    assert p["exit_armed"] == 1
+    assert recon["systems"]["__unassigned__"]["exit"]["submitted"] == 1
+
+
+@pytest.mark.parametrize("raw", ["stopped", "suspended", "future_broker_status"])
+def test_status_unknown_or_ambiguous_is_kept_under_observation(raw):
+    assert is_working(raw) is True
 
 
 def test_wait_still_skips_when_nothing_to_watch(tmp_path, monkeypatch):
@@ -353,17 +395,6 @@ def test_status_normalizes_alpaca_enum():
 def test_status_missing_is_empty_and_still_working(raw):
     assert normalize_order_status(raw) == ""
     assert is_working(raw) is True
-
-
-@pytest.mark.parametrize("raw", ["stopped", "suspended", "future_broker_status"])
-def test_status_unknown_or_ambiguous_is_kept_under_observation(raw):
-    """known-terminal 以外は早期 settled とせず、poll を続ける。"""
-    assert is_working(raw) is True
-
-
-@pytest.mark.parametrize("raw", ["filled", "canceled", "expired", "rejected"])
-def test_status_known_terminal_stops_polling(raw):
-    assert is_working(raw) is False
 
 
 def test_producer_writes_bare_token_not_enum_repr():

@@ -1,0 +1,176 @@
+{
+  "label": "limitfill_fixed_integrated",
+  "created_at": "2026-08-21T01:06:47",
+  "n_trials": 15,
+  "cpcv": {
+    "n_groups": 6,
+    "k_test": 2,
+    "embargo_pct": 0.01,
+    "n_combinations": 15,
+    "n_backtest_paths": 5,
+    "full_sample_sharpe": -2.977351,
+    "fold_sharpe_mean": -2.311275,
+    "fold_sharpe_std": 0.860453,
+    "fold_sharpe_min": -4.106421,
+    "fold_sharpe_max": -0.523066,
+    "frac_folds_positive": 0.0
+  },
+  "bootstrap": {
+    "statistic": "annualized_sharpe",
+    "point_estimate": -2.977351,
+    "mean": -3.006982,
+    "std": 0.638207,
+    "ci_low": -4.240741,
+    "ci_high": -1.711304,
+    "ci_level": 0.95,
+    "p_value_le_zero": 1.0,
+    "n_boot": 2000,
+    "block_length": 9,
+    "n_obs": 747
+  },
+  "deflated_sharpe": {
+    "observed_sharpe_annual": -2.977351,
+    "observed_sharpe_per_period": -0.18755549,
+    "benchmark_sharpe_per_period": 0.09597716,
+    "n_obs": 747,
+    "n_trials": 15,
+    "skew": -0.128998,
+    "kurt": 23.002864,
+    "psr_vs_zero": 1e-06,
+    "deflated_sharpe": 0.0,
+    "passed": false
+  },
+  "survivorship": {
+    "membership_file_present": false,
+    "membership_path": "C:\\Repos\\quant_trading_system_0510to0906\\data\\universe_membership.csv",
+    "universe_size": 4655,
+    "survivorship_free": false,
+    "biased": true,
+    "reasons": [
+      "no dated membership file; universe is a current-membership snapshot applied to historical data (delisted symbols absent)"
+    ]
+  },
+  "fold_sharpes": [
+    {
+      "combo": "0-1",
+      "n_test_dates": 172,
+      "n_train_dates": 338,
+      "n_trades": 199,
+      "sharpe": -4.106421,
+      "total_pnl": -22267.04
+    },
+    {
+      "combo": "0-2",
+      "n_test_dates": 172,
+      "n_train_dates": 329,
+      "n_trades": 127,
+      "sharpe": -1.070218,
+      "total_pnl": -6898.24
+    },
+    {
+      "combo": "0-3",
+      "n_test_dates": 172,
+      "n_train_dates": 322,
+      "n_trades": 192,
+      "sharpe": -1.879419,
+      "total_pnl": -16013.1
+    },
+    {
+      "combo": "0-4",
+      "n_test_dates": 172,
+      "n_train_dates": 320,
+      "n_trades": 224,
+      "sharpe": -0.523066,
+      "total_pnl": -7569.13
+    },
+    {
+      "combo": "0-5",
+      "n_test_dates": 171,
+      "n_train_dates": 327,
+      "n_trades": 146,
+      "sharpe": -1.454252,
+      "total_pnl": -10273.65
+    },
+    {
+      "combo": "1-2",
+      "n_test_dates": 172,
+      "n_train_dates": 334,
+      "n_trades": 302,
+      "sharpe": -2.496616,
+      "total_pnl": -27749.11
+    },
+    {
+      "combo": "1-3",
+      "n_test_dates": 172,
+      "n_train_dates": 318,
+      "n_trades": 226,
+      "sharpe": -2.649685,
+      "total_pnl": -26617.47
+    },
+    {
+      "combo": "1-4",
+      "n_test_dates": 172,
+      "n_train_dates": 316,
+      "n_trades": 215,
+      "sharpe": -2.325321,
+      "total_pnl": -24216.99
+    },
+    {
+      "combo": "1-5",
+      "n_test_dates": 171,
+      "n_train_dates": 323,
+      "n_trades": 215,
+      "sharpe": -2.421699,
+      "total_pnl": -24657.82
+    },
+    {
+      "combo": "2-3",
+      "n_test_dates": 172,
+      "n_train_dates": 334,
+      "n_trades": 369,
+      "sharpe": -2.269835,
+      "total_pnl": -23422.71
+    },
+    {
+      "combo": "2-4",
+      "n_test_dates": 172,
+      "n_train_dates": 317,
+      "n_trades": 251,
+      "sharpe": -2.441798,
+      "total_pnl": -17557.71
+    },
+    {
+      "combo": "2-5",
+      "n_test_dates": 171,
+      "n_train_dates": 324,
+      "n_trades": 249,
+      "sharpe": -2.395541,
+      "total_pnl": -17104.3
+    },
+    {
+      "combo": "3-4",
+      "n_test_dates": 172,
+      "n_train_dates": 327,
+      "n_trades": 420,
+      "sharpe": -3.169093,
+      "total_pnl": -30568.32
+    },
+    {
+      "combo": "3-5",
+      "n_test_dates": 171,
+      "n_train_dates": 321,
+      "n_trades": 317,
+      "sharpe": -2.412884,
+      "total_pnl": -23059.3
+    },
+    {
+      "combo": "4-5",
+      "n_test_dates": 171,
+      "n_train_dates": 331,
+      "n_trades": 408,
+      "sharpe": -3.053278,
+      "total_pnl": -25325.5
+    }
+  ],
+  "extra": {}
+}

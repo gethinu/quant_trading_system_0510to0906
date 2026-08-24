@@ -93,10 +93,15 @@ $freshChk = Join-Path $PrimaryRoot "scripts\check_dashboard_freshness.py"
 Push-Location $PrimaryRoot
 try {
     if (Test-Path $freshChk) {
-        Write-Launch "--- [dashboard_freshness] detect (+notify if stale) ---"
-        & python $freshChk --repo-root $PrimaryRoot --notify 2>&1 |
+        # --check-served: git push が成功していても Vercel の build が発火しない/
+        # 落ちる場合がある。その時ローカル同士の比較 (results_csv vs data/) は
+        # 「fresh」と答えてしまうので、本番 HTML に publish 済み run_id が現れるかも
+        # 見る (2026-08-17: publish 成功・blob 一致なのに本番は朝の run のままだった)。
+        # 正常な deploy 遅延 (実測 ~20 分) は grace 内なので警告しない。
+        Write-Launch "--- [dashboard_freshness] detect (+notify if stale/undeployed) ---"
+        & python $freshChk --repo-root $PrimaryRoot --notify --check-served 2>&1 |
             ForEach-Object { Write-Launch $_ }
-        Write-Launch "[dashboard_freshness] exit=$LASTEXITCODE (0=fresh, 2=stale)"
+        Write-Launch "[dashboard_freshness] exit=$LASTEXITCODE (0=ok, 2=stale, 3=deploy 不達)"
     }
     if (Test-Path $pubScript) {
         Write-Launch "--- [dashboard_selfheal] publish_data_to_vercel.ps1 -AutoLatest ---"

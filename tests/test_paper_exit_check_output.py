@@ -14,6 +14,15 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+from types import SimpleNamespace
+
+from common.alpaca_trading import PositionSnapshot
+from scripts.paper_exit_check import (
+    _collect_entry_orders_index,
+    _hydrate_from_alpaca_coids,
+    _load_ticker_renames,
+    _resolve_rename_aliases,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "paper_exit_check.py"
@@ -75,3 +84,104 @@ def test_offline_mode_yields_no_positions(tmp_path: Path):
     assert data["positions"] == []
     assert data["exits"] == []
     assert data["count"] == 0
+
+
+def _mf(qty: float = 100) -> PositionSnapshot:
+    return PositionSnapshot(symbol="MF", qty=qty, side="long", avg_entry_price=4.7)
+
+
+def test_ticker_rename_config_includes_mf_alias_for_exit_resolution():
+    """open_auto_run 側でも MF の entry metadata を UBXG から解決できる。"""
+    row = _load_ticker_renames()["MF"]
+    assert row["canonical"] == "UBXG"
+    assert row["qty"] == 100
+
+
+def test_rename_alias_requires_holding_qty_to_match_config():
+    """config を書いただけでは効かない。保有株数が qty と一致した時だけ採用する。"""
+    renames = {"MF": {"canonical": "UBXG", "qty": 100.0}}
+    assert _resolve_rename_aliases([_mf(100)], renames) == {"MF": "UBXG"}
+
+
+def test_rename_alias_is_rejected_when_holding_qty_diverged(capsys):
+    """部分決済 / 買い増し / 別物なら alias を捨て、unmanaged のまま残す。"""
+    renames = {"MF": {"canonical": "UBXG", "qty": 100.0}}
+    assert _resolve_rename_aliases([_mf(50)], renames) == {}
+    # silent に落とさない (stale config が見えなくならないように)
+    assert "qty 不一致" in capsys.readouterr().out
+
+
+def test_rename_row_without_qty_evidence_is_not_loaded(tmp_path: Path):
+    """qty は採用根拠そのもの。無い行は alias を作らない。"""
+    p = tmp_path / "ticker_renames.json"
+    p.write_text(
+        json.dumps(
+            {
+                "renames": [
+                    {"alias": "AAA", "canonical": "BBB"},
+                    {"alias": "CCC", "canonical": "DDD", "qty": 0},
+                    {"alias": "EEE", "canonical": "FFF", "qty": 7},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert set(_load_ticker_renames(p)) == {"EEE"}
+
+
+def test_unheld_alias_does_not_widen_artifact_lookback():
+    """保有していない alias は採用しない (過去 artifact を無用に遡らせない)。"""
+    renames = {"CHRN": {"canonical": "EKSO", "qty": 119.0}}
+    assert _resolve_rename_aliases([_mf(100)], renames) == {}
+
+
+def test_rename_config_keeps_ledger_uniqueness_invariant():
+    """build_exit_ledger 側の二段ゲートの記述を exit 側の都合で消さない。
+
+    この config は main では build_exit_ledger と共有される。片方の consumer の
+    説明だけに書き換えると、merge 時にもう片方の不変条件が消える。
+    """
+    data = json.loads(
+        (ROOT / "config" / "ticker_renames.json").read_text(encoding="utf-8")
+    )
+    safety = data["safety"]
+    assert "一意に打ち消し合う" in safety
+    assert "build_exit_ledger" in safety
+    assert "paper_exit_check" in safety
+
+
+def test_required_renamed_symbol_is_loaded_beyond_normal_lookback(tmp_path: Path):
+    """35日超の UBXG entry も、MF alias が必要なら artifact から補える。"""
+    for i in range(1, 31):
+        (tmp_path / f"paper_orders_202608{i:02d}.json").write_text(
+            '{"orders": []}', encoding="utf-8"
+        )
+    (tmp_path / "paper_orders_20260713.json").write_text(
+        json.dumps(
+            {
+                "orders": [
+                    {
+                        "symbol": "UBXG",
+                        "system": "system3",
+                        "entry_date": "2026-07-13",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    index = _collect_entry_orders_index(tmp_path, required_symbols={"UBXG"})
+    assert index["UBXG"] == {"system": "system3", "entry_date": "2026-07-13"}
+
+
+def test_alpaca_entry_coid_uses_rename_alias_when_broker_symbol_changed():
+    """live path でも UBXG order metadata を MF position に補完する。"""
+    order = SimpleNamespace(symbol="UBXG", client_order_id="system3-UBXG-20260713")
+    client = SimpleNamespace(get_orders=lambda _request: [order])
+    snap = PositionSnapshot(symbol="MF", qty=100, side="long", avg_entry_price=4.7)
+
+    _hydrate_from_alpaca_coids([snap], client, symbol_aliases={"MF": "UBXG"})
+
+    assert snap.system == "system3"
+    assert snap.entry_date == "2026-07-13"

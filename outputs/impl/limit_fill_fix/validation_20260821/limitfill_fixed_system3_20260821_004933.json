@@ -1,0 +1,167 @@
+{
+  "label": "limitfill_fixed_system3",
+  "created_at": "2026-08-21T01:05:43",
+  "n_trials": 15,
+  "cpcv": {
+    "n_groups": 6,
+    "k_test": 2,
+    "embargo_pct": 0.01,
+    "n_combinations": 15,
+    "n_backtest_paths": 5,
+    "full_sample_sharpe": 0.006949,
+    "fold_sharpe_mean": -3.849182,
+    "fold_sharpe_std": 1.480887,
+    "fold_sharpe_min": -5.95805,
+    "fold_sharpe_max": -1.39194,
+    "frac_folds_positive": 0.0
+  },
+  "bootstrap": {
+    "statistic": "annualized_sharpe",
+    "point_estimate": 0.006949,
+    "mean": -0.204561,
+    "std": 0.917382,
+    "ci_low": -2.314091,
+    "ci_high": 1.231652,
+    "ci_level": 0.95,
+    "p_value_le_zero": 0.527,
+    "n_boot": 2000,
+    "block_length": 8,
+    "n_obs": 558
+  },
+  "deflated_sharpe": {
+    "observed_sharpe_annual": 0.006949,
+    "observed_sharpe_per_period": 0.00043771,
+    "benchmark_sharpe_per_period": 0.16518199,
+    "n_obs": 558,
+    "n_trials": 15,
+    "skew": 2.655847,
+    "kurt": 137.896325,
+    "psr_vs_zero": 0.504124,
+    "deflated_sharpe": 5e-05,
+    "passed": false
+  },
+  "survivorship": {},
+  "fold_sharpes": [
+    {
+      "combo": "0-1",
+      "n_test_dates": 129,
+      "n_train_dates": 252,
+      "n_trades": 324,
+      "sharpe": -2.991142,
+      "total_pnl": -75218.74
+    },
+    {
+      "combo": "0-2",
+      "n_test_dates": 129,
+      "n_train_dates": 244,
+      "n_trades": 331,
+      "sharpe": -5.95805,
+      "total_pnl": -91750.42
+    },
+    {
+      "combo": "0-3",
+      "n_test_dates": 129,
+      "n_train_dates": 245,
+      "n_trades": 312,
+      "sharpe": -3.739755,
+      "total_pnl": -77584.68
+    },
+    {
+      "combo": "0-4",
+      "n_test_dates": 129,
+      "n_train_dates": 244,
+      "n_trades": 326,
+      "sharpe": -4.359934,
+      "total_pnl": -84049.61
+    },
+    {
+      "combo": "0-5",
+      "n_test_dates": 129,
+      "n_train_dates": 248,
+      "n_trades": 316,
+      "sharpe": -2.294193,
+      "total_pnl": -76803.58
+    },
+    {
+      "combo": "1-2",
+      "n_test_dates": 128,
+      "n_train_dates": 249,
+      "n_trades": 351,
+      "sharpe": -5.209486,
+      "total_pnl": -93029.45
+    },
+    {
+      "combo": "1-3",
+      "n_test_dates": 128,
+      "n_train_dates": 242,
+      "n_trades": 336,
+      "sharpe": -2.571754,
+      "total_pnl": -75413.62
+    },
+    {
+      "combo": "1-4",
+      "n_test_dates": 128,
+      "n_train_dates": 241,
+      "n_trades": 350,
+      "sharpe": -3.133438,
+      "total_pnl": -85361.78
+    },
+    {
+      "combo": "1-5",
+      "n_test_dates": 128,
+      "n_train_dates": 245,
+      "n_trades": 340,
+      "sharpe": -1.39194,
+      "total_pnl": -74073.44
+    },
+    {
+      "combo": "2-3",
+      "n_test_dates": 128,
+      "n_train_dates": 249,
+      "n_trades": 341,
+      "sharpe": -5.44104,
+      "total_pnl": -85966.2
+    },
+    {
+      "combo": "2-4",
+      "n_test_dates": 128,
+      "n_train_dates": 241,
+      "n_trades": 357,
+      "sharpe": -5.797838,
+      "total_pnl": -93107.3
+    },
+    {
+      "combo": "2-5",
+      "n_test_dates": 128,
+      "n_train_dates": 245,
+      "n_trades": 347,
+      "sharpe": -2.346872,
+      "total_pnl": -86679.95
+    },
+    {
+      "combo": "3-4",
+      "n_test_dates": 128,
+      "n_train_dates": 250,
+      "n_trades": 335,
+      "sharpe": -5.627082,
+      "total_pnl": -73571.59
+    },
+    {
+      "combo": "3-5",
+      "n_test_dates": 128,
+      "n_train_dates": 246,
+      "n_trades": 328,
+      "sharpe": -2.842841,
+      "total_pnl": -68866.82
+    },
+    {
+      "combo": "4-5",
+      "n_test_dates": 128,
+      "n_train_dates": 253,
+      "n_trades": 342,
+      "sharpe": -4.03237,
+      "total_pnl": -77281.93
+    }
+  ],
+  "extra": {}
+}

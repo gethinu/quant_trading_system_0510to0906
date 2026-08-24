@@ -291,11 +291,71 @@ def test_unmeasured_ledger_is_red(tmp_path):
 
 
 def test_stale_ledger_is_red(tmp_path):
-    """当日ぶんが無い = 計測が止まっている (publish 経路の故障)。"""
+    """直近立会ぶんが無い = 計測が止まっている (publish 経路の故障)。"""
     d = _write_ledger(tmp_path, "exit_ledger_20260721.json", _ledger(date="2026-07-21"))
     alerts, red, _ = mb.check_exit_ledger(d, 20260722)
     assert red is True
-    assert any("当日ぶん未更新" in a for a in alerts)
+    assert any("ぶん未更新" in a for a in alerts)
+
+
+# --------------------------------------------------------------------------
+# exit 台帳の鮮度は「カレンダー当日」でなく「立会セッション」で測る
+# (2026-08-20: 08:00 JST は当日セッションの寄り前なので、当日ぶんは存在し得ない。
+#  カレンダー比較だと毎朝必ず赤 = 本物の停止が埋もれる)
+# --------------------------------------------------------------------------
+def test_before_the_open_yesterdays_ledger_is_green(tmp_path):
+    """(a) セッション前 + 台帳=前営業日 -> 🟢。毎朝のオオカミ少年を止める。"""
+    d = _write_ledger(tmp_path, "exit_ledger_20260819.json", _ledger(date="2026-08-19"))
+    alerts, red, summary = mb.check_exit_ledger(
+        d, 20260820, expected_session_yyyymmdd=20260819
+    )
+    assert red is False
+    assert not any("未更新" in a for a in alerts)
+    assert "exit台帳=20260819" in summary
+
+
+def test_after_the_open_a_stale_ledger_is_still_red(tmp_path):
+    """(b) セッションは走ったのに台帳が前日のまま -> 🔴 (本物の stale は隠さない)。"""
+    d = _write_ledger(tmp_path, "exit_ledger_20260819.json", _ledger(date="2026-08-19"))
+    alerts, red, _ = mb.check_exit_ledger(
+        d, 20260820, expected_session_yyyymmdd=20260820
+    )
+    assert red is True
+    assert any(
+        "直近立会 (20260820) ぶん未更新" in a and "最新=20260819" in a for a in alerts
+    )
+
+
+def test_ledger_for_the_current_session_is_green(tmp_path):
+    """(c) 台帳=当日セッション -> 🟢。"""
+    d = _write_ledger(tmp_path, "exit_ledger_20260820.json", _ledger(date="2026-08-20"))
+    alerts, red, _ = mb.check_exit_ledger(
+        d, 20260820, expected_session_yyyymmdd=20260820
+    )
+    assert red is False and alerts == []
+
+
+def test_ledger_newer_than_the_expected_session_is_not_red(tmp_path):
+    """朝の self-heal が当日日付で台帳を作り直した日を赤にしない (>= で判定)。"""
+    d = _write_ledger(tmp_path, "exit_ledger_20260820.json", _ledger(date="2026-08-20"))
+    alerts, red, _ = mb.check_exit_ledger(
+        d, 20260820, expected_session_yyyymmdd=20260819
+    )
+    assert red is False and alerts == []
+
+
+def test_missing_session_argument_falls_back_to_calendar_today(tmp_path):
+    """省略時は従来挙動 (カレンダー当日)。既存の呼び出しを壊さない。"""
+    d = _write_ledger(tmp_path, "exit_ledger_20260721.json", _ledger(date="2026-07-21"))
+    _, red, _ = mb.check_exit_ledger(d, 20260722)
+    assert red is True
+
+
+def test_expected_session_helper_is_before_the_open_on_a_jst_morning():
+    """本番経路 (_expected_session) が立会日を返し、実行日より前になり得ること。"""
+    got = mb._expected_session(20991231)
+    assert got != 20991231  # fallback ではなく実カレンダーを引けている
+    assert 20000101 <= got <= int(date.today().strftime("%Y%m%d"))
 
 
 def test_exit_intent_not_filled_is_red(tmp_path):

@@ -99,6 +99,7 @@ TODAY_SIGNAL_COLUMNS = [
     "signal_type",
     "entry_date",
     "entry_price",
+    "limit_price",
     "stop_price",
     "score_key",
     "score",
@@ -118,7 +119,10 @@ class TodaySignal:
     signal_type: str  # "buy" | "sell"
     entry_date: pd.Timestamp
     entry_price: float
-    stop_price: float
+    # spec の指値 (前日終値 x ratio) を live 経路で出せた時だけ入る。
+    # None = 成行 (または指値価格を確定できなかった) = 従来挙動。
+    limit_price: float | None = None
+    stop_price: float = 0.0
     score_key: str | None = None
     score: float | None = None
     score_rank: int | None = None
@@ -1806,6 +1810,14 @@ def _build_today_signals_dataframe(
             entry_skip_stats.record(str(sym), reason_label)
             continue
         entry, stop = comp
+        # entry_price が strategy 由来の **spec 指値** かどうか。指値でない
+        # (= 成行の見積り価格) 場合は limit_price を出さない。下流の
+        # signals_json_to_orders は「limit_price が無ければ market」という
+        # 既存の runtime fallback を守る (common/alpaca_trading.py の
+        # docs-alignment コメント参照) ので、S3/S5/S6 の現挙動は変わらない。
+        limit_price_val: float | None = None
+        if (debug_info.get("details") or {}).get("entry_source") == "spec_limit_price":
+            limit_price_val = float(entry)
         skey, sval, _asc = _score_from_candidate(system_name, c)
 
         try:
@@ -2103,6 +2115,7 @@ def _build_today_signals_dataframe(
                 signal_type=signal_type,
                 entry_date=entry_date_norm,
                 entry_price=float(entry),
+                limit_price=limit_price_val,
                 stop_price=float(stop),
                 score_key=skey,
                 score=(
@@ -2687,6 +2700,26 @@ def _compute_entry_stop(
     else:
         # Entry day not found (likely next trading day not yet in df).
         # Use latest series fallback explicitly.
+        #
+        # NOTE (2026-08-22 fix): ここは **live 経路そのもの** である。当日シグナル
+        # は「翌日の注文」を今日作るので entry_date の bar は df にまだ無く、
+        # strategy.compute_entry (当日 Open が要る) は必ず None を返して
+        # ここへ落ちる。その結果 entry_price = **オフセットなしの前日終値** に
+        # なっていた (2026-08-21 の実 artifact で System2 全 10 件が
+        # entry_price / prev_close = 1.0000)。
+        # spec の指値を公開している strategy はそちらを使う。
+        # 例: System2 = 前日終値 x 1.04 の指値売 (docs/systems/システム2.txt 仕掛け)。
+        _limit_fn = getattr(strategy, "compute_entry_limit_price", None)
+        if callable(_limit_fn):
+            try:
+                _pc = _latest_positive(_get_series_ci(df, "Close"))
+                _lim = _limit_fn(_pc) if _pc is not None else None
+                if _lim is not None and float(_lim) > 0:
+                    entry = float(_lim)
+                    _record_detail("entry_source", "spec_limit_price")
+                    _record_detail("entry_prev_close", float(_pc))
+            except Exception as exc:  # noqa: BLE001
+                _record_detail("spec_limit_price_error", str(exc))
         try:
             # Prefer previous day's Close as entry fallback
             close_col = None
@@ -2694,7 +2727,9 @@ def _compute_entry_stop(
                 if isinstance(col, str) and col.lower() == "close":
                     close_col = col
                     break
-            if close_col is not None:
+            if entry is not None:
+                pass
+            elif close_col is not None:
                 series = pd.to_numeric(df[close_col], errors="coerce").dropna()
                 series = series[series > 0]
                 if not series.empty:
