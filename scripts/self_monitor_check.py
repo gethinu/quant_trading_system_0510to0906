@@ -26,7 +26,10 @@
                    最新 logs/open_run_<YYYYMMDD>/completion_recon.json + paper_orders.json。
                    one-shot ツールが残す `_<suffix>` 付き sidecar dir は **除外** する
                    (canonical 名だけが nightly。詳細は _latest_open_run_dir)。
-                   abort(market_closed) は良性、それ以外の abort は WARN。
+                   abort(market_closed) は良性、それ以外の abort は WARN。ただし
+                   **その abort の通知が外へ出ていない** (run.log に ntfy 成功が無い)
+                   なら誰も知らない silent abort なので CRIT へ昇格する
+                   (2026-08-24 の host DNS 断。詳細は notification_evidence)。
                    entry_submitted=0 は **無条件 WARN にしない**: book が満杯で全件
                    standing_cap / already_held skip なら設計どおりの正常終了なので OK、
                    失敗・生成ゼロ・capacity 以外の skip・成果物欠落だけを WARN にする
@@ -336,6 +339,75 @@ def _latest_open_run_dir(logs_dir: Path) -> Path | None:
     return max(canonical, key=lambda d: d.name)
 
 
+# --- abort したのに通知が外へ出ていない run は CRIT (2026-08-25) ---------------
+# 2026-08-24 の 22:35/23:35 は **ホストの DNS が丸ごと落ちて** いた。gate の clock 取得が
+# 3 回とも NameResolutionError で失敗 -> `abort=clock_unavailable` で fail-closed 停止
+# (発注ゼロ = 安全)。ところが停止を知らせる ntfy も **同じ死んだ DNS** を通るので
+# `[ntfy] warn 送信 ok=False` となり、**誰にも何も届かなかった**。exit まで丸ごと飛んだ
+# 夜が、翌朝まで誰にも気づかれない状態だった (実測: logs/open_run_20260824/)。
+#
+# 「abort した」だけなら WARN で足りる (人が気づく前提)。しかし「abort した **かつ**
+# その通知が外に出なかった」は *沈黙した停止* であり、朝の SelfMonitor が最後の砦になる。
+# ここだけ CRIT へ昇格させ、morning の ntfy を urgent + CRIT 見出しにする。
+#
+# 判定は **既存の成果物だけ** で行う (runner 側に新フィールドを要求しない):
+#   - abort         … completion_recon.json の `abort` (gate が書く)。
+#                     record に理由が残らず死んだ場合の保険として SUMMARY.md の
+#                     `**ABORTED**` も見る (finalize は abort 時必ず書く)。
+#   - 通知の生死    … run.log の `[ntfy] ... ok=True/False`。open_auto_run._ntfy_warn は
+#                     成否をそのまま run.log に落とすので、これが唯一の送達痕跡。
+#
+# fail-closed: `[ntfy]` 行が 1 本も無い場合も「届いていない」側に倒す。実際 abort 経路で
+# ntfy を **呼ばない** のは `not_paper` (live 環境を掴んだ最悪ケース) だけで、そこは
+# まさに CRIT で叩き起こしたい。「証明できない = 正常」にすると沈黙を見逃す。
+#
+# market_closed だけは例外で従来どおり ok。clock が読めた = ネットは生きていた、かつ
+# 休場は何も起きなくて正しい夜なので、通知の有無は問題にならない。
+_NTFY_LOG_RE = re.compile(r"\[ntfy\][^\r\n]*")
+_NTFY_OK_RE = re.compile(r"ok=True", re.IGNORECASE)
+
+
+def notification_evidence(run_dir: Path) -> tuple[str, dict[str, Any]]:
+    """run.log から外向き通知の送達痕跡を読む。
+
+    Returns ``(state, data)``。state は:
+      ``delivered`` … `[ntfy] ... ok=True` があった (誰かに届いた)
+      ``failed``    … `[ntfy]` 行はあるが成功が 1 本も無い (送信試行して落ちた/未設定)
+      ``absent``    … `[ntfy]` 行が無い / run.log が読めない (送信を試みた形跡すら無い)
+    """
+    log_path = run_dir / "run.log"
+    try:
+        text = log_path.read_text(encoding="utf-8", errors="replace")
+    except Exception:  # noqa: BLE001 - 読めない = 痕跡なし (fail-closed)
+        return "absent", {"ntfy_lines": 0, "ntfy_log": "unreadable"}
+    lines = _NTFY_LOG_RE.findall(text)
+    if not lines:
+        return "absent", {"ntfy_lines": 0}
+    data: dict[str, Any] = {
+        "ntfy_lines": len(lines),
+        "ntfy_last": lines[-1].strip()[:200],
+    }
+    if any(_NTFY_OK_RE.search(ln) for ln in lines):
+        return "delivered", data
+    return "failed", data
+
+def _abort_reason(run_dir: Path, recon: dict) -> str | None:
+    """その run が ABORT で終わったか。理由文字列 / 終わっていなければ None。
+
+    正は completion_recon.json の ``abort`` (gate が書く)。record に理由が残らないまま
+    死んだ場合の保険として SUMMARY.md も見る (finalize は abort 時に必ず
+    ``**ABORTED**`` 行を書くので、理由が空でも「落ちた」ことだけは残る)。
+    """
+    abort = recon.get("abort")
+    if abort:
+        return str(abort)
+    try:
+        summary = (run_dir / "SUMMARY.md").read_text(encoding="utf-8", errors="replace")
+    except Exception:  # noqa: BLE001 - SUMMARY が無い run は abort 判定材料なし
+        return None
+    return "unrecorded" if "**ABORTED**" in summary else None
+
+
 # --- entry_submitted=0 は「失敗」とは限らない (2026-08-22 cry-wolf 修正) ---------
 # book が満杯の夜は、生成された order が **全件** pre-submit で skip され送信 0 になる。
 # これは設計どおりの正常終了であって run の失敗ではない (実測 2026-08-11 / 2026-08-21:
@@ -460,11 +532,14 @@ def check_open_run(
     age = _mtime_age_hours(newest / "completion_recon.json") or _mtime_age_hours(newest)
     run_date = recon.get("date") or newest.name.replace("open_run_", "")
     abort = recon.get("abort")
+    abort_reason = _abort_reason(newest, recon)
     mode = recon.get("mode")
     submitted = recon.get("entry_submitted")
     data = {
         "dir": newest.name,
         "run_date": run_date,
+        # runner が run_id を書くようになったら拾う (無い間は None)。
+        "run_id": recon.get("run_id"),
         "mode": mode,
         "abort": abort,
         "done_lock": done,
@@ -474,20 +549,35 @@ def check_open_run(
         "age_hours": round(age, 1) if age is not None else None,
     }
 
-    # 良性 abort (市場休場) は OK 扱い
+    # 良性 abort (市場休場) は OK 扱い。clock が読めた = 外向きの経路は生きていた夜で、
+    # かつ休場は何も起きなくて正しいので、通知の有無は問わない。
     if abort == "market_closed":
         return CheckResult(
             "open_run", "ok", f"{run_date}: market closed で正常 skip", data
         )
-    if abort == "drawdown_flatten":
-        return CheckResult(
-            "open_run",
-            "warn",
-            f"{run_date}: drawdown breaker 発火で flatten/中止",
-            data,
-        )
-    if abort:
-        return CheckResult("open_run", "warn", f"{run_date}: ABORT ({abort})", data)
+
+    if abort_reason:
+        notify_state, notify_data = notification_evidence(newest)
+        data.update(notify_data)
+        data["notification"] = notify_state
+        if notify_state != "delivered":
+            label = recon.get("run_id") or newest.name
+            return CheckResult(
+                "open_run",
+                "crit",
+                f"{run_date}: ABORT({abort_reason}) が誰にも通知されないまま終わっている "
+                f"(ntfy={notify_state} / run={label}) — entry も exit も走っていない。"
+                "保有の期限超過と原因を今すぐ確認",
+                data,
+            )
+        if abort == "drawdown_flatten":
+            return CheckResult(
+                "open_run",
+                "warn",
+                f"{run_date}: drawdown breaker 発火で flatten/中止",
+                data,
+            )
+        return CheckResult("open_run", "warn", f"{run_date}: ABORT ({abort_reason})", data)
 
     # abort 無し = entry まで到達したはず
     if age is not None and age > max_age_hours:
