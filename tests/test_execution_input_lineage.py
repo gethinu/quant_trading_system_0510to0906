@@ -107,6 +107,29 @@ def test_recon_withholds_run_id_when_any_input_unbound(paper_run, exit_run):
     assert recon["execution_lineage_ok"] is False
 
 
+def test_recon_stamps_when_every_input_is_absent():
+    """entry も exit も **1 つも動かなかった** run は突合対象が無いので stamp する。
+
+    ``test_absent_input_is_missing_and_tolerated`` は片側だけが missing の場合を
+    見ており、``test_recon_withholds_run_id_when_any_input_unbound`` の
+    ``(None, None)`` は「dict はあるが ``source_signals_run_id`` が無い」
+    (= ``unverified``) であって段の不在ではない。両段とも不在という
+    ``missing`` だけの lineage が **withhold 側に倒れない** ことは、どちらの
+    テストからも落ちていた。
+
+    ここが逆に倒れると、gate abort や skip で execution が 1 段も走らなかった日に
+    recon が run_id を名乗れなくなり、bundle preflight が正常な run を
+    fail-closed で弾き続ける。
+    """
+    recon = build_recon(_signals(), None, None, date_str="2026-08-17")
+    assert recon["execution_lineage"] == {
+        "paper_orders": "missing",
+        "exit_orders": "missing",
+    }
+    assert recon["execution_lineage_ok"] is True
+    assert recon["source_signals_run_id"] == RUN
+
+
 # --- preflight fail-closed ----------------------------------------------
 # 既存 bundle テストの fixture を再利用する (funnel/Exit が揃った現実的な形)。
 # 最小 dict では funnel materialization が先に落ち、lineage check に到達しない。
