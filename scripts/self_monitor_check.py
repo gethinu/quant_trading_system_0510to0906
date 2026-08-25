@@ -23,10 +23,14 @@
     3. [publish]   Vercel publish が成功したか。monitor-webapp ブランチに当日 commit があるか
                    (git log)。古ければ dashboard 固着の疑い → CRIT。
     4. [open_run]  オープン自動発注 run が走り entry が fill したか。
-                   最新 logs/open_run_<YYYYMMDD>/completion_recon.json + paper_orders_*.json。
+                   最新 logs/open_run_<YYYYMMDD>/completion_recon.json + paper_orders.json。
                    one-shot ツールが残す `_<suffix>` 付き sidecar dir は **除外** する
                    (canonical 名だけが nightly。詳細は _latest_open_run_dir)。
-                   abort(market_closed) は良性、それ以外の abort / entry 0 は WARN。
+                   abort(market_closed) は良性、それ以外の abort は WARN。
+                   entry_submitted=0 は **無条件 WARN にしない**: book が満杯で全件
+                   standing_cap / already_held skip なら設計どおりの正常終了なので OK、
+                   失敗・生成ゼロ・capacity 以外の skip・成果物欠落だけを WARN にする
+                   (2026-08-22 cry-wolf 修正。詳細は classify_zero_entry)。
 
 Exit codes: 0=全 OK, 2=WARN あり, 3=CRIT あり。
 """
@@ -332,6 +336,116 @@ def _latest_open_run_dir(logs_dir: Path) -> Path | None:
     return max(canonical, key=lambda d: d.name)
 
 
+# --- entry_submitted=0 は「失敗」とは限らない (2026-08-22 cry-wolf 修正) ---------
+# book が満杯の夜は、生成された order が **全件** pre-submit で skip され送信 0 になる。
+# これは設計どおりの正常終了であって run の失敗ではない (実測 2026-08-11 / 2026-08-21:
+# 生成 17/11 件がすべて standing_cap + already_held で skip、entry_failed=0)。
+# 旧実装は entry_submitted<=0 だけを見て無条件 WARN だったので、cap 飽和のたびに
+# 「実 run だが entry_submitted=0」と誤報していた。
+#
+# 判定は skip 理由で行う。以下は「枠が無い / 既に持っている」= capacity 由来で良性:
+#   standing_cap  … per-system / portfolio の建玉上限に到達 (alpaca_trading.py)
+#   already_held  … 同一 symbol/side を既に保有
+#   already_open  … 同一 client_order_id の注文が既に生存 (重複抑止)
+#   qty_reserved  … 別注文 (保護 / exit) が qty を予約済み
+# これ以外の理由 (untradable / min_notional / unsizable / 理由なし) と、失敗・
+# 生成ゼロ・成果物欠落は **本物の異常** なので今までどおり WARN を出す。
+#
+# 注意: cap が生の建玉数であること (sys5 starvation 等) は構造的な別問題で、ここでは
+# 直さない。docs/MORNING_BRIEF_CRY_WOLF_20260822.md を参照。
+_BENIGN_ENTRY_SKIP_KINDS = frozenset(
+    {"standing_cap", "already_held", "already_open", "qty_reserved"}
+)
+
+
+def _skip_kind(reason: Any) -> str:
+    """`standing_cap:system2_held=10+...` -> `standing_cap` (無ければ空文字)。"""
+    return str(reason or "").split(":", 1)[0].strip()
+
+
+def _load_entry_orders(newest: Path, results_dir: Path, run_date: str) -> dict | None:
+    """その run の paper_orders payload を返す (見つからなければ None)。
+
+    正は runner が open_run dir へ dump した ``paper_orders.json``。取れないときだけ
+    ``results_csv/paper_orders_<YYYYMMDD>.json`` へ落ちるが、**同じ run 日付のもの
+    だけ** を使う (別日の残骸で良性判定してしまうのを防ぐ)。
+    """
+    payload = _load_json(newest / "paper_orders.json")
+    if isinstance(payload, dict):
+        return payload
+    digits = "".join(ch for ch in str(run_date) if ch.isdigit())[:8]
+    if len(digits) != 8:
+        return None
+    payload = _load_json(results_dir / f"paper_orders_{digits}.json")
+    return payload if isinstance(payload, dict) else None
+
+
+def classify_zero_entry(recon: dict, orders_payload: dict | None) -> tuple[bool, str, dict]:
+    """entry_submitted==0 が capacity 由来 (正常) か本物の異常かを判定する。
+
+    Returns ``(is_anomaly, detail, extra_data)``。判定できない (成果物が無い /
+    壊れている) ときは **異常側に倒す** (fail-closed): 「証明できない = 正常」に
+    してしまうと本物の沈黙を silent success に変えてしまうため。
+    """
+    extra: dict[str, Any] = {}
+    try:
+        failed = int(recon.get("entry_failed") or 0)
+    except (TypeError, ValueError):
+        failed = 0
+    status = str(recon.get("entry_status") or "")
+    extra["entry_failed"] = failed
+
+    if failed > 0:
+        return True, f"送信失敗 {failed} 件", extra
+    if status == "no_orders_generated":
+        return True, "signals はあるのに order が 1 件も生成されていない", extra
+    if status == "all_submit_failed":
+        return True, "生成した order が全件 submit 失敗", extra
+
+    if orders_payload is None:
+        return True, "paper_orders 成果物が無く skip 理由を確認できない", extra
+
+    orders = orders_payload.get("orders")
+    if not isinstance(orders, list):
+        return True, "paper_orders の orders が読めない", extra
+
+    try:
+        input_signals = int(orders_payload.get("input_signals") or 0)
+    except (TypeError, ValueError):
+        input_signals = 0
+    extra["input_signals"] = input_signals
+
+    if not orders:
+        if input_signals > 0:
+            return True, f"input_signals={input_signals} なのに order が 0 件", extra
+        # 真の flat book (シグナル自体が無い) は薄シグナル側 check の担当。
+        return False, "発注対象シグナルが無い (flat book)", extra
+
+    kinds: dict[str, int] = {}
+    unexplained = 0
+    for o in orders:
+        kind = _skip_kind((o or {}).get("skip_reason")) if isinstance(o, dict) else ""
+        if not kind:
+            unexplained += 1
+            continue
+        kinds[kind] = kinds.get(kind, 0) + 1
+    extra["skip_kinds"] = kinds
+    extra["orders_without_skip_reason"] = unexplained
+
+    if unexplained:
+        return (
+            True,
+            f"skip 理由の無い order が {unexplained} 件 (送信も skip もされず消えた)",
+            extra,
+        )
+    non_benign = {k: v for k, v in kinds.items() if k not in _BENIGN_ENTRY_SKIP_KINDS}
+    if non_benign:
+        return True, f"capacity 以外の理由で skip: {non_benign}", extra
+
+    breakdown = ", ".join(f"{k}={kinds[k]}" for k in sorted(kinds))
+    return False, f"全 {len(orders)} 件が枠不足/既保有で skip ({breakdown})", extra
+
+
 def check_open_run(
     logs_dir: Path, results_dir: Path, max_age_hours: float
 ) -> CheckResult:
@@ -390,10 +504,21 @@ def check_open_run(
     except (TypeError, ValueError):
         n_sub = 0
     if n_sub <= 0:
+        orders_payload = _load_entry_orders(newest, results_dir, str(run_date))
+        is_anomaly, why, extra = classify_zero_entry(recon, orders_payload)
+        data.update(extra)
+        data["zero_entry_verdict"] = "anomaly" if is_anomaly else "expected"
+        if is_anomaly:
+            return CheckResult(
+                "open_run",
+                "warn",
+                f"{run_date}: 実 run だが entry_submitted={submitted} — {why}",
+                data,
+            )
         return CheckResult(
             "open_run",
-            "warn",
-            f"{run_date}: 実 run だが entry_submitted={submitted}",
+            "ok",
+            f"{run_date}: entry_submitted=0 は正常 — {why}",
             data,
         )
     return CheckResult(

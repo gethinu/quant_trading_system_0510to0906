@@ -25,6 +25,7 @@ from scripts.self_monitor_check import (  # noqa: E402
     check_open_run,
     check_publish,
     check_signals,
+    classify_zero_entry,
 )
 
 
@@ -194,6 +195,7 @@ def test_open_run_filled_is_ok(tmp_path: Path):
 
 
 def test_open_run_zero_entries_is_warn(tmp_path: Path):
+    """paper_orders 成果物が無い entry 0 は fail-closed で WARN のまま。"""
     logs = tmp_path / "logs"
     d = logs / "open_run_20260713"
     _write(
@@ -202,6 +204,7 @@ def test_open_run_zero_entries_is_warn(tmp_path: Path):
     )
     r = check_open_run(logs, tmp_path / "results_csv", max_age_hours=96)
     assert r.status == "warn"
+    assert r.data["zero_entry_verdict"] == "anomaly"
 
 
 def test_open_run_none_when_no_dirs(tmp_path: Path):
@@ -286,6 +289,168 @@ def test_open_run_ignores_non_dir_and_malformed_names(tmp_path: Path):
     (logs / "open_run_20260820").write_text("not a dir", encoding="utf-8")
     (logs / "open_run_2026082").mkdir()  # 7 桁 = 日付として不正
     assert _latest_open_run_dir(logs).name == "open_run_20260819"
+
+
+# --- open_run: entry_submitted=0 の cry-wolf 修正 (2026-08-22) ----------------
+# book が満杯の夜は生成 order が全件 standing_cap / already_held で pre-submit skip
+# され送信 0 になる = 設計どおりの正常終了。旧実装は entry_submitted<=0 を無条件
+# WARN にしていたので、cap 飽和のたびに「実 run だが entry_submitted=0」と誤報した。
+# 本物の異常 (送信失敗 / 生成ゼロ / capacity 以外の skip / 成果物欠落) は必ず WARN。
+def _zero_entry_run(
+    tmp_path: Path, orders: list[dict] | None, *, recon_extra: dict | None = None
+) -> Path:
+    logs = tmp_path / "logs"
+    d = logs / "open_run_20260821"
+    _write(
+        d / "completion_recon.json",
+        {
+            "date": "2026-08-21",
+            "mode": "paper_submit",
+            "entry_submitted": 0,
+            "entry_skipped": len(orders or []),
+            "entry_failed": 0,
+            "entry_status": "no_orders_submitted",
+            **(recon_extra or {}),
+        },
+    )
+    if orders is not None:
+        _write(
+            d / "paper_orders.json",
+            {
+                "date": "2026-08-21",
+                "count": len(orders),
+                "submitted": 0,
+                "failed": 0,
+                "skipped": len(orders),
+                "input_signals": len(orders),
+                "status": "no_orders_submitted",
+                "orders": orders,
+            },
+        )
+    return logs
+
+
+def _skips(*reasons: str) -> list[dict]:
+    return [
+        {"symbol": f"S{i}", "side": "buy", "system": "system2", "skip_reason": r}
+        for i, r in enumerate(reasons)
+    ]
+
+
+def test_open_run_zero_entries_ok_when_cap_saturated(tmp_path: Path):
+    """2026-08-21 の実データ再現: 11 件が already_held 4 + standing_cap 7 で全 skip。"""
+    orders = _skips(
+        *(["already_held:buy_qty=41"] * 4),
+        *(["standing_cap:system2_held=10+batch=0>=cap=10"] * 7),
+    )
+    logs = _zero_entry_run(tmp_path, orders)
+    r = check_open_run(logs, tmp_path / "results_csv", max_age_hours=96)
+    assert r.status == "ok", r.detail
+    assert r.data["zero_entry_verdict"] == "expected"
+    assert r.data["skip_kinds"] == {"already_held": 4, "standing_cap": 7}
+
+
+def test_open_run_zero_entries_ok_for_every_capacity_kind(tmp_path: Path):
+    logs = _zero_entry_run(
+        tmp_path,
+        _skips(
+            "standing_cap:portfolio_total_held=40",
+            "already_held:sell_qty=-261",
+            "already_open:duplicate_client_order_id",
+            "qty_reserved:protective_order_already_open",
+        ),
+    )
+    r = check_open_run(logs, tmp_path / "results_csv", max_age_hours=96)
+    assert r.status == "ok", r.detail
+
+
+def test_open_run_zero_entries_warns_on_non_capacity_skip(tmp_path: Path):
+    """untradable のような capacity 以外の skip は握り潰さない。"""
+    logs = _zero_entry_run(
+        tmp_path,
+        _skips(
+            "standing_cap:system2_held=10+batch=0>=cap=10",
+            "untradable:not_tradable_at_broker",
+        ),
+    )
+    r = check_open_run(logs, tmp_path / "results_csv", max_age_hours=96)
+    assert r.status == "warn"
+    assert "untradable" in r.detail
+
+
+def test_open_run_zero_entries_warns_on_order_without_skip_reason(tmp_path: Path):
+    """送信も skip もされず消えた order = silent drop。必ず WARN。"""
+    orders = _skips("standing_cap:system2_held=10+batch=0>=cap=10")
+    orders.append({"symbol": "GHOST", "side": "buy", "system": "system1"})
+    logs = _zero_entry_run(tmp_path, orders)
+    r = check_open_run(logs, tmp_path / "results_csv", max_age_hours=96)
+    assert r.status == "warn"
+    assert r.data["orders_without_skip_reason"] == 1
+
+
+def test_open_run_zero_entries_warns_when_submits_failed(tmp_path: Path):
+    """cap で説明できても entry_failed>0 なら本物の失敗。"""
+    logs = _zero_entry_run(
+        tmp_path,
+        _skips("standing_cap:system2_held=10+batch=0>=cap=10"),
+        recon_extra={"entry_failed": 3, "entry_status": "all_submit_failed"},
+    )
+    r = check_open_run(logs, tmp_path / "results_csv", max_age_hours=96)
+    assert r.status == "warn"
+
+
+def test_open_run_zero_entries_warns_when_no_orders_generated(tmp_path: Path):
+    """signals はあるのに order 生成ゼロ = schema drift。cap とは別物。"""
+    logs = _zero_entry_run(
+        tmp_path,
+        [],
+        recon_extra={"entry_status": "no_orders_generated"},
+    )
+    r = check_open_run(logs, tmp_path / "results_csv", max_age_hours=96)
+    assert r.status == "warn"
+
+
+def test_open_run_zero_entries_falls_back_to_results_csv_same_date(tmp_path: Path):
+    """open_run dir に dump が無くても、同じ日付の results_csv 版なら採用する。"""
+    logs = _zero_entry_run(tmp_path, None)
+    results = tmp_path / "results_csv"
+    _write(
+        results / "paper_orders_20260821.json",
+        {
+            "input_signals": 2,
+            "orders": _skips(
+                "standing_cap:system2_held=10+batch=0>=cap=10",
+                "already_held:buy_qty=5",
+            ),
+        },
+    )
+    r = check_open_run(logs, results, max_age_hours=96)
+    assert r.status == "ok", r.detail
+
+
+def test_open_run_zero_entries_ignores_other_date_paper_orders(tmp_path: Path):
+    """別日の paper_orders で『正常』にしない (実際 Sat には翌日ぶんが残っている)。"""
+    logs = _zero_entry_run(tmp_path, None)
+    results = tmp_path / "results_csv"
+    _write(
+        results / "paper_orders_20260822.json",
+        {"input_signals": 1, "orders": _skips("standing_cap:x")},
+    )
+    r = check_open_run(logs, results, max_age_hours=96)
+    assert r.status == "warn"
+
+
+def test_classify_zero_entry_is_fail_closed_on_unreadable_artifact():
+    assert classify_zero_entry({}, None)[0] is True
+    assert classify_zero_entry({}, {"orders": "not-a-list"})[0] is True
+
+
+def test_classify_zero_entry_flat_book_is_not_an_anomaly():
+    """input signals 自体が 0 なら order 0 は正常 (薄シグナルは signals check の担当)。"""
+    is_anomaly, _why, _extra = classify_zero_entry(
+        {"entry_status": "no_input_signals"}, {"input_signals": 0, "orders": []}
+    )
+    assert is_anomaly is False
 
 
 # --- publish (git 無しの tmp dir では warn へフォールバック) ----------------
