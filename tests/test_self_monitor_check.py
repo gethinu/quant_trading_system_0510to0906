@@ -19,6 +19,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts.self_monitor_check import (  # noqa: E402
+    _abort_reason,
     _latest_open_run_dir,
     check_daily,
     check_data_advance,
@@ -26,6 +27,7 @@ from scripts.self_monitor_check import (  # noqa: E402
     check_publish,
     check_signals,
     classify_zero_entry,
+    notification_evidence,
 )
 
 
@@ -167,14 +169,162 @@ def test_open_run_market_closed_is_ok(tmp_path: Path):
 
 
 def test_open_run_thin_signal_abort_is_warn(tmp_path: Path):
+    """通知が **届いた** abort は従来どおり WARN (人がもう知っている)。"""
     logs = tmp_path / "logs"
     d = logs / "open_run_20260713"
     _write(
         d / "completion_recon.json",
         {"date": "2026-07-13", "abort": "thin_signals:2<10"},
     )
+    _write_text(d / "run.log", "[2026-07-13 22:35:10] [ntfy] warn 送信 ok=True\n")
     r = check_open_run(logs, tmp_path / "results_csv", max_age_hours=96)
     assert r.status == "warn"
+    assert r.data["notification"] == "delivered"
+
+
+# --- 通知が出ないまま abort した run は CRIT (2026-08-24 の host DNS 断) ---------
+# 実データ: logs/open_run_20260824/ は abort=clock_unavailable + run.log に
+# `[ntfy] warn 送信 ok=False` が 2 本 (22:35 / 23:35)。gate の clock も停止通知の ntfy も
+# 同じ死んだ DNS を通るので、run が止まったこと自体が誰にも届かなかった。
+# 「abort した」だけなら WARN、「abort して **かつ通知も出なかった**」は沈黙なので CRIT。
+
+
+def _abort_run(
+    tmp_path: Path,
+    *,
+    abort: str | None = "clock_unavailable",
+    ntfy: str | None = "ok=False",
+    summary: bool = True,
+) -> Path:
+    """abort で終わった run の成果物一式を組み立てる (DONE.lock は作らない)。"""
+    logs = tmp_path / "logs"
+    d = logs / "open_run_20260824"
+    recon: dict = {"date": "2026-08-24", "mode": "paper_submit"}
+    if abort is not None:
+        recon["abort"] = abort
+    _write(d / "completion_recon.json", recon)
+    if summary:
+        _write_text(
+            d / "SUMMARY.md",
+            "# OPEN AUTO RUN 2026-08-24 (paper_submit)\n\n" f"- **ABORTED**: {abort}\n",
+        )
+    if ntfy is not None:
+        _write_text(
+            d / "run.log",
+            "[2026-08-24 22:35:10] [gate] clock_unavailable -> ABORT\n"
+            f"[2026-08-24 22:35:17] [ntfy] warn 送信 {ntfy}\n",
+        )
+    return logs
+
+
+def test_open_run_abort_without_notification_is_crit(tmp_path: Path):
+    """2026-08-24 の再現: abort したのに ntfy が落ちた = 誰も知らない -> CRIT。"""
+    logs = _abort_run(tmp_path)
+    r = check_open_run(logs, tmp_path / "results_csv", max_age_hours=96)
+    assert r.status == "crit", r.detail
+    assert r.data["notification"] == "failed"
+    assert "clock_unavailable" in r.detail
+    assert "2026-08-24" in r.detail
+
+
+def test_open_run_abort_with_delivered_notification_stays_warn(tmp_path: Path):
+    """同じ abort でも通知が出ていれば WARN のまま (昇格は沈黙にだけ効く)。"""
+    logs = _abort_run(tmp_path, ntfy="ok=True")
+    r = check_open_run(logs, tmp_path / "results_csv", max_age_hours=96)
+    assert r.status == "warn", r.detail
+    assert r.data["notification"] == "delivered"
+
+
+def test_open_run_abort_without_any_ntfy_line_is_crit(tmp_path: Path):
+    """送信を試みた形跡すら無い (not_paper 等) も fail-closed で CRIT。"""
+    logs = _abort_run(tmp_path, abort="not_paper:live env", ntfy=None)
+    r = check_open_run(logs, tmp_path / "results_csv", max_age_hours=96)
+    assert r.status == "crit", r.detail
+    assert r.data["notification"] == "absent"
+
+
+def test_open_run_abort_recorded_only_in_summary_is_crit(tmp_path: Path):
+    """recon に理由が残らないまま死んでも SUMMARY の **ABORTED** で拾う。"""
+    logs = _abort_run(tmp_path, abort=None, ntfy=None)
+    r = check_open_run(logs, tmp_path / "results_csv", max_age_hours=96)
+    assert r.status == "crit", r.detail
+    assert "unrecorded" in r.detail
+
+
+def test_open_run_market_closed_stays_ok_even_without_notification(tmp_path: Path):
+    """休場 abort は良性。clock が読めた夜なので通知の有無は問わない。"""
+    logs = _abort_run(tmp_path, abort="market_closed", ntfy=None)
+    r = check_open_run(logs, tmp_path / "results_csv", max_age_hours=96)
+    assert r.status == "ok", r.detail
+
+
+def test_open_run_drawdown_flatten_without_notification_is_crit(tmp_path: Path):
+    logs = _abort_run(tmp_path, abort="drawdown_flatten", ntfy="ok=False")
+    r = check_open_run(logs, tmp_path / "results_csv", max_age_hours=96)
+    assert r.status == "crit", r.detail
+
+
+def test_open_run_normal_filled_run_is_not_escalated(tmp_path: Path):
+    """abort していない通常 run は ntfy 痕跡が無くても CRIT にしない。"""
+    logs = tmp_path / "logs"
+    d = logs / "open_run_20260824"
+    _write(
+        d / "completion_recon.json",
+        {
+            "date": "2026-08-24",
+            "mode": "paper_submit",
+            "entry_submitted": 47,
+            "entry_status": "ok",
+        },
+    )
+    _write_text(d / "SUMMARY.md", "# OPEN AUTO RUN 2026-08-24\n\n- entry: 47\n")
+    (d / "DONE.lock").write_text("x", encoding="utf-8")
+    r = check_open_run(logs, tmp_path / "results_csv", max_age_hours=96)
+    assert r.status == "ok", r.detail
+
+
+def test_open_run_cap_saturated_zero_entry_is_not_escalated(tmp_path: Path):
+    """cap 満杯の entry_submitted=0 (2026-08-21 実データ) も CRIT にしない。"""
+    orders = _skips(
+        *(["already_held:buy_qty=41"] * 4),
+        *(["standing_cap:system2_held=10+batch=0>=cap=10"] * 7),
+    )
+    logs = _zero_entry_run(tmp_path, orders)
+    d = logs / "open_run_20260821"
+    _write_text(d / "SUMMARY.md", "# OPEN AUTO RUN 2026-08-21\n\n- entry: 0\n")
+    (d / "DONE.lock").write_text("x", encoding="utf-8")
+    r = check_open_run(logs, tmp_path / "results_csv", max_age_hours=96)
+    assert r.status == "ok", r.detail
+
+
+def test_notification_evidence_states(tmp_path: Path):
+    d = tmp_path / "run"
+    d.mkdir()
+    assert notification_evidence(d)[0] == "absent", "run.log 自体が無い"
+    _write_text(d / "run.log", "[..] start\n[..] done\n")
+    assert notification_evidence(d)[0] == "absent", "[ntfy] 行が 1 本も無い"
+    _write_text(d / "run.log", "[..] [ntfy] warn 送信失敗 (無視): boom\n")
+    assert notification_evidence(d)[0] == "failed"
+    _write_text(
+        d / "run.log", "[..] [ntfy] NTFY_TOPIC 未設定のため warn 通知スキップ\n"
+    )
+    assert notification_evidence(d)[0] == "failed"
+    _write_text(
+        d / "run.log",
+        "[..] [ntfy] warn 送信 ok=False\n[..] [ntfy] warn 送信 ok=True\n",
+    )
+    assert notification_evidence(d)[0] == "delivered", "1 本でも成功すれば届いている"
+
+
+def test_abort_reason_prefers_recon_over_summary(tmp_path: Path):
+    d = tmp_path / "run"
+    d.mkdir()
+    assert _abort_reason(d, {}) is None
+    _write_text(d / "SUMMARY.md", "- entry: 47\n")
+    assert _abort_reason(d, {}) is None
+    _write_text(d / "SUMMARY.md", "- **ABORTED**: None\n")
+    assert _abort_reason(d, {}) == "unrecorded"
+    assert _abort_reason(d, {"abort": "market_closed"}) == "market_closed"
 
 
 def test_open_run_filled_is_ok(tmp_path: Path):
