@@ -391,6 +391,7 @@ def notification_evidence(run_dir: Path) -> tuple[str, dict[str, Any]]:
         return "delivered", data
     return "failed", data
 
+
 def _abort_reason(run_dir: Path, recon: dict) -> str | None:
     """その run が ABORT で終わったか。理由文字列 / 終わっていなければ None。
 
@@ -452,7 +453,9 @@ def _load_entry_orders(newest: Path, results_dir: Path, run_date: str) -> dict |
     return payload if isinstance(payload, dict) else None
 
 
-def classify_zero_entry(recon: dict, orders_payload: dict | None) -> tuple[bool, str, dict]:
+def classify_zero_entry(
+    recon: dict, orders_payload: dict | None
+) -> tuple[bool, str, dict]:
     """entry_submitted==0 が capacity 由来 (正常) か本物の異常かを判定する。
 
     Returns ``(is_anomaly, detail, extra_data)``。判定できない (成果物が無い /
@@ -577,7 +580,9 @@ def check_open_run(
                 f"{run_date}: drawdown breaker 発火で flatten/中止",
                 data,
             )
-        return CheckResult("open_run", "warn", f"{run_date}: ABORT ({abort_reason})", data)
+        return CheckResult(
+            "open_run", "warn", f"{run_date}: ABORT ({abort_reason})", data
+        )
 
     # abort 無し = entry まで到達したはず
     if age is not None and age > max_age_hours:
