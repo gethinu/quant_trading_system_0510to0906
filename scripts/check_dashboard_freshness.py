@@ -470,7 +470,9 @@ def _send_one(item: dict) -> tuple[bool, str]:
         return False, f"{type(exc).__name__}: {exc}"
 
 
-def _notify_stale(result: dict, root: Path, now: str, *, post_heal: bool = False) -> None:
+def _notify_stale(
+    result: dict, root: Path, now: str, *, post_heal: bool = False
+) -> None:
     """Fire an ntfy WARN for this gap, flushing any carried-over failures first.
 
     A send failure is NOT swallowed: the alert is queued to ``logs/`` and retried
@@ -651,8 +653,10 @@ def main(argv: list[str] | None = None) -> int:
 
     # 明示引数が既定より強い: --data-dir を渡された呼び出しは、その dir 自体を
     # 測ることが目的なので origin ref で上書きしない。
-    basis = args.served_basis or os.getenv("QTS_SERVED_BASIS") or (
-        "local" if args.data_dir else "ref"
+    basis = (
+        args.served_basis
+        or os.getenv("QTS_SERVED_BASIS")
+        or ("local" if args.data_dir else "ref")
     )
     served_ref = args.served_ref if basis == "ref" else None
     result = check_freshness(
