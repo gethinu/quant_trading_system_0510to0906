@@ -4,6 +4,9 @@
 `C:\\tmp\\open_run_20260708.py` (削除済) を汎用化し、以下を段で行う:
 
     1. [gate]    paper env 断言 + market-open (Alpaca clock)。ここで落ちたら run 全体 ABORT。
+                 「休場と分かっている (market_closed)」と「開場か分からない
+                 (clock_unavailable)」は別扱いで、素通しフラグも別
+                 (--allow-closed / --allow-clock-unknown。後者は既定 OFF)。
                  シグナル数 < 閾値 は **entry 専用ゲート** で、exit は必ず通す
                  (薄データで新規建てはしないが、手仕舞いは止めない)。
     2. [signals] apps/app_today_signals.py --headless --date <d> で当日シグナル生成。
@@ -16,7 +19,9 @@
     7. [notify]  scripts/publish_execution_summary.py (非 dry-run) で ntfy 実績通知
                  (UTF-8-safe な NtfyPublisher 経由。素の str POST の latin-1 死を回避)。
     8. [publish] notify が再構成した recon/pipeline を含む当日 data を Vercel へ publish。
-    9. [durable] logs/open_run_<date>/ に全成果物と DONE.lock を残す。
+    9. [durable] logs/open_run_<date>/ に全成果物と DONE.lock を残す。記録は起動ごとに
+                 completion_recon_<run_id>.json (上書きしない) + 最新起動を指す
+                 completion_recon.json の 2 本立て。
 
 安全ガード:
     - paper 固定 (assert_paper_env)。live/実マネーは一切扱わない。
@@ -168,12 +173,43 @@ def _env_flag(name: str, default: bool = False) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+# Task Scheduler の QuantTrading_OpenAutoRun は **同じ日に 2 回** 起動する
+# (22:35 と 23:35)。成果物にどちらの起動のものか書いていないと、1 回目の記録が
+# 2 回目に上書きされたとき「何が起きたか」が丸ごと消える。実際 2026-08-24 は
+# 22:35 の abort(clock_unavailable) を 23:35 の run が同じ completion_recon.json へ
+# 書き潰し、朝には 1 回ぶんの原因しか残っていなかった。
+_TRIGGER_SLOTS = (("2235", 22), ("2335", 23))
+_TRIGGER_MANUAL = "manual"
+
+
+def _resolve_trigger(explicit: str | None, started: datetime) -> str:
+    """この起動が nightly の 22:35 / 23:35 トリガか手動かを返す。
+
+    スケジューラは起動元を子プロセスへ伝えないので、ローカル時刻の *時* で判定する
+    (22 時台 -> ``2235`` / 23 時台 -> ``2335`` / それ以外 -> ``manual``)。
+    ``--trigger`` / ``OPEN_RUN_TRIGGER`` で明示指定があればそれを優先する。
+    """
+    if explicit and str(explicit).strip():
+        return str(explicit).strip()
+    for name, hour in _TRIGGER_SLOTS:
+        if started.hour == hour:
+            return name
+    return _TRIGGER_MANUAL
+
+
 class Runner:
     def __init__(self, args: argparse.Namespace) -> None:
         self.args = args
         self.date = args.date or datetime.now().strftime("%Y-%m-%d")
         self.compact = self.date.replace("-", "")
         self.dry_run = bool(args.dry_run)
+        # この「起動」の身元。date だけだと同日 2 トリガを区別できない (下記 _resolve_trigger)。
+        started = datetime.now()
+        self.observed_at = (
+            started.astimezone(timezone.utc).isoformat(timespec="seconds")
+        )
+        self.trigger = _resolve_trigger(getattr(args, "trigger", None), started)
+        self.run_id = f"{self.compact}-{self.trigger}-{started.strftime('%H%M%S')}"
         # 薄シグナルは entry のみを止める。exit は必ず通す (下記 signals() 参照)。
         self.entry_allowed = True
         self.out = ROOT / "logs" / f"open_run_{self.compact}"
@@ -187,6 +223,9 @@ class Runner:
         self._log_path = self.out / "run.log"
         self.record: dict[str, object] = {
             "date": self.date,
+            "run_id": self.run_id,
+            "trigger": self.trigger,
+            "observed_at": self.observed_at,
             "mode": "dry_run" if self.dry_run else "paper_submit",
             "worktree": str(ROOT),
         }
@@ -362,19 +401,35 @@ class Runner:
             # 「閉場だった」と「clock が読めなかった」は別物。取り違えると
             # exit が飛んだ日を「休場だから正常」と誤読する。
             self.record["clock_unavailable"] = clock_error
-        if not is_open and not self.args.allow_closed:
-            reason = "clock_unavailable" if clock_error else "market_closed"
-            self.log(f"[gate] {reason} -> ABORT (--allow-closed で無視可)")
-            self.record["abort"] = reason
-            detail = (
-                f"clock を {_CLOCK_FETCH_ATTEMPTS} 回取得できず開場判定不能"
-                f" ({clock_error}): 自動発注を中止 (paper)。**exit も飛ぶ**ので"
-                " 保有の期限超過を確認すること。"
-                if clock_error
-                else "market closed のため自動発注を中止 (paper)。"
-            )
-            self._ntfy_warn(f"OpenAutoRun ABORT {self.date}", detail)
-            return False
+        if not is_open:
+            # 「休場だと **分かっている**」と「開場かどうか **分からない**」は
+            # リスクが違う。前者は何も起きなくて正しい夜、後者は broker が見えて
+            # いない夜で、そのまま段を通せば板の状態を知らずに発注することになる。
+            # 旧実装は両方を --allow-closed 1 本で外せたので、off-hours テスト用に
+            # 足したつもりの逃げ道が clock 不通も黙って素通しできてしまっていた。
+            # clock 不明の bypass は別フラグ (既定 OFF) に分ける。
+            if clock_error is not None:
+                reason = "clock_unavailable"
+                bypass = bool(getattr(self.args, "allow_clock_unknown", False))
+                bypass_flag = "--allow-clock-unknown"
+            else:
+                reason = "market_closed"
+                bypass = bool(self.args.allow_closed)
+                bypass_flag = "--allow-closed"
+            if not bypass:
+                self.log(f"[gate] {reason} -> ABORT ({bypass_flag} で無視可)")
+                self.record["abort"] = reason
+                detail = (
+                    f"clock を {_CLOCK_FETCH_ATTEMPTS} 回取得できず開場判定不能"
+                    f" ({clock_error}): 自動発注を中止 (paper)。**exit も飛ぶ**ので"
+                    " 保有の期限超過を確認すること。"
+                    if clock_error
+                    else "market closed のため自動発注を中止 (paper)。"
+                )
+                self._ntfy_warn(f"OpenAutoRun ABORT {self.date}", detail)
+                return False
+            self.record["gate_bypass"] = reason
+            self.log(f"[gate] {reason} だが {bypass_flag} 指定のため段を続行する")
         return True
 
     def signals(self) -> bool:
@@ -1064,6 +1119,7 @@ class Runner:
         lines = [
             f"# OPEN AUTO RUN {self.date} ({self.record['mode']})",
             "",
+            f"- run_id: {self.run_id} (trigger={self.trigger}, observed_at={self.observed_at})",
             f"- worktree: {ROOT}",
             f"- market_is_open: {self.record.get('market_is_open')}",
             f"- signal_count: {self.record.get('signal_count')} "
@@ -1111,6 +1167,19 @@ class Runner:
 
         # SUMMARY の失敗情報も completion_recon に残せるよう、最後に dump する。
         # _dump 自体は I/O 失敗を吸収するが、警告 log 側の例外も念のため封じる。
+        #
+        # **run_id 別のファイルを先に**書く。同日 2 トリガが同じ
+        # completion_recon.json を後勝ちで潰すため、2026-08-24 は 22:35 の
+        # abort(clock_unavailable) の記録が 23:35 に消えた。run_id 別ファイルは
+        # 1 起動 1 ファイルで上書きされないので、あとから「何回走って何回落ちたか」を
+        # 復元できる。completion_recon.json は **最新起動へのポインタ**として据え置く
+        # (SelfMonitor / publish など既存の読み手を壊さない)。
+        per_run_path = self.out / f"completion_recon_{self.run_id}.json"
+        try:
+            self._dump(per_run_path.name, self.record)
+        except Exception as exc:  # noqa: BLE001 - canonical 側の書き込みは必ず試す
+            remember_write_error("completion_recon_run_write_error", per_run_path, exc)
+
         completion_path = self.out / "completion_recon.json"
         try:
             self._dump(completion_path.name, self.record)
@@ -1228,7 +1297,28 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--allow-closed",
         action="store_true",
-        help="market closed でも段を通す (off-hours テスト)",
+        help=(
+            "clock が読めて **休場と分かっている** ときに段を通す (off-hours テスト)。"
+            "clock 自体が取れない場合は素通ししない (--allow-clock-unknown を参照)。"
+        ),
+    )
+    p.add_argument(
+        "--allow-clock-unknown",
+        action="store_true",
+        default=_env_flag("OPEN_RUN_ALLOW_CLOCK_UNKNOWN", False),
+        help=(
+            "[既定 OFF・緊急用] Alpaca clock が取得できず開場判定不能でも段を通す。"
+            "板の状態を知らないまま発注することになるので、人が張り付いている時だけ "
+            "(env OPEN_RUN_ALLOW_CLOCK_UNKNOWN=1 でも可)。"
+        ),
+    )
+    p.add_argument(
+        "--trigger",
+        default=os.getenv("OPEN_RUN_TRIGGER") or None,
+        help=(
+            "この起動の呼び元 (2235 / 2335 / manual)。既定はローカル時刻の時から推定。"
+            "成果物の run_id に入る。"
+        ),
     )
     p.add_argument(
         "--force",
