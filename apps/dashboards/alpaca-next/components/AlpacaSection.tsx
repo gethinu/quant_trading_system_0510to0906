@@ -1609,6 +1609,9 @@ export function AlpacaSection({ payload }: { payload: AlpacaSnapshot | null }) {
   const a = payload.account;
   const s = payload.summary;
   const st = computeStatus(payload);
+  const overdueUnsubmitted = st.overdue.filter(
+    (r) => r.executionState !== 'submitted',
+  ).length;
   const realized = payload.realized ?? null;
   const eqRange = payload.equity_ranges?.['1M'] ?? null;
 
@@ -1773,7 +1776,10 @@ export function AlpacaSection({ payload }: { payload: AlpacaSnapshot | null }) {
         title="保有ポジション"
         badge={
           st.overdue.length > 0
-            ? { text: `期限超過 ${st.overdue.length}`, tone: 'fail' }
+            ? {
+                text: `期限超過 ${st.overdue.length} · 未送信/不明 ${overdueUnsubmitted}`,
+                tone: 'fail',
+              }
             : undefined
         }
         meta={

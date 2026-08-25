@@ -61,6 +61,9 @@ def test_dry_run_default_writes_json(tmp_path: Path):
     assert "positions" in data
     assert data.get("submitted") == 0
     assert data.get("failed") == 0
+    assert data.get("time_exit_due") == 0
+    assert data.get("time_exit_unsubmitted") == 0
+    assert data.get("execution_health") == "ok"
 
 
 def test_output_schema_has_system_rules_summary(tmp_path: Path):
@@ -185,3 +188,69 @@ def test_alpaca_entry_coid_uses_rename_alias_when_broker_symbol_changed():
 
     assert snap.system == "system3"
     assert snap.entry_date == "2026-07-13"
+def test_operational_gate_rejects_due_dry_run(monkeypatch, tmp_path: Path):
+    """期限 exit の案だけ作って broker 未送信なら日次運用は成功扱いしない。"""
+    from common.alpaca_trading import PreparedExit
+    from scripts import paper_exit_check as pec
+
+    due = PreparedExit(
+        symbol="DUE",
+        system="system2",
+        qty=1,
+        side="sell",
+        order_type="market",
+        reason="time_based",
+        holding_days=3,
+        max_holding_days=2,
+    )
+    monkeypatch.setattr(pec, "build_exit_orders_from_positions", lambda *a, **k: [due])
+    out = tmp_path / "exit_orders_20260703.json"
+    rc = pec.main(
+        [
+            "--no-alpaca",
+            "--date",
+            "2026-07-03",
+            "--output-json",
+            str(out),
+            "--results-dir",
+            str(tmp_path),
+            "--fail-on-unsubmitted-time-exit",
+        ]
+    )
+    data = json.loads(out.read_text(encoding="utf-8"))
+    # 2026-08-25: exit=3 は broker_unreachable が先に使っているため、この
+    # opt-in ゲートは別コード 4 で surface する (docs/RUNNER_RETIREMENT_20260822.md)。
+    assert rc == 4
+    assert data["time_exit_due"] == 1
+    assert data["time_exit_unsubmitted"] == 1
+    assert data["execution_health"] == "blocked_unsubmitted_time_exit"
+
+
+def test_manual_dry_run_remains_zero_without_operational_gate(
+    monkeypatch, tmp_path: Path
+):
+    """明示ゲート無しの手動シミュレーションは従来互換で exit=0。"""
+    from common.alpaca_trading import PreparedExit
+    from scripts import paper_exit_check as pec
+
+    due = PreparedExit(
+        symbol="DUE",
+        system="system2",
+        qty=1,
+        side="sell",
+        order_type="market",
+        reason="time_based",
+    )
+    monkeypatch.setattr(pec, "build_exit_orders_from_positions", lambda *a, **k: [due])
+    rc = pec.main(
+        [
+            "--no-alpaca",
+            "--date",
+            "2026-07-03",
+            "--output-json",
+            str(tmp_path / "manual.json"),
+            "--results-dir",
+            str(tmp_path),
+        ]
+    )
+    assert rc == 0

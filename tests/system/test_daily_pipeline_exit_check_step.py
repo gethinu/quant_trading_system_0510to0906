@@ -3,11 +3,11 @@
 subscriber サービスイン基準:
     - [exit_check] step が pipeline に存在する
     - default = dry-run (paper_exit_check.py + --output-json のみ)
-    - -AutoSubmitPaper 時のみ --confirm --yes が渡る
+    - -AutoSubmitPaper / -AutoSubmitPaperExits 時のみ --confirm --yes が渡る
     - SkipExitCheck switch が定義されている
     - step の位置は paper_orders (5b) の後、vercel (6) の前
 
-paper_orders_step 側と同じ opt-in flag をシェアする regression protection。
+既存の combined opt-in を保持しつつ exit-only opt-in を許す regression protection。
 """
 
 from __future__ import annotations
@@ -56,7 +56,7 @@ def test_exit_check_default_is_dryrun():
         end = code.find('Write-Log "----- [vercel]', start)
     block = code[start:end]
     # AutoSubmit の中には --confirm --yes、else の中には無い
-    idx_switch = block.find("if ($AutoSubmitPaper)")
+    idx_switch = block.find("if ($ExitSubmitEnabled)")
     idx_else = block.find("else {", idx_switch)
     assert idx_switch != -1 and idx_else != -1
     submit_block = block[idx_switch:idx_else]
@@ -75,11 +75,46 @@ def test_exit_check_between_paper_orders_and_vercel():
     assert idx_paper < idx_exit < idx_vercel
 
 
-def test_exit_check_shares_autosubmit_flag_with_entry():
-    """entry (5b) と exit_check (5c) は同じ -AutoSubmitPaper flag で連動する。"""
+def test_exit_check_has_independent_submit_flag():
+    """exit だけを実発注でき、entry の権限と分離されている。"""
     code = _code_section(_read())
-    # exit_check の submit 分岐が同じ $AutoSubmitPaper を参照している
+    assert "[switch]$AutoSubmitPaperExits" in _read()
+    assert "$ExitSubmitEnabled = $AutoSubmitPaper -or $AutoSubmitPaperExits" in code
     idx_exit = code.find('Write-Log "[exit_check] SkipExitCheck')
     tail = code[idx_exit:]
-    idx_switch = tail.find("if ($AutoSubmitPaper)")
-    assert idx_switch != -1, "exit_check が AutoSubmitPaper flag を参照していない"
+    assert "if ($ExitSubmitEnabled)" in tail
+
+
+def test_exit_only_submit_can_be_enabled_by_primary_env():
+    """既存 scheduler wrapper が primary .env を継承すれば追加引数なしで opt-in 可能。"""
+    code = _code_section(_read())
+    assert "$env:AUTO_SUBMIT_PAPER_EXITS" in code
+    assert "$AutoSubmitPaperExits = $true" in code
+
+
+def test_proposal_pass_does_not_arm_the_unsubmitted_time_exit_gate():
+    """06:00 の提案 pass に --fail-on-unsubmitted-time-exit を配線しない。
+
+    2026-08-25 (main 統合) の判断。daily_pipeline の exit_check は role=proposal
+    の pass で、exit の実発注は夜の open_auto_run が行う。この pass で
+    「期限到来 time exit が未送信」を失敗にすると、**未送信であることが正常**
+    なので毎日鳴る (2026-08-22 に潰したばかりの cry-wolf と同型)。
+
+    ゲート自体は paper_exit_check に opt-in で存在し (既定 OFF)、件数は
+    artifact の time_exit_unsubmitted / execution_health で常に観測できる。
+    """
+    code = _code_section(_read())
+    idx_exit = code.find('Write-Log "[exit_check] SkipExitCheck')
+    tail = code[idx_exit:]
+    assert '"--fail-on-unsubmitted-time-exit"' not in tail
+
+
+def test_exit_check_exit_codes_are_mapped_without_collision():
+    """exit=3 は broker_unreachable、gate は別コード 4。同じ数字に相乗りさせない。"""
+    code = _code_section(_read())
+    idx_exit = code.find('Write-Log "[exit_check] SkipExitCheck')
+    tail = code[idx_exit:]
+    assert 'elseif ($ec -eq 3) { $Failures += "exit_check(broker_unreachable)" }' in tail
+    assert 'elseif ($ec -eq 4) { $Failures += "exit_check(unsubmitted_time_exit)" }' in tail
+    # 未知コードも黙って成功にしない
+    assert 'elseif ($ec -ne 0) { $Failures += "exit_check(exit=$ec)" }' in tail

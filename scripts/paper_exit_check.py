@@ -2,7 +2,8 @@
 
 daily_pipeline.ps1 の [exit_check] step (5c) から呼ばれる:
     default:                dry-run (JSON 出力のみ、実発注なし)
-    -AutoSubmitPaper 付き:  Paper 口座へ実発注 (成行 close / stop / trail / target)
+    -AutoSubmitPaperExits:  exit だけ Paper 口座へ実発注
+    -AutoSubmitPaper:       entry + exit を Paper 口座へ実発注 (後方互換)
 
 安全設計:
     - ALPACA_PAPER=true 強制 (live 口座禁止、assert_paper_env)
@@ -24,9 +25,17 @@ daily_pipeline.ps1 の [exit_check] step (5c) から呼ばれる:
       "count": <int>,
       "submitted": <int>,
       "failed": <int>,
+      "time_exit_due": <int>,
+      "time_exit_unsubmitted": <int>,
+      "execution_health": "ok" | "blocked_unsubmitted_time_exit",
       "positions": [ ... snapshot dicts ... ],
       "exits": [ ... PreparedExit rows ... ]
     }
+
+Exit codes: 0=正常, 1=送信失敗, 2=paper safety abort,
+            3=broker 到達不能 (positions を確認できず = 0 exits は flat book ではない),
+            4=期限到来 time exit が未送信 (--fail-on-unsubmitted-time-exit 指定時のみ。
+              既定 OFF で、daily_pipeline の提案 pass には配線していない)
 """
 
 from __future__ import annotations
@@ -538,6 +547,18 @@ def main(argv: list[str] | None = None) -> int:
         default=2.5,
         help="cancel 後、qty 解放を待つ秒数 (default 2.5)。",
     )
+    parser.add_argument(
+        "--fail-on-unsubmitted-time-exit",
+        action="store_true",
+        help=(
+            "time-based exit が期限到来しているのに broker へ未送信なら exit=4。"
+            "**既定 OFF / opt-in**。提案 (dry-run) pass で有効にすると『未送信』が"
+            "正常状態なので毎日鳴る (2026-08-25 統合時の判断: exit=3 は "
+            "broker_unreachable が先に使っており、daily_pipeline の 06:00 提案 pass"
+            "には配線しない)。件数は artifact の time_exit_unsubmitted /"
+            " execution_health で常に観測できる。"
+        ),
+    )
     args = parser.parse_args(argv)
 
     date_str = args.date or _today_str()
@@ -756,6 +777,10 @@ def main(argv: list[str] | None = None) -> int:
 
     mode = "submitted" if not dry_run else "dry_run"
     role = role_for(dry_run)
+    time_exits = [e for e in exits if e.reason == "time_based"]
+    unsubmitted_time_cnt = sum(
+        1 for e in time_exits if e.dry_run or not e.order_id or bool(e.error)
+    )
 
     sidecar = _write_output(
         exits,
@@ -772,6 +797,13 @@ def main(argv: list[str] | None = None) -> int:
             # 既存の保護注文で建玉が全量予約済みだった件数 (危険ではない)。
             "already_protected": already_protected,
             "broker_unreachable": broker_unreachable,
+            # 「exit 案を作った」と「broker へ送った」を混同しないための運用 health。
+            # dashboard / verifier はこの値で dry-run の期限超過を赤く出せる。
+            "time_exit_due": len(time_exits),
+            "time_exit_unsubmitted": unsubmitted_time_cnt,
+            "execution_health": (
+                "blocked_unsubmitted_time_exit" if unsubmitted_time_cnt > 0 else "ok"
+            ),
             "spy_high": spy_high,
             "spy_max70": spy_max70,
             "unassigned_count": len(unassigned),
@@ -804,7 +836,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     # summary
-    time_cnt = sum(1 for e in exits if e.reason == "time_based")
+    time_cnt = len(time_exits)
     breakout_cnt = sum(1 for e in exits if e.reason == "spy_breakout")
     protect_cnt = sum(1 for e in exits if e.reason.startswith("protect_"))
     print(
@@ -852,6 +884,15 @@ def main(argv: list[str] | None = None) -> int:
             "接続を確認し、必要なら再実行してください。"
         )
         return 3
+    # opt-in ゲート: 期限到来済みの time exit が未送信のまま残っている。
+    # broker_unreachable (=3) とは別事象なので **別コード 4** で surface する
+    # (同じ 3 に相乗りさせると daily_pipeline がどちらか判別できない)。
+    if args.fail_on_unsubmitted_time_exit and unsubmitted_time_cnt > 0:
+        print(
+            "[CRIT] time-based exit が期限到来していますが broker へ未送信です: "
+            f"{unsubmitted_time_cnt}件 (mode={mode})"
+        )
+        return 4
     return 0 if submit_failed == 0 else 1
 
 
