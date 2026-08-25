@@ -175,9 +175,7 @@ class TestMainExitCodes:
         calls: list[dict] = []
         # ``_notify_stale`` は 2026-08-22 の cry-wolf 修正で keyword-only の
         # ``post_heal`` を取るようになった。スタブも **kwargs を受ける。
-        monkeypatch.setattr(
-            cdf, "_notify_stale", lambda *_a, **kw: calls.append(kw)
-        )
+        monkeypatch.setattr(cdf, "_notify_stale", lambda *_a, **kw: calls.append(kw))
         cdf.main(
             [
                 "--results-dir",
@@ -197,9 +195,7 @@ class TestMainExitCodes:
         _write_signal(results, "20260722")
         _write_signal(data, "20260721")
         calls: list[dict] = []
-        monkeypatch.setattr(
-            cdf, "_notify_stale", lambda *_a, **kw: calls.append(kw)
-        )
+        monkeypatch.setattr(cdf, "_notify_stale", lambda *_a, **kw: calls.append(kw))
 
         rc = cdf.main(
             [
@@ -221,9 +217,7 @@ class TestMainExitCodes:
         _write_signal(results, "20260722")
         _write_signal(data, "20260721")
         calls: list[dict] = []
-        monkeypatch.setattr(
-            cdf, "_notify_stale", lambda *_a, **kw: calls.append(kw)
-        )
+        monkeypatch.setattr(cdf, "_notify_stale", lambda *_a, **kw: calls.append(kw))
 
         cdf.main(
             [

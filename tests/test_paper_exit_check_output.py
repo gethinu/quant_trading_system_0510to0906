@@ -188,6 +188,8 @@ def test_alpaca_entry_coid_uses_rename_alias_when_broker_symbol_changed():
 
     assert snap.system == "system3"
     assert snap.entry_date == "2026-07-13"
+
+
 def test_operational_gate_rejects_due_dry_run(monkeypatch, tmp_path: Path):
     """期限 exit の案だけ作って broker 未送信なら日次運用は成功扱いしない。"""
     from common.alpaca_trading import PreparedExit

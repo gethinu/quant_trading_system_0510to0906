@@ -7,8 +7,8 @@ commit を作って直接 push し、**local の working tree / branch ref を�
 git リポジトリで再現し、ref 基準なら fresh、local 基準なら stale になることを固定する。
 """
 
-from pathlib import Path
 import json
+from pathlib import Path
 import subprocess
 import sys
 
@@ -58,7 +58,8 @@ def repo(tmp_path: Path) -> Path:
     data = root / DATA_REL
     _write(data / "today_signals_20260819.json", {"generated_at": "2026-08-19T00:00Z"})
     _write(
-        data / "dashboard_bundle_20260819.json", {"source_run_id": "20260819_080000_aaa"}
+        data / "dashboard_bundle_20260819.json",
+        {"source_run_id": "20260819_080000_aaa"},
     )
     _git(root, "add", "-A")
     _git(root, "commit", "--quiet", "-m", "publish 08-19")
