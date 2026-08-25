@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "date": "2026-08-25",
-  "generated_at": "2026-08-25T06:22:36+09:00",
+  "generated_at": "2026-08-25T22:49:41+09:00",
   "provider": "polygon",
   "systems": {
     "sys1": {
@@ -10,32 +10,35 @@
           "symbol": "WETO",
           "side": "BUY",
           "entry_price": 26.01,
-          "weight": 0.038,
+          "limit_price": null,
+          "weight": 0.0388,
           "rank": 1,
           "reason": "ROC200が2位（全1396銘柄中）のため"
+        },
+        {
+          "symbol": "IPST",
+          "side": "BUY",
+          "entry_price": 9.65,
+          "limit_price": null,
+          "weight": 0.032,
+          "rank": 2,
+          "reason": "ROC200が3位（全1396銘柄中）のため"
         },
         {
           "symbol": "BNY",
           "side": "BUY",
           "entry_price": 158.49,
-          "weight": 0.0737,
-          "rank": 2,
-          "reason": "ROC200が4位（全1396銘柄中）のため"
-        },
-        {
-          "symbol": "SLS",
-          "side": "BUY",
-          "entry_price": 15.46,
-          "weight": 0.0401,
+          "limit_price": null,
+          "weight": 0.0752,
           "rank": 3,
-          "reason": "ROC200が6位（全1396銘柄中）のため"
+          "reason": "ROC200が4位（全1396銘柄中）のため"
         }
       ],
       "n_candidates_input": 10,
       "n_signals_output": 3,
       "gate_survival_ratio": 0.3,
       "funnel": {
-        "target": 5238,
+        "target": 5236,
         "filter_pass": 1435,
         "setup_pass": 623,
         "candidate_count": 10,
@@ -48,80 +51,90 @@
         {
           "symbol": "RGEN",
           "side": "SELL",
-          "entry_price": 181.13,
-          "weight": 0.1324,
+          "entry_price": 188.38,
+          "limit_price": 188.38,
+          "weight": 0.1276,
           "rank": 25,
           "reason": "モメンタムが強く過熱のため"
         },
         {
           "symbol": "OMER",
           "side": "SELL",
-          "entry_price": 19.27,
-          "weight": 0.1191,
+          "entry_price": 20.04,
+          "limit_price": 20.04,
+          "weight": 0.1222,
           "rank": 26,
           "reason": "モメンタムが強く過熱のため"
         },
         {
           "symbol": "HTFL",
           "side": "SELL",
-          "entry_price": 49.75,
-          "weight": 0.1025,
+          "entry_price": 51.74,
+          "limit_price": 51.74,
+          "weight": 0.1087,
           "rank": 27,
           "reason": "モメンタムが強く過熱のため"
         },
         {
           "symbol": "MRVI",
           "side": "SELL",
-          "entry_price": 8.64,
-          "weight": 0.0965,
+          "entry_price": 8.99,
+          "limit_price": 8.99,
+          "weight": 0.0993,
           "rank": 28,
           "reason": "モメンタムが強く過熱のため"
         },
         {
           "symbol": "ARX",
           "side": "SELL",
-          "entry_price": 19.59,
-          "weight": 0.0872,
+          "entry_price": 20.37,
+          "limit_price": 20.37,
+          "weight": 0.0897,
           "rank": 29,
           "reason": "モメンタムが強く過熱のため"
         },
         {
           "symbol": "AEM",
           "side": "SELL",
-          "entry_price": 216.06,
-          "weight": 0.0718,
+          "entry_price": 224.7,
+          "limit_price": 224.7,
+          "weight": 0.0761,
           "rank": 30,
           "reason": "モメンタムが強く過熱のため"
         },
         {
           "symbol": "KGC",
           "side": "SELL",
-          "entry_price": 32.76,
-          "weight": 0.0719,
+          "entry_price": 34.07,
+          "limit_price": 34.07,
+          "weight": 0.0716,
           "rank": 31,
           "reason": "モメンタムが強く過熱のため"
         },
         {
           "symbol": "CORT",
           "side": "SELL",
-          "entry_price": 122.25,
-          "weight": 0.0569,
+          "entry_price": 127.14,
+          "limit_price": 127.14,
+          "weight": 0.0603,
           "rank": 32,
           "reason": "モメンタムが強く過熱のため"
         },
         {
           "symbol": "MANH",
           "side": "SELL",
-          "entry_price": 214.56,
-          "weight": 0.057,
+          "entry_price": 223.14,
+          "limit_price": 223.14,
+          "weight": 0.0454,
           "rank": 33,
           "reason": "モメンタムが強く過熱のため"
         },
         {
           "symbol": "SSRM",
           "side": "SELL",
-          "entry_price": 37.77,
-          "weight": 0.0527,
+          "entry_price": 39.28,
+          "limit_price": 39.28,
+          "weight": 0.0532,
           "rank": 34,
           "reason": "モメンタムが強く過熱のため"
         }
@@ -130,7 +143,7 @@
       "n_signals_output": 10,
       "gate_survival_ratio": 1.0,
       "funnel": {
-        "target": 5238,
+        "target": 5236,
         "filter_pass": 1435,
         "setup_pass": 41,
         "candidate_count": 10,
@@ -144,7 +157,7 @@
       "n_signals_output": 0,
       "gate_survival_ratio": 0.0,
       "funnel": {
-        "target": 5238,
+        "target": 5236,
         "filter_pass": 956,
         "setup_pass": 25,
         "candidate_count": 10,
@@ -158,7 +171,7 @@
       "n_signals_output": 0,
       "gate_survival_ratio": 0.0,
       "funnel": {
-        "target": 5238,
+        "target": 5236,
         "filter_pass": 495,
         "setup_pass": 360,
         "candidate_count": 10,
@@ -172,7 +185,7 @@
       "n_signals_output": 0,
       "gate_survival_ratio": 0.0,
       "funnel": {
-        "target": 5238,
+        "target": 5236,
         "filter_pass": 1238,
         "setup_pass": 1,
         "candidate_count": 1,
@@ -186,7 +199,7 @@
       "n_signals_output": 0,
       "gate_survival_ratio": 0.0,
       "funnel": {
-        "target": 5238,
+        "target": 5236,
         "filter_pass": 1053,
         "setup_pass": 0,
         "candidate_count": 0,
@@ -211,9 +224,9 @@
   },
   "portfolio": {
     "total_signals": 13,
-    "total_notional_usd": 15043.97,
+    "total_notional_usd": 14759.93,
     "hedge": null,
-    "universe_target": 5238,
+    "universe_target": 5236,
     "caps": {
       "applied": true,
       "held": {
@@ -230,8 +243,10 @@
         "max_total": 70,
         "max_long": 40,
         "max_short": 30,
-        "gross_cap_usd": 100000.0,
-        "net_cap_usd": 50000.0
+        "gross_cap_usd": 101178.53,
+        "net_cap_usd": 50589.26,
+        "equity_base_usd": 101178.53,
+        "equity_source": "alpaca"
       },
       "allow": {
         "long": 3,
@@ -246,16 +261,20 @@
       "trimmed": {
         "long_count": 21
       },
-      "new_long_usd": 2284.59,
-      "new_short_usd": 12759.38
+      "new_long_usd": 2154.5,
+      "new_short_usd": 12605.43
     }
   },
   "meta": {
     "cli_version": "0.1.0",
-    "run_id": "20260825_060813_b0b084",
-    "elapsed_seconds": 863.0,
+    "run_id": "20260825_223507_9a9f47",
+    "elapsed_seconds": 874.7,
+    "publish_delivery": {
+      "state": "not_attempted",
+      "attempted_at": null,
+      "channels": {}
+    },
     "status": "ok",
-    "abort_reason": null,
-    "publish_status": "ok"
+    "abort_reason": null
   }
 }
