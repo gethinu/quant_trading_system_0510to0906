@@ -114,7 +114,12 @@ def test_exit_check_exit_codes_are_mapped_without_collision():
     code = _code_section(_read())
     idx_exit = code.find('Write-Log "[exit_check] SkipExitCheck')
     tail = code[idx_exit:]
-    assert 'elseif ($ec -eq 3) { $Failures += "exit_check(broker_unreachable)" }' in tail
-    assert 'elseif ($ec -eq 4) { $Failures += "exit_check(unsubmitted_time_exit)" }' in tail
+    assert (
+        'elseif ($ec -eq 3) { $Failures += "exit_check(broker_unreachable)" }' in tail
+    )
+    assert (
+        'elseif ($ec -eq 4) { $Failures += "exit_check(unsubmitted_time_exit)" }'
+        in tail
+    )
     # 未知コードも黙って成功にしない
     assert 'elseif ($ec -ne 0) { $Failures += "exit_check(exit=$ec)" }' in tail

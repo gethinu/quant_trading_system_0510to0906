@@ -182,7 +182,9 @@ def test_deploy_missing_still_alerts_under_defer(tmp_path, sent, monkeypatch):
     (data / "dashboard_bundle_20260822.json").write_text(
         json.dumps({"source_run_id": "20260822_062601_d80c7f"}), encoding="utf-8"
     )
-    monkeypatch.setattr(cdf, "_fetch_served_html", lambda url, timeout: "<html>古い</html>")
+    monkeypatch.setattr(
+        cdf, "_fetch_served_html", lambda url, timeout: "<html>古い</html>"
+    )
     monkeypatch.setattr(cdf, "_minutes_since", lambda p: 999.0)  # grace 超過
 
     code = cdf.main(
