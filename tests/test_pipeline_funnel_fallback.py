@@ -71,9 +71,20 @@ def test_funnel_fallback_when_grouped_empty(tmp_path: Path) -> None:
     assert tgt["count"] == 5223
     assert fil["count"] == 1515
     assert stu["count"] == 686
-    # grouped 実測ではないので measured=False (provenance を偽らない)
-    assert tgt["measured"] is False
-    assert fil["measured"] is False
+    # 2026-08-25 (main 統合): funnel 由来でも measured=True。provenance は
+    # measured を False に落として表すのではなく ``source`` field で表す
+    # (6418363)。count があるのに measured=False という組み合わせは
+    # PipelineSection.tsx が「未検証 = producer 契約の不整合」として描くため、
+    # ダッシュ側の契約に合わせた。偽らないことは source で担保する。
+    assert tgt["measured"] is True
+    assert fil["measured"] is True
+    assert tgt["source"] == "today_signals.funnel"
+    assert fil["source"] == "today_signals.funnel"
+    # spy_only (sys7) の Tgt は共有 universe 値を採用せず、理由つきで未計測を維持する。
+    sys7_tgt = _phase(report, "sys7", "Tgt")
+    assert sys7_tgt["count"] is None
+    assert sys7_tgt["measured"] is False
+    assert sys7_tgt["unmeasured_reason"] == "shared_universe_not_applicable_to_spy_only"
     # 比率も埋まる (未計測なら prev/univ が '—' 表示になる)
     assert fil["ratio_of_universe"] == round(1515 / 5223, 6)
     assert stu["ratio_of_prev"] == round(686 / 1515, 6)
@@ -123,9 +134,12 @@ def test_grouped_measured_takes_priority_over_funnel(tmp_path: Path) -> None:
     # Tgt は grouped 実測 (measured=True) — funnel の 5223 ではなく grouped の銘柄数
     assert tgt["measured"] is True
     assert tgt["count"] != 5223
-    # STUpass は grouped で実測不能 → funnel fallback (measured=False, count=686)
-    assert stu["measured"] is False
+    # STUpass は grouped で実測不能 → funnel fallback。measured=True だが
+    # source で funnel 由来だと分かる (grouped 実測の Tgt は source なしのまま)。
+    assert stu["measured"] is True
     assert stu["count"] == 686
+    assert stu["source"] == "today_signals.funnel"
+    assert tgt.get("source") != "today_signals.funnel"
 
 
 def test_exit_stays_null_when_signals_has_no_exit(tmp_path: Path) -> None:

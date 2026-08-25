@@ -88,8 +88,26 @@ $OutputEncoding = [System.Text.Encoding]::UTF8
 # to (1) DETECT the publish gap and alert on recurrence, then (2) SELF-HEAL by
 # republishing the newest generated data. -AutoLatest is idempotent (a no-op once
 # data/ is already current). Paper-only; data publish only, never orders.
+#
+# 2026-08-22 cry-wolf fix -- ORDER OF DETECT vs ALERT
+# ---------------------------------------------------
+# The detect pass used to alert BEFORE the self-heal ran, so it alerted on a state
+# the very next step was about to fix. At 08:00 JST that state is the NORMAL one:
+# the 06:00 daily advances results_csv/ but does not publish, so origin's data/ is
+# still on yesterday until the self-heal below pushes. Measured 2026-08-09..22:
+# 14/14 mornings fired "publish が取りこぼされています" and were verified fresh ~10 s
+# later. Now the stale alert is DEFERRED past the self-heal and only fires if the
+# re-check still sees a gap (i.e. the self-heal genuinely failed, as on 08-20 when
+# the bundle preflight rejected the publish). The alert is not disabled -- it is
+# moved to the only point where it means something.
+#
+# --check-served stays on the FIRST pass on purpose: it judges a *previously*
+# published run against the live HTML, so the self-heal does not affect it, and
+# running it after a fresh push would only ever see an age-0 bundle (always inside
+# the deploy grace = a vacuous check).
 $pubScript = Join-Path $PrimaryRoot "scripts\publish_data_to_vercel.ps1"
 $freshChk = Join-Path $PrimaryRoot "scripts\check_dashboard_freshness.py"
+$canSelfHeal = Test-Path $pubScript
 Push-Location $PrimaryRoot
 try {
     if (Test-Path $freshChk) {
@@ -98,16 +116,32 @@ try {
         # 「fresh」と答えてしまうので、本番 HTML に publish 済み run_id が現れるかも
         # 見る (2026-08-17: publish 成功・blob 一致なのに本番は朝の run のままだった)。
         # 正常な deploy 遅延 (実測 ~20 分) は grace 内なので警告しない。
-        Write-Launch "--- [dashboard_freshness] detect (+notify if stale/undeployed) ---"
-        & python $freshChk --repo-root $PrimaryRoot --notify --check-served 2>&1 |
-            ForEach-Object { Write-Launch $_ }
-        Write-Launch "[dashboard_freshness] exit=$LASTEXITCODE (0=ok, 2=stale, 3=deploy 不達)"
+        $preArgs = @($freshChk, "--repo-root", $PrimaryRoot, "--notify", "--check-served")
+        if ($canSelfHeal) {
+            # self-heal がこの後に走るなら stale 通知は再チェックへ委譲する。
+            $preArgs += "--defer-stale-notify"
+            Write-Launch "--- [dashboard_freshness] detect (stale alert deferred until after self-heal) ---"
+        }
+        else {
+            Write-Launch "--- [dashboard_freshness] detect (no self-heal available -> alert now) ---"
+        }
+        & python @preArgs 2>&1 | ForEach-Object { Write-Launch $_ }
+        Write-Launch "[dashboard_freshness] pre-heal exit=$LASTEXITCODE (0=ok, 2=stale, 3=deploy missing)"
     }
-    if (Test-Path $pubScript) {
+    if ($canSelfHeal) {
         Write-Launch "--- [dashboard_selfheal] publish_data_to_vercel.ps1 -AutoLatest ---"
         & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $pubScript -AutoLatest 2>&1 |
             ForEach-Object { Write-Launch $_ }
         Write-Launch "[dashboard_selfheal] exit=$LASTEXITCODE"
+
+        # 治療後の再チェック。ここで **まだ** stale なら本物 (self-heal が効かなかった)。
+        # 通常運転の朝はここで fresh になるので通知は飛ばない = cry wolf が止まる。
+        if (Test-Path $freshChk) {
+            Write-Launch "--- [dashboard_freshness] re-check after self-heal (the ONLY pass allowed to alert) ---"
+            & python $freshChk --repo-root $PrimaryRoot --notify --post-heal 2>&1 |
+                ForEach-Object { Write-Launch $_ }
+            Write-Launch "[dashboard_freshness] post-heal exit=$LASTEXITCODE (0=ok -> no alert, 2=still stale -> ALERT)"
+        }
     }
 }
 finally {

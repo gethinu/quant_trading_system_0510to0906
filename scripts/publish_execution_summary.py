@@ -38,6 +38,7 @@ from scripts.build_execution_recon import (  # noqa: E402
     _load_json,
     build_recon,
     patch_pipeline_exit,
+    patch_pipeline_funnel,
 )
 
 logger = logging.getLogger(__name__)
@@ -131,6 +132,61 @@ def _wire_pipeline_exit(results_dir: Path, date_str: str, recon: dict) -> None:
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("pipeline Exit 書き戻し失敗 (無視): %s", exc)
+
+
+def _wire_pipeline_funnel(
+    results_dir: Path, date_str: str, signals: dict | None
+) -> None:
+    """漏斗 (pipeline_YYYYMMDD.json) の Tgt/FILpass/STUpass/TRDlist/Entry を
+    *today_signals の funnel* から埋めて書き戻す (Exit の姉妹配線)。
+
+    daily_polygon_monitor が生成する pipeline は funnel phase が全 system measured=false
+    に戻りがち (funnel 配線が prod 生成経路に未着地、既知
+    docs/operations/exit_unmeasured_rootcause_20260730.md)。ntfy と同じく today_signals を
+    single source に、この publish step で funnel を実数 + measured=True に上書きする。
+    _wire_pipeline_exit の *後* に呼ぶこと (Exit patch 済みの pipeline を読み、funnel を
+    足して書き戻す。両者はディスクから都度 fresh に読むため順序は安全)。
+
+    pipeline / signals が無い、funnel 実数ゼロの時は **何もしない** = 未計測を維持。
+    """
+    if signals is None:
+        logger.info("today_signals が無いため funnel 配線をスキップ")
+        return
+    pipeline_path = _default_path(results_dir, "pipeline", date_str)
+    pipeline = _load_json(pipeline_path)
+    if pipeline is None:
+        logger.info(
+            "pipeline funnel が無いため funnel 配線をスキップ: %s", pipeline_path
+        )
+        return
+    _, n_patched, status = patch_pipeline_funnel(pipeline, signals)
+    if status != "ok" or not n_patched:
+        logger.info("pipeline funnel 配線せず (%s): %s", status, pipeline_path)
+        return
+    try:
+        tmp = pipeline_path.with_suffix(pipeline_path.suffix + ".tmp")
+        tmp.write_text(
+            json.dumps(pipeline, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        tmp.replace(pipeline_path)
+        logger.info(
+            "pipeline funnel 配線: %s (%d phase, today_signals と同一 source)",
+            pipeline_path,
+            n_patched,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("pipeline funnel 書き戻し失敗 (無視): %s", exc)
+
+
+def _load_signals_for_funnel(args: argparse.Namespace, date_str: str) -> dict | None:
+    """funnel 配線用に today_signals を読む (recon とは別に生の funnel が要るため)。"""
+    results_dir = Path(args.results_dir)
+    sig_path = (
+        Path(args.signals_json)
+        if args.signals_json
+        else _default_path(results_dir, "today_signals", date_str)
+    )
+    return _load_json(sig_path)
 
 
 def _resolve_recon(args: argparse.Namespace) -> dict | None:
@@ -248,6 +304,14 @@ def main(argv: list[str] | None = None) -> int:
     # ntfy 本文と同一 recon を single source にするので両者が必ず一致する。
     # dry-run でも書く (ダッシュへ反映させるため。実送信の有無とは独立)。
     _wire_pipeline_exit(Path(args.results_dir), str(date_str), recon)
+
+    # 漏斗の funnel phase (Tgt/FILpass/STUpass/TRDlist/Entry) を today_signals から埋めて
+    # 全 system 未計測を消す。Exit の *後* に呼ぶ (Exit patch 済み pipeline を読み funnel を足す)。
+    _wire_pipeline_funnel(
+        Path(args.results_dir),
+        str(date_str),
+        _load_signals_for_funnel(args, str(date_str)),
+    )
 
     # sidecar は **全経路で** 書く。書かない経路があると「送っていない」と
     # 「記録し忘れた」を dashboard が区別できなくなる。

@@ -557,6 +557,32 @@ def build_pipeline_report(
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("pipeline Exit 配線 (build-time) 失敗 (無視): %s", exc)
 
+    # --- Funnel phase の配線 (未計測を消す) ----------------------------------
+    # Tgt/FILpass/STUpass/TRDlist/Entry は上のループで funnel から count を入れるが、
+    # measured は grouped-daily 実測時のみ True (funnel 由来は False)。ダッシュが読む
+    # pipeline は結果全 system 未計測に見える。同日の today_signals funnel を single
+    # source に measured=True へ引き上げる (grouped 実測 phase と spy_only Tgt は保護)。
+    # publish_execution_summary の _wire_pipeline_funnel と同一関数・冪等なので、
+    # build 経路 / publish 経路のどちらでも同じ結果に揃う。
+    if signals_dir is not None:
+        try:
+            from scripts.build_execution_recon import patch_pipeline_funnel
+
+            sig_path = (
+                signals_dir / f"today_signals_{target_date.replace('-', '')}.json"
+            )
+            if sig_path.exists():
+                sig = json.loads(sig_path.read_text(encoding="utf-8"))
+                _, n_patched, status = patch_pipeline_funnel(report, sig)
+                logger.info(
+                    "pipeline funnel 配線 (build-time, signals=%s): patched=%d status=%s",
+                    sig_path.name,
+                    n_patched,
+                    status,
+                )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("pipeline funnel 配線 (build-time) 失敗 (無視): %s", exc)
+
     return report
 
 

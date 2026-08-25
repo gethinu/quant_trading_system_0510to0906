@@ -76,6 +76,21 @@ class TestDailyPipelineCliContract:
             "scripts\\publish_signals.py" in ps1_text
             or "scripts/publish_signals.py" in ps1_text
         )
+        assert '"--fallback"' in ps1_text
+
+    def test_skippublish_keeps_exec_summary_materialization(self, ps1_text: str):
+        """SkipPublish は通知だけを抑止し、recon/pipeline 生成は続行する。
+
+        Step 5d (publish_execution_summary) は recon 生成と pipeline の
+        Exit/funnel materialization も担う。step ごと skip すると Step 6 の
+        bundle preflight (--require-exit) が recon 不在で必ず fail-closed する。
+        """
+        body = ps1_text
+        # exec_summary step が SkipPublish で丸ごと skip されない
+        assert "[exec_summary] SkipPublish 指定によりスキップ" not in body
+        # SkipPublish 時は --dry-run を足して送信のみ抑止する
+        assert "$SkipPublish -or (-not $AutoSubmitPaper) -or $DryRunPublish" in body
+        assert "通知のみ抑止" in body
 
     def test_exit_code_contract_documented(self, ps1_text: str):
         """Exit codes: 0=全 OK, 2=一部失敗 (WARN), 1=致命的エラー."""

@@ -34,52 +34,71 @@ function fmtRatio(v: number | null): string {
 }
 
 function universeOf(sys: SystemPipeline): number | null {
-  return sys.phases.find((p) => p.name === 'Tgt')?.count ?? null;
+  const phase = sys.phases.find((p) => p.name === 'Tgt');
+  return phase?.measured === true && Number.isFinite(phase.count)
+    ? phase.count
+    : null;
 }
 
 function finalOf(sys: SystemPipeline): number | null {
-  if (sys.final_signals != null) return sys.final_signals;
-  return sys.phases.find((p) => p.name === 'Entry')?.count ?? null;
+  const phase = sys.phases.find((p) => p.name === 'Entry');
+  return phase?.measured === true && Number.isFinite(phase.count)
+    ? phase.count
+    : null;
 }
 
 /**
  * phase 表示ロジック:
- *   - count が number → 実数値 + progress bar (絞込透明性)
- *   - count が null → 「未計測」を淡く表示 (誤解を招かない、hard "not measured" 表現ではなく)
+ *   - measured=true + finite count → 実数値 + progress bar
+ *   - countあり/measured=false → 「未検証」(producer契約の不整合)
+ *   - count=null/measured=false → 「未計測」(取得不可)
  */
 function PhaseRow({ phase }: { phase: SystemPipelinePhase }) {
-  const measured = phase.count != null;
-  const barPct =
-    phase.ratio_of_prev != null
+  const measured = phase.measured === true && Number.isFinite(phase.count);
+  const hasUnverifiedValue = !measured && phase.count != null;
+  const barPct = !measured
+    ? 0
+    : phase.ratio_of_prev != null
       ? Math.max(2, Math.min(100, phase.ratio_of_prev * 100))
       : phase.name === 'Tgt' && measured
-      ? 100
-      : 0;
+        ? 100
+        : 0;
   return (
     <div className="py-1.5 border-t border-white/5">
       <div className="flex items-baseline justify-between gap-2">
         <span className="text-[13px] font-medium truncate">{phase.label}</span>
         <span
           className={`text-[13px] tabular-nums ${
-            measured ? 'text-cardfg' : 'text-muted/60 italic'
+            measured
+              ? 'text-cardfg'
+              : hasUnverifiedValue
+                ? 'text-warn italic'
+                : 'text-muted/60 italic'
           }`}
+          title={phase.unmeasured_reason ?? undefined}
         >
-          {measured ? fmtCount(phase.count) : '未計測'}
+          {measured ? fmtCount(phase.count) : hasUnverifiedValue ? '未検証' : '未計測'}
         </span>
       </div>
       <div className="mt-1 h-1.5 w-full rounded bg-white/5 overflow-hidden">
         <div
           className={`h-full rounded ${
-            measured ? 'bg-sky-400/70' : 'bg-white/10'
+            measured
+              ? 'bg-sky-400/70'
+              : hasUnverifiedValue
+                ? 'bg-warn/40'
+                : 'bg-white/10'
           }`}
           style={{ width: `${barPct}%` }}
         />
       </div>
       <div className="mt-0.5 flex justify-between text-[10px] text-muted tabular-nums gap-2">
-        <span className="truncate">{phase.condition ?? ''}</span>
+        <span className="truncate">
+          {phase.unmeasured_reason ?? phase.condition ?? ''}
+        </span>
         <span className="shrink-0">
-          prev {fmtRatio(phase.ratio_of_prev)} · univ{' '}
-          {fmtRatio(phase.ratio_of_universe)}
+          prev {fmtRatio(measured ? phase.ratio_of_prev : null)} · univ{' '}
+          {fmtRatio(measured ? phase.ratio_of_universe : null)}
         </span>
       </div>
     </div>
@@ -123,9 +142,17 @@ function SystemPipelineAccordion({ sys }: { sys: SystemPipeline }) {
 
 export function PipelineSection({
   payload,
+  signalsRunId,
 }: {
   payload: PipelinePayload | null;
+  signalsRunId?: string | null;
 }) {
+  const lineageMismatch =
+    payload?.source_signals_run_id &&
+    signalsRunId &&
+    payload.source_signals_run_id !== signalsRunId;
+  const lineageUnknown =
+    payload && !payload.from_legacy && !payload.source_signals_run_id;
   return (
     <section className="bg-card rounded-xl p-4 shadow-lg">
       {/* default collapsed — 情報密度削減 (E) の柱。 */}
@@ -144,6 +171,15 @@ export function PipelineSection({
           数値は<span className="text-cardfg"> 絞込透明性のための参考値</span>で、
           通過率は評価軸ではありません (厳しい gate ほど TRDlist/Entry は少数になる設計)。
         </p>
+        {lineageMismatch ? (
+          <p className="mb-2 rounded border border-fail/30 bg-fail/10 px-2 py-1 text-[10px] text-fail">
+            pipeline と signals の run_id が不一致です。値は表示対象外として確認してください。
+          </p>
+        ) : lineageUnknown ? (
+          <p className="mb-2 rounded border border-warn/30 bg-warn/10 px-2 py-1 text-[10px] text-warn">
+            pipeline の run lineage は未検証です（旧データ）。
+          </p>
+        ) : null}
         {/* 血統の凡例。System8 だけ設計思想が別系統なので、印の意味を必ず添える。 */}
         <p className="text-[10px] text-muted mb-3 leading-snug">{LINEAGE_LEGEND}</p>
         {!payload ? (

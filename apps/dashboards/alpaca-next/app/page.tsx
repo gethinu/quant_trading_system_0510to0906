@@ -1,7 +1,4 @@
-import { loadPipeline } from '@/lib/loadPipeline';
-import { loadSignals } from '@/lib/loadSignals';
-import { loadNarrative } from '@/lib/loadNarrative';
-import { loadAlpaca } from '@/lib/loadAlpaca';
+import { loadDashboardBundle } from '@/lib/loadDashboardBundle';
 import { NarrativeCard } from '@/components/NarrativeCard';
 import { PipelineSection } from '@/components/PipelineSection';
 import { SignalsSection } from '@/components/SignalsSection';
@@ -13,6 +10,8 @@ import type {
   SignalsPayload,
   Narrative,
   AlpacaSnapshot,
+  DashboardBundleManifest,
+  NotifyDelivery,
 } from '@/lib/types';
 
 export const dynamic = 'force-static';
@@ -24,7 +23,8 @@ function universeOf(payload: PipelinePayload | null): number | null {
   // 実測値が 1 つでもあれば拾えるよう max を採る。
   let best: number | null = null;
   for (const sys of Object.values(payload.systems)) {
-    const tgt = sys.phases.find((p) => p.name === 'Tgt')?.count;
+    const phase = sys.phases.find((p) => p.name === 'Tgt');
+    const tgt = phase?.measured === true ? phase.count : null;
     if (typeof tgt === 'number' && (best == null || tgt > best)) best = tgt;
   }
   return best;
@@ -57,10 +57,12 @@ function SignalsView({
   signals,
   pipeline,
   narrative,
+  notifyDelivery,
 }: {
   signals: SignalsPayload | null;
   pipeline: PipelinePayload | null;
   narrative: Narrative | null;
+  notifyDelivery: NotifyDelivery | null;
 }) {
   const universe = universeOf(pipeline);
   const total = signals?.portfolio.total_signals ?? 0;
@@ -111,19 +113,74 @@ function SignalsView({
 
       <div className="grid grid-cols-1 gap-4 items-start">
         {/* signals first (subscriber pitch: 実データが見出しの直下) */}
-        <SignalsSection payload={signals} />
+        <SignalsSection payload={signals} notifyDelivery={notifyDelivery} />
         {/* pipeline は詳細 (default collapsed via <details>) */}
-        <PipelineSection payload={pipeline} />
+        <PipelineSection
+          payload={pipeline}
+          signalsRunId={signals?.meta.run_id}
+        />
       </div>
     </div>
   );
 }
 
+function BundleHealth({
+  manifest,
+  issues,
+}: {
+  manifest: DashboardBundleManifest | null;
+  issues: string[];
+}) {
+  if (issues.length === 0 && manifest) {
+    return (
+      <div className="mb-3 rounded-lg border border-ok/25 bg-ok/10 px-3 py-2 text-[10px] text-ok">
+        bundle verified · run {manifest.source_run_id} · funnel{' '}
+        {manifest.measurement.funnel_measured}/{manifest.measurement.funnel_total} · Exit{' '}
+        {manifest.measurement.exit_measured}/7
+      </div>
+    );
+  }
+  if (issues.length === 0) return null;
+  return (
+    <details
+      open
+      className="mb-3 rounded-lg border border-warn/30 bg-warn/10 px-3 py-2 text-[10px] text-warn"
+    >
+      <summary className="cursor-pointer font-medium">
+        bundle check: {issues.length} issue{issues.length === 1 ? '' : 's'}
+      </summary>
+      <ul className="mt-1 list-disc pl-4">
+        {issues.map((issue) => (
+          <li key={issue}>{issue}</li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
 export default function Home() {
-  const pipeline: PipelinePayload | null = loadPipeline();
-  const signals: SignalsPayload | null = loadSignals();
-  const narrative: Narrative | null = loadNarrative();
-  const alpaca: AlpacaSnapshot | null = loadAlpaca();
+  const bundle = loadDashboardBundle();
+  const pipeline: PipelinePayload | null = bundle.pipeline;
+  const signals: SignalsPayload | null = bundle.signals;
+  let narrative: Narrative | null = bundle.narrative;
+  const alpaca: AlpacaSnapshot | null = bundle.alpaca;
+  const bundleIssues = [...bundle.issues];
+  if (signals && narrative && narrative.date !== signals.date) {
+    bundleIssues.push(
+      `narrative=${narrative.date} / signals=${signals.date} の日付が不一致です。`,
+    );
+    narrative = null;
+  }
+  if (
+    bundle.manifest?.files?.alpaca_snapshot &&
+    alpaca &&
+    alpaca.date !== bundle.manifest.date
+  ) {
+    bundleIssues.push(
+      `alpaca=${alpaca.date} / bundle=${bundle.manifest.date} の日付が不一致です。`,
+    );
+  }
+  const uniqueBundleIssues = [...new Set(bundleIssues)];
 
   const total = signals?.portfolio.total_signals ?? 0;
   // 当日損益は「同一基準で計測できた時だけ」出す。measured=false の snapshot で
@@ -142,6 +199,7 @@ export default function Home() {
 
   return (
     <main className="mx-auto max-w-5xl p-4 sm:p-6 pb-16">
+      <BundleHealth manifest={bundle.manifest} issues={uniqueBundleIssues} />
       {/* 最上部の「状態」サマリー。今日の損益 / 保有と期限超過 / 鮮度と run_id /
           赤アラート件数だけを出す。ここから下 (両タブ) は詳細で、既定で畳んである。 */}
       <StatusSummary
@@ -152,7 +210,12 @@ export default function Home() {
       />
       <Tabs
         signalsView={
-          <SignalsView signals={signals} pipeline={pipeline} narrative={narrative} />
+          <SignalsView
+            signals={signals}
+            pipeline={pipeline}
+            narrative={narrative}
+            notifyDelivery={bundle.notifyDelivery}
+          />
         }
         alpacaView={<AlpacaSection payload={alpaca} />}
         signalsBadge={total > 0 ? String(total) : undefined}

@@ -26,8 +26,25 @@ job is the publish gap between "generated" and "served"; it does NOT judge wheth
 the pipeline itself ran (both dirs equally behind today is a different failure,
 covered by ``check_rolling_freshness.py`` / ``self_monitor``).
 
-Pair it with ``publish_data_to_vercel.ps1 -AutoLatest`` (the self-heal): run this
-detector FIRST to alert on the recurrence, then the self-heal to fix it.
+Two-pass contract with the self-heal (2026-08-22 cry-wolf fix)
+--------------------------------------------------------------
+Pair it with ``publish_data_to_vercel.ps1 -AutoLatest`` (the self-heal). The
+ORDER matters and used to be wrong: the detector alerted, and only afterwards did
+the self-heal run. But at 08:00 JST the gap is the NORMAL state -- the 06:00
+daily advances ``results_csv/`` without publishing, so ``origin``'s ``data/`` is
+still on yesterday until the self-heal pushes. Result: 14/14 consecutive mornings
+fired "publish が取りこぼされています" and were fresh ~10 s later. Cry wolf.
+
+The launcher now runs two passes::
+
+    1. detect  --defer-stale-notify   (log + exit code, NO stale ntfy)
+    2. self-heal  publish_data_to_vercel.ps1 -AutoLatest
+    3. re-check --notify --post-heal  (alert only if the heal did NOT fix it)
+
+The deploy watchdog (``--check-served``) stays on pass 1: it judges a *previously*
+published run against the live HTML, so it is unaffected by the self-heal -- and
+running it after a fresh push would only ever see an age-0 bundle (always within
+grace, i.e. vacuous).
 
 Exit codes
 ----------
@@ -44,6 +61,7 @@ import json
 import os
 from pathlib import Path
 import re
+import subprocess
 import sys
 
 _SIGNAL_RE = re.compile(r"today_signals_(\d{8})\.json$")
@@ -114,16 +132,117 @@ def _fmt(date_int: int | None) -> str:
     return f"{s[0:4]}-{s[4:6]}-{s[6:8]}"
 
 
-def check_freshness(results_dir: Path, data_dir: Path) -> dict:
-    """Compare generated (results_csv) vs served (data/) newest signal dates.
+# --- served basis: origin ref ------------------------------------------------
+# publish_data_to_vercel.ps1 は `git commit-tree` で **origin tip** に commit を作り
+# `<sha>:refs/heads/<branch>` へ直接 push する。local の working tree と branch ref は
+# 意図的に一切触らない (2026-07-30 の root-cause fix)。よって local の data/ は永久に
+# 古く、それを "served" とみなすと **毎日** STALE になる (2026-08-19 の誤警報:
+# served=2026-08-11 と出続けたが origin は当日分を配信済みだった)。
+# publish 自身の verify が使っているのと同じ `origin/<branch>` を基準にする。
+_PUBLISH_REF_DEFAULT = "origin/claude/monitor-webapp"
+_DATA_REL_DEFAULT = "apps/dashboards/alpaca-next/data"
+
+
+def _git(repo_root: Path, *args: str, timeout: float = 30.0) -> str | None:
+    """read-only な git を実行して stdout を返す。失敗は None (= 不明)。"""
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(repo_root), *args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+        )
+    except Exception:  # noqa: BLE001 - git 不在 / timeout は "不明" 扱い
+        return None
+    if proc.returncode != 0:
+        return None
+    return proc.stdout
+
+
+def _fetch_ref(repo_root: Path, ref: str, timeout: float = 30.0) -> bool:
+    """`origin/<branch>` を最新化する。失敗しても致命ではない (既存 ref で続行)。"""
+    remote, _, branch = ref.partition("/")
+    if not remote or not branch:
+        return False
+    return (
+        _git(repo_root, "fetch", "--quiet", remote, branch, timeout=timeout) is not None
+    )
+
+
+def newest_signal_date_ref(
+    repo_root: Path, ref: str, data_rel: str = _DATA_REL_DEFAULT
+) -> int | None:
+    """`ref` の data/ に **コミット済** の最新 today_signals 日付 (int) を返す。"""
+    out = _git(repo_root, "ls-tree", "--name-only", ref, f"{data_rel}/")
+    if out is None:
+        return None
+    best: int | None = None
+    for line in out.splitlines():
+        m = _SIGNAL_RE.search(line.strip())
+        if not m:
+            continue
+        n = int(m.group(1))
+        if best is None or n > best:
+            best = n
+    return best
+
+
+def _generated_at_ref(
+    repo_root: Path,
+    ref: str,
+    date_int: int | None,
+    data_rel: str = _DATA_REL_DEFAULT,
+) -> str | None:
+    """`ref` にコミット済の today_signals から generated_at を読む (報告用)。"""
+    if date_int is None:
+        return None
+    out = _git(repo_root, "show", f"{ref}:{data_rel}/today_signals_{date_int}.json")
+    if out is None:
+        return None
+    try:
+        payload = json.loads(out)
+    except ValueError:
+        return None
+    val = payload.get("generated_at") if isinstance(payload, dict) else None
+    return val if isinstance(val, str) else None
+
+
+def check_freshness(
+    results_dir: Path,
+    data_dir: Path,
+    *,
+    repo_root: Path | None = None,
+    served_ref: str | None = None,
+    fetch: bool = True,
+) -> dict:
+    """Compare generated (results_csv) vs served newest signal dates.
+
+    served の基準:
+      ``served_ref`` を渡すとその git ref (既定の呼び出しでは
+      ``origin/claude/monitor-webapp``) に **コミット済** の data/ を served とみなす。
+      これが publish 側の verify と同じ基準で、唯一 Vercel が build する実体でもある。
+      ref が読めない (git 不在 / offline / ref 不明) 場合だけ従来どおり
+      ローカル ``data_dir`` にフォールバックする。``served_basis`` に採用元を返す。
 
     status:
       "fresh"   -- data_date >= results_date, or results has nothing to publish.
       "stale"   -- results_date > data_date (a dashboard publish was missed).
-      "unknown" -- neither dir has any today_signals file.
+      "unknown" -- neither source has any today_signals file.
     """
     results_date = newest_signal_date(results_dir)
-    data_date = newest_signal_date(data_dir)
+
+    served_basis = "local"
+    data_date: int | None = None
+    if served_ref and repo_root is not None:
+        if fetch:
+            _fetch_ref(repo_root, served_ref)
+        data_date = newest_signal_date_ref(repo_root, served_ref)
+        if data_date is not None:
+            served_basis = f"ref:{served_ref}"
+    if served_basis == "local":
+        data_date = newest_signal_date(data_dir)
 
     if results_date is None and data_date is None:
         status = "unknown"
@@ -142,7 +261,12 @@ def check_freshness(results_dir: Path, data_dir: Path) -> dict:
         "results_date_str": _fmt(results_date),
         "data_date_str": _fmt(data_date),
         "results_generated_at": _generated_at(results_dir, results_date),
-        "data_generated_at": _generated_at(data_dir, data_date),
+        "data_generated_at": (
+            _generated_at_ref(repo_root, served_ref, data_date)
+            if served_basis.startswith("ref:") and repo_root is not None and served_ref
+            else _generated_at(data_dir, data_date)
+        ),
+        "served_basis": served_basis,
     }
 
 
@@ -170,6 +294,55 @@ def newest_bundle(data_dir: Path) -> dict | None:
         return None
     payload["_path"] = str(best[1])
     return payload
+
+
+def newest_bundle_ref(
+    repo_root: Path, ref: str, data_rel: str = _DATA_REL_DEFAULT
+) -> dict | None:
+    """`ref` にコミット済の最新 dashboard_bundle manifest を読む。
+
+    watchdog も従来はローカル data/ の manifest を見ていたため、publish が
+    commit-tree で origin にしか書かない現行仕様では manifest を見つけられず
+    ``unknown`` に落ちていた (= 本番不達を検出できない)。
+    """
+    out = _git(repo_root, "ls-tree", "--name-only", ref, f"{data_rel}/")
+    if out is None:
+        return None
+    best: tuple[int, str] | None = None
+    for line in out.splitlines():
+        name = line.strip()
+        m = _BUNDLE_RE.search(name)
+        if not m:
+            continue
+        key = int(m.group(1))
+        if best is None or key > best[0]:
+            best = (key, name)
+    if best is None:
+        return None
+    blob = _git(repo_root, "show", f"{ref}:{best[1]}")
+    if blob is None:
+        return None
+    try:
+        payload = json.loads(blob)
+    except ValueError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    payload["_path"] = f"{ref}:{best[1]}"
+    iso = _git(repo_root, "log", "-1", "--format=%cI", ref, "--", best[1])
+    payload["_committed_iso"] = (iso or "").strip() or None
+    return payload
+
+
+def _minutes_since_iso(iso: str | None) -> float | None:
+    """commit 時刻からの経過分。ref 基準の manifest には mtime が無いため。"""
+    if not iso:
+        return None
+    try:
+        ct = datetime.fromisoformat(iso)
+    except ValueError:
+        return None
+    return (datetime.now(tz=ct.tzinfo) - ct).total_seconds() / 60.0
 
 
 def _fetch_served_html(url: str, timeout: float) -> str | None:
@@ -200,6 +373,8 @@ def check_served_run(
     url: str = _PROD_URL_DEFAULT,
     grace_minutes: float = _DEPLOY_GRACE_MINUTES_DEFAULT,
     timeout: float = 20.0,
+    repo_root: Path | None = None,
+    served_ref: str | None = None,
 ) -> dict:
     """publish した run_id が **本番で実際に配信されているか** を確認する。
 
@@ -214,14 +389,22 @@ def check_served_run(
       "deploy_missing"-- grace を超えても現れない (build 不達の疑い)
       "unknown"       -- manifest 不在 / run_id 不明 / HTML 取得失敗
     """
-    manifest = newest_bundle(data_dir)
+    manifest = None
+    if served_ref and repo_root is not None:
+        manifest = newest_bundle_ref(repo_root, served_ref)
+    if manifest is None:
+        manifest = newest_bundle(data_dir)
     if not manifest:
         return {"status": "unknown", "reason": "no_bundle_manifest"}
     run_id = str(manifest.get("source_run_id") or "")
     if not run_id:
         return {"status": "unknown", "reason": "manifest_has_no_run_id"}
 
-    age = _minutes_since(manifest.get("_path"))
+    age = (
+        _minutes_since_iso(manifest.get("_committed_iso"))
+        if manifest.get("_committed_iso")
+        else _minutes_since(manifest.get("_path"))
+    )
     html = _fetch_served_html(url, timeout)
     if html is None:
         return {
@@ -287,17 +470,33 @@ def _send_one(item: dict) -> tuple[bool, str]:
         return False, f"{type(exc).__name__}: {exc}"
 
 
-def _notify_stale(result: dict, root: Path, now: str) -> None:
+def _notify_stale(result: dict, root: Path, now: str, *, post_heal: bool = False) -> None:
     """Fire an ntfy WARN for this gap, flushing any carried-over failures first.
 
     A send failure is NOT swallowed: the alert is queued to ``logs/`` and retried
     on every later invocation (including "fresh" ones) until it lands, so a broken
     notifier degrades into a late alert instead of a silent one.
+
+    ``post_heal`` は「self-heal (``-AutoLatest``) を走らせた **後** の再チェックで
+    まだ stale だった」ことを示す。通常運転の朝は self-heal が数秒で解消するので、
+    この経路以外から stale 通知を出してはいけない (2026-08-22 の cry-wolf 修正)。
     """
-    title = (
-        f"Dashboard STALE: served {result['data_date_str']} < "
-        f"generated {result['results_date_str']}"
-    )
+    if post_heal:
+        title = (
+            f"Dashboard STALE (self-heal 後も): served {result['data_date_str']} < "
+            f"generated {result['results_date_str']}"
+        )
+        tail = (
+            "self-heal (publish_data_to_vercel.ps1 -AutoLatest) は実行済みだが "
+            "解消しませんでした。手動確認が必要です "
+            "(bundle preflight FAIL / push 失敗 / 生成物欠落を疑う)。"
+        )
+    else:
+        title = (
+            f"Dashboard STALE: served {result['data_date_str']} < "
+            f"generated {result['results_date_str']}"
+        )
+        tail = "self-heal: publish_data_to_vercel.ps1 -AutoLatest"
     body = (
         "ダッシュボードの publish が取りこぼされています "
         "(ntfy は新しいのに中身が古い型)。\n"
@@ -305,7 +504,7 @@ def _notify_stale(result: dict, root: Path, now: str) -> None:
         f"@ {result.get('results_generated_at') or '?'}\n"
         f"served   (data/)      : {result['data_date_str']} "
         f"@ {result.get('data_generated_at') or '?'}\n"
-        "self-heal: publish_data_to_vercel.ps1 -AutoLatest"
+        f"{tail}"
     )
     _flush_pending(root, now, extra={"title": title, "body": body, "queued_at": now})
 
@@ -399,6 +598,47 @@ def main(argv: list[str] | None = None) -> int:
             "2026-08-17 に約 20 分の実績があるため短くしすぎない。"
         ),
     )
+    parser.add_argument(
+        "--served-ref",
+        default=os.getenv("QTS_PUBLISH_REF", _PUBLISH_REF_DEFAULT),
+        help=(
+            "served の基準にする git ref (既定 origin/claude/monitor-webapp)。"
+            "publish は commit-tree で origin tip にしか書かないため、ローカルの "
+            "data/ を基準にすると毎日 STALE になる。"
+        ),
+    )
+    parser.add_argument(
+        "--served-basis",
+        choices=("ref", "local"),
+        default=None,
+        help=(
+            "served をどこから読むか。既定は ref (= origin)。"
+            "ただし --data-dir を明示した呼び出しは『その dir を測れ』という意味なので "
+            "local に固定する (明示引数 > 既定)。"
+        ),
+    )
+    parser.add_argument(
+        "--no-fetch",
+        action="store_true",
+        help="--served-basis ref のとき git fetch を省く (offline / 高速確認用)。",
+    )
+    parser.add_argument(
+        "--defer-stale-notify",
+        action="store_true",
+        help=(
+            "この pass では stale の ntfy を **送らない** (検出とログと exit code のみ)。"
+            "morning_brief.ps1 の 2 パス構成 (検出 → self-heal → 再チェック) の "
+            "1 パス目で使う。通知は self-heal 後の再チェックに委譲する。"
+        ),
+    )
+    parser.add_argument(
+        "--post-heal",
+        action="store_true",
+        help=(
+            "self-heal 実行後の再チェックであることを本文に明記する "
+            "(『self-heal 済みなのに解消しなかった』= 本物の異常)。"
+        ),
+    )
     args = parser.parse_args(argv)
 
     root = Path(args.repo_root)
@@ -409,7 +649,19 @@ def main(argv: list[str] | None = None) -> int:
         else root / "apps" / "dashboards" / "alpaca-next" / "data"
     )
 
-    result = check_freshness(results_dir, data_dir)
+    # 明示引数が既定より強い: --data-dir を渡された呼び出しは、その dir 自体を
+    # 測ることが目的なので origin ref で上書きしない。
+    basis = args.served_basis or os.getenv("QTS_SERVED_BASIS") or (
+        "local" if args.data_dir else "ref"
+    )
+    served_ref = args.served_ref if basis == "ref" else None
+    result = check_freshness(
+        results_dir,
+        data_dir,
+        repo_root=root,
+        served_ref=served_ref,
+        fetch=not args.no_fetch,
+    )
 
     if args.json:
         print(json.dumps(result, ensure_ascii=False))
@@ -417,7 +669,8 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"[dashboard_freshness] status={result['status']} "
             f"generated={result['results_date_str']} "
-            f"served={result['data_date_str']}"
+            f"served={result['data_date_str']} "
+            f"basis={result.get('served_basis', 'local')}"
         )
 
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -430,6 +683,8 @@ def main(argv: list[str] | None = None) -> int:
             data_dir,
             url=args.prod_url,
             grace_minutes=args.deploy_grace_minutes,
+            repo_root=root,
+            served_ref=served_ref,
         )
         print(
             f"[dashboard_deploy] status={served['status']} "
@@ -462,8 +717,20 @@ def main(argv: list[str] | None = None) -> int:
             f"served {result['data_date_str']}). "
             "Run publish_data_to_vercel.ps1 -AutoLatest to self-heal."
         )
-        if args.notify:
-            _notify_stale(result, root, now)
+        # cry-wolf 対策 (2026-08-22): 08:00 の朝は **必ず** ここが stale になる。
+        # 06:00 のデイリーが results_csv を進めるだけで publish しないため、
+        # origin の data/ は前日のままだからだ。直後に走る self-heal
+        # (publish_data_to_vercel.ps1 -AutoLatest) が数秒で解消するので、この
+        # 時点の stale は「まだ治療していない」だけであって異常ではない。
+        # 通知するのは self-heal 後の再チェック (--post-heal) で **なお** stale
+        # だったときだけにする。--defer-stale-notify がその 1 パス目の指示。
+        if args.notify and not args.defer_stale_notify:
+            _notify_stale(result, root, now, post_heal=args.post_heal)
+        elif args.defer_stale_notify:
+            print(
+                "[dashboard_freshness] stale だが通知は self-heal 後の再チェックへ委譲 "
+                "(--defer-stale-notify)。self-heal で解消すれば通知しない。"
+            )
         return 2
 
     # Fresh now, but an earlier alert may never have landed. Retry it here so a

@@ -27,7 +27,13 @@ export interface SystemPipelinePhase {
   condition?: string;
   /** grouped-daily で実測できた phase のみ数値。未計測は null。 */
   count: number | null;
-  measured?: boolean;
+  measured: boolean;
+  /** Measurement producer and exact signals run, when applicable. */
+  source?: string;
+  source_run_id?: string | null;
+  source_observed_at?: string | null;
+  /** Why a phase is unavailable; never replace this state with a guessed zero. */
+  unmeasured_reason?: string;
   /** 直前の計測済 phase に対する通過率 (参考数値)。 */
   ratio_of_prev: number | null;
   /** universe に対する通過率 (参考数値)。 */
@@ -45,6 +51,11 @@ export interface PipelinePayload {
   provider?: string;
   schema?: string;
   systems: Record<string, SystemPipeline>;
+  source_signals_run_id?: string | null;
+  source_signals_generated_at?: string | null;
+  source_signals_sha256?: string;
+  source_recon_sha256?: string;
+  materialized_at?: string;
   notes?: string[];
   /** 旧 coverage schema から fallback 生成された場合 true。 */
   from_legacy?: boolean;
@@ -68,6 +79,14 @@ export interface SystemSignals {
   n_candidates_input: number;
   n_signals_output: number;
   gate_survival_ratio: number;
+  funnel?: {
+    target: number | null;
+    filter_pass: number | null;
+    setup_pass: number | null;
+    candidate_count: number | null;
+    entry_count: number | null;
+    exit_count?: number | null;
+  };
 }
 
 export interface Hedge {
@@ -86,7 +105,57 @@ export interface SignalsMeta {
   cli_version: string;
   run_id: string;
   elapsed_seconds: number | null;
-  publish_status?: 'ok' | 'partial' | 'failed';
+  publish_status?: 'ok' | 'partial' | 'failed' | 'not_attempted' | 'unknown';
+  publish_delivery?: {
+    state:
+      | 'primary_accepted'
+      | 'all_accepted'
+      | 'fallback_accepted'
+      | 'partial'
+      | 'all_failed'
+      | 'not_configured'
+      | 'not_attempted'
+      | 'unknown';
+    attempted_at: string | null;
+    channels: Record<
+      string,
+      {
+        state: 'accepted' | 'failed' | 'not_configured';
+        status_code: number | null;
+      }
+    >;
+  };
+}
+
+/**
+ * execution summary (夜の実績通知) の ntfy 配信状態。
+ * signals の meta.publish_delivery は朝の予告便専用で、open run は publish_signals を
+ * 呼ばないため、実績通知の成否はこの sidecar にしか残らない。
+ * accepted は ntfy server が受理した意味であり、端末到達の保証ではない。
+ */
+export interface NotifyDelivery {
+  schema: 'notify_delivery/v1';
+  kind: string;
+  date: string;
+  source_signals_run_id: string | null;
+  state: 'accepted' | 'failed' | 'not_configured' | 'not_attempted';
+  attempted_at: string | null;
+  channels: Record<string, { state: string; status_code: number | null }>;
+}
+
+export interface DashboardBundleManifest {
+  schema: 'dashboard_bundle/v1';
+  date: string;
+  source_run_id: string;
+  materialized_at: string;
+  files: Record<string, { name: string; sha256: string }>;
+  sources?: Record<string, { name: string; sha256: string }>;
+  measurement: {
+    funnel_measured: number;
+    funnel_total: number;
+    exit_measured: number;
+  };
+  warnings: string[];
 }
 
 export interface SignalsPayload {

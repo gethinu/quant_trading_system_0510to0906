@@ -1,0 +1,14 @@
+{
+  "schema": "notify_delivery/v1",
+  "kind": "execution_summary",
+  "date": "2026-08-18",
+  "source_signals_run_id": "20260818_223505_d9de12",
+  "state": "accepted",
+  "attempted_at": "2026-08-18T13:50:56+00:00",
+  "channels": {
+    "ntfy": {
+      "state": "accepted",
+      "status_code": 200
+    }
+  }
+}

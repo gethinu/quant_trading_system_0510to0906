@@ -13,6 +13,7 @@
  */
 
 import type { AlpacaPosition, AlpacaSnapshot, ExitExecutionState } from './types';
+import { isRegistryDelisted } from './delistedRegistry';
 
 export type AlertLevel = 'red' | 'amber';
 
@@ -47,6 +48,11 @@ export interface DashboardStatus {
   dueToday: number;
   /** 上場廃止などで API から決済できない建玉。 */
   delisted: number;
+  /**
+   * system 由来がどのソース (position_tracker / entry-coid / symbol_system_map) にも
+   * 無い「orphan」建玉。delisted とは別枠で「要手動確認」として数える。
+   */
+  orphan: number;
   alerts: StatusAlert[];
   nRed: number;
   nAmber: number;
@@ -59,12 +65,39 @@ const EMPTY: DashboardStatus = {
   overdueSubmitted: 0,
   dueToday: 0,
   delisted: 0,
+  orphan: 0,
   alerts: [],
   nRed: 0,
   nAmber: 0,
 };
 
-const isOverdue = (p: AlpacaPosition) => p.days_remaining != null && p.days_remaining < 0;
+/**
+ * 決済不能 (上場廃止) の建玉か。
+ * snapshot の delisted ラベルに加え、確定 delisted レジストリ (probe 揮発に強い)
+ * も truth として union する。
+ */
+const isDelistedPos = (p: AlpacaPosition) =>
+  p.system === 'delisted' ||
+  p.exit_type === 'delisted' ||
+  isRegistryDelisted(p.symbol);
+
+/**
+ * system 由来が無い orphan 建玉か。
+ * = delisted ではなく、system 未解決 (null/"unknown") で、entry_date も days_remaining も
+ *   復元できていない（どのソースにも帰属根拠が無い）もの。
+ * exit 側 recon の ``orphan_no_system_origin`` と同じ集合を snapshot 側で判定する。
+ * ※ 既定 max_hold を当てない＝捏造しない。期限超過 (days_remaining<0) からは自然に外れる。
+ */
+const isOrphanPos = (p: AlpacaPosition) =>
+  !isDelistedPos(p) &&
+  (p.system == null || p.system === 'unknown') &&
+  p.days_remaining == null &&
+  !p.entry_date;
+
+// 期限超過は days_remaining<0 のときだけ。orphan/delisted は days_remaining=null なので
+// ここに混ざらない（＝実データに無い超過日数を捏造して赤にしない）。
+const isOverdue = (p: AlpacaPosition) =>
+  p.days_remaining != null && p.days_remaining < 0 && !isDelistedPos(p) && !isOrphanPos(p);
 
 export function computeStatus(snap: AlpacaSnapshot | null): DashboardStatus {
   if (!snap) return EMPTY;
@@ -86,9 +119,8 @@ export function computeStatus(snap: AlpacaSnapshot | null): DashboardStatus {
   const overduePl = overdue.reduce((n, r) => n + r.unrealizedPl, 0);
   const overdueSubmitted = overdue.filter((r) => r.executionState === 'submitted').length;
   const dueToday = snap.positions.filter((p) => p.days_remaining === 0).length;
-  const delisted = snap.positions.filter(
-    (p) => p.system === 'delisted' || p.exit_type === 'delisted',
-  ).length;
+  const delisted = snap.positions.filter(isDelistedPos).length;
+  const orphan = snap.positions.filter(isOrphanPos).length;
 
   const alerts: StatusAlert[] = [];
   const red = (id: string, text: string, detail?: string) =>
@@ -166,7 +198,17 @@ export function computeStatus(snap: AlpacaSnapshot | null): DashboardStatus {
     amber(
       'delisted',
       `決済できない建玉 ${delisted} 件 (上場廃止)`,
-      'API から close 不能。equity には載り続けます。',
+      'API から close 不能。alloc・期限超過からは除外。equity には載り続けます。',
+    );
+  }
+  if (orphan > 0) {
+    // system 由来不明。捏造で赤を消さず、別枠の amber として「要手動確認」に出す。
+    // alloc チャート・期限超過カウントからは除外済み（下の除外条件で担保）。
+    amber(
+      'orphan',
+      `要手動確認: system 由来不明の建玉 ${orphan} 件`,
+      'position_tracker / entry-coid / symbol_system_map いずれにも帰属が無い (orphan)。' +
+        ' alloc・期限超過から除外。entry-coid 遡及で帰属復元 または 手動処理の対象。',
     );
   }
   if (snap.pnl_today && !snap.pnl_today.measured) {
@@ -201,6 +243,7 @@ export function computeStatus(snap: AlpacaSnapshot | null): DashboardStatus {
     overdueSubmitted,
     dueToday,
     delisted,
+    orphan,
     alerts,
     nRed: alerts.filter((a) => a.level === 'red').length,
     nAmber: alerts.filter((a) => a.level === 'amber').length,

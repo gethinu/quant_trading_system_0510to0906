@@ -21,13 +21,16 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from scripts.prepare_dashboard_bundle import (  # noqa: E402
+    BundleContractError,
+    materialize_dashboard_bundle,
+)
 from scripts.publish_execution_summary import (  # noqa: E402
     build_notify_delivery,
     notify_delivery_path,
     write_notify_delivery,
 )
-
-DATE = "2026-08-13"
+from test_prepare_dashboard_bundle import COMPACT, DATE, _fixtures, _write  # noqa: E402
 
 RUN = "20260813_223505_first"  # _signals() の既定 run_id
 
@@ -76,3 +79,74 @@ def test_write_is_atomic_and_named_by_date(tmp_path: Path) -> None:
 def test_write_failure_is_swallowed(tmp_path: Path) -> None:
     """観測用の副産物なので、書けなくても通知処理は落とさない。"""
     assert write_notify_delivery(tmp_path / "missing_dir_is_created", _sidecar(RUN))
+
+
+# --- bundle への取り込み ---------------------------------------------------
+def test_bundle_includes_sidecar_when_run_matches(tmp_path: Path) -> None:
+    _fixtures(tmp_path)
+    _write(tmp_path / f"notify_delivery_{COMPACT}.json", _sidecar(RUN))
+    manifest = materialize_dashboard_bundle(
+        results_dir=tmp_path, date_str=DATE, require_exit=False
+    )
+    assert "notify_delivery" in manifest["files"]
+    assert not any("notify_delivery" in w for w in manifest.get("warnings", []))
+
+
+def test_bundle_excludes_sidecar_from_another_run(tmp_path: Path) -> None:
+    """別 run の配信状態を今日の bundle に載せない。"""
+    _fixtures(tmp_path)
+    _write(tmp_path / f"notify_delivery_{COMPACT}.json", _sidecar("some_other_run"))
+    manifest = materialize_dashboard_bundle(
+        results_dir=tmp_path, date_str=DATE, require_exit=False
+    )
+    assert "notify_delivery" not in manifest["files"]
+    assert any("run_id mismatch" in w for w in manifest["warnings"])
+
+
+def test_bundle_excludes_sidecar_with_unknown_state(tmp_path: Path) -> None:
+    """語彙外の state を黙って表示に通さない。"""
+    _fixtures(tmp_path)
+    bad = _sidecar(RUN)
+    bad["state"] = "delivered"  # 端末到達を含意する語は使わない
+    _write(tmp_path / f"notify_delivery_{COMPACT}.json", bad)
+    manifest = materialize_dashboard_bundle(
+        results_dir=tmp_path, date_str=DATE, require_exit=False
+    )
+    assert "notify_delivery" not in manifest["files"]
+    assert any("unknown delivery state" in w for w in manifest["warnings"])
+
+
+def test_bundle_without_sidecar_still_publishes(tmp_path: Path) -> None:
+    """sidecar が無い日 (朝の pipeline 等) は optional なので publish を止めない。"""
+    _fixtures(tmp_path)
+    manifest = materialize_dashboard_bundle(
+        results_dir=tmp_path, date_str=DATE, require_exit=False
+    )
+    assert "notify_delivery" not in manifest["files"]
+    assert manifest["date"] == DATE
+
+
+def test_bundle_excludes_sidecar_with_wrong_date(tmp_path: Path) -> None:
+    _fixtures(tmp_path)
+    wrong = _sidecar(RUN)
+    wrong["date"] = "2026-08-12"
+    _write(tmp_path / f"notify_delivery_{COMPACT}.json", wrong)
+    manifest = materialize_dashboard_bundle(
+        results_dir=tmp_path, date_str=DATE, require_exit=False
+    )
+    assert "notify_delivery" not in manifest["files"]
+
+
+def test_sidecar_problem_never_fails_the_whole_publish(tmp_path: Path) -> None:
+    """観測用 optional の不備で bundle 全体を落とさない (Exit/funnel は無関係)。"""
+    _fixtures(tmp_path)
+    (tmp_path / f"notify_delivery_{COMPACT}.json").write_text(
+        "{ not json", encoding="utf-8"
+    )
+    try:
+        manifest = materialize_dashboard_bundle(
+            results_dir=tmp_path, date_str=DATE, require_exit=False
+        )
+    except BundleContractError as exc:  # pragma: no cover - 失敗時の説明用
+        raise AssertionError(f"optional sidecar が publish を止めた: {exc}") from exc
+    assert "notify_delivery" not in manifest["files"]

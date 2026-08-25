@@ -5,13 +5,6 @@
 **発見経路**: `outputs/SIGNAL_CALIBRATION_PROBE_20260820.md` §5「Fill realism」
 **影響**: System3 / System5 / System6 の **過去のバックテスト勝率はすべて過大**
 
-> **`main` 上での注記 (2026-08-21)**: 本 doc が参照する
-> `outputs/SIGNAL_CALIBRATION_PROBE_20260820.md` / `outputs/impl/signal_calibration_probe/` /
-> `common/validation/` は、いずれも別系統の作業として `claude/monitor-webapp` にのみ存在し
-> **`main` には無い**。指値約定修正そのもの（`strategies/` の変更・テスト・再測定スクリプト
-> `outputs/impl/limit_fill_fix/`）は `main` 上で完結しており、これらの参照は発見経路と
-> 影響棚卸しの記録として残している。
-
 ---
 
 ## 1. バグ
