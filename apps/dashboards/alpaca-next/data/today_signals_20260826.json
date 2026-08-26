@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "date": "2026-08-26",
-  "generated_at": "2026-08-26T06:39:48+09:00",
+  "generated_at": "2026-08-26T22:49:09+09:00",
   "provider": "polygon",
   "systems": {
     "sys1": {
@@ -10,7 +10,8 @@
           "symbol": "WETO",
           "side": "BUY",
           "entry_price": 27.59,
-          "weight": 0.0281,
+          "limit_price": null,
+          "weight": 0.0275,
           "rank": 1,
           "reason": "ROC200が1位（全1392銘柄中）のため"
         },
@@ -18,7 +19,8 @@
           "symbol": "BNY",
           "side": "BUY",
           "entry_price": 162.14,
-          "weight": 0.0579,
+          "limit_price": null,
+          "weight": 0.0566,
           "rank": 2,
           "reason": "ROC200が2位（全1392銘柄中）のため"
         },
@@ -26,7 +28,8 @@
           "symbol": "IPST",
           "side": "BUY",
           "entry_price": 8.58,
-          "weight": 0.0188,
+          "limit_price": null,
+          "weight": 0.0184,
           "rank": 3,
           "reason": "ROC200が3位（全1392銘柄中）のため"
         },
@@ -34,7 +37,8 @@
           "symbol": "ASST",
           "side": "BUY",
           "entry_price": 19.73,
-          "weight": 0.0392,
+          "limit_price": null,
+          "weight": 0.0384,
           "rank": 4,
           "reason": "ROC200が4位（全1392銘柄中）のため"
         },
@@ -42,7 +46,8 @@
           "symbol": "SLS",
           "side": "BUY",
           "entry_price": 14.32,
-          "weight": 0.0256,
+          "limit_price": null,
+          "weight": 0.025,
           "rank": 5,
           "reason": "ROC200が5位（全1392銘柄中）のため"
         },
@@ -50,7 +55,8 @@
           "symbol": "ERAS",
           "side": "BUY",
           "entry_price": 17.6,
-          "weight": 0.0305,
+          "limit_price": null,
+          "weight": 0.0299,
           "rank": 6,
           "reason": "ROC200が8位（全1392銘柄中）のため"
         },
@@ -58,7 +64,8 @@
           "symbol": "FBRX",
           "side": "BUY",
           "entry_price": 76.95,
-          "weight": 0.0432,
+          "limit_price": null,
+          "weight": 0.0422,
           "rank": 7,
           "reason": "ROC200が9位（全1392銘柄中）のため"
         },
@@ -66,7 +73,8 @@
           "symbol": "AMCR",
           "side": "BUY",
           "entry_price": 47.91,
-          "weight": 0.0391,
+          "limit_price": null,
+          "weight": 0.0383,
           "rank": 8,
           "reason": "ROC200が10位（全1392銘柄中）のため"
         },
@@ -74,7 +82,8 @@
           "symbol": "AMIX",
           "side": "BUY",
           "entry_price": 5.37,
-          "weight": 0.0071,
+          "limit_price": null,
+          "weight": 0.007,
           "rank": 9,
           "reason": "ROC200が上位のため"
         }
@@ -83,7 +92,7 @@
       "n_signals_output": 9,
       "gate_survival_ratio": 0.9,
       "funnel": {
-        "target": 5249,
+        "target": 5247,
         "filter_pass": 1432,
         "setup_pass": 633,
         "candidate_count": 10,
@@ -96,80 +105,90 @@
         {
           "symbol": "XNCR",
           "side": "SELL",
-          "entry_price": 29.0,
-          "weight": 0.1006,
+          "entry_price": 30.16,
+          "limit_price": 30.16,
+          "weight": 0.0993,
           "rank": 34,
           "reason": "モメンタムが強く過熱のため"
         },
         {
           "symbol": "RGEN",
           "side": "SELL",
-          "entry_price": 181.62,
-          "weight": 0.0834,
+          "entry_price": 188.88,
+          "limit_price": 188.88,
+          "weight": 0.0848,
           "rank": 35,
           "reason": "モメンタムが強く過熱のため"
         },
         {
           "symbol": "OMER",
           "side": "SELL",
-          "entry_price": 19.32,
-          "weight": 0.0828,
+          "entry_price": 20.09,
+          "limit_price": 20.09,
+          "weight": 0.0812,
           "rank": 36,
           "reason": "モメンタムが強く過熱のため"
         },
         {
           "symbol": "HTFL",
           "side": "SELL",
-          "entry_price": 50.2,
-          "weight": 0.0717,
+          "entry_price": 52.21,
+          "limit_price": 52.21,
+          "weight": 0.073,
           "rank": 37,
           "reason": "モメンタムが強く過熱のため"
         },
         {
           "symbol": "NIQ",
           "side": "SELL",
-          "entry_price": 19.18,
-          "weight": 0.0675,
+          "entry_price": 19.95,
+          "limit_price": 19.95,
+          "weight": 0.0657,
           "rank": 38,
           "reason": "モメンタムが強く過熱のため"
         },
         {
           "symbol": "SII",
           "side": "SELL",
-          "entry_price": 135.46,
-          "weight": 0.0553,
+          "entry_price": 140.88,
+          "limit_price": 140.88,
+          "weight": 0.0562,
           "rank": 39,
           "reason": "モメンタムが強く過熱のため"
         },
         {
           "symbol": "ATRC",
           "side": "SELL",
-          "entry_price": 49.28,
-          "weight": 0.0553,
+          "entry_price": 51.25,
+          "limit_price": 51.25,
+          "weight": 0.0537,
           "rank": 40,
           "reason": "モメンタムが強く過熱のため"
         },
         {
           "symbol": "AEM",
           "side": "SELL",
-          "entry_price": 217.89,
-          "weight": 0.0444,
+          "entry_price": 226.61,
+          "limit_price": 226.61,
+          "weight": 0.0452,
           "rank": 41,
           "reason": "モメンタムが強く過熱のため"
         },
         {
           "symbol": "IAG",
           "side": "SELL",
-          "entry_price": 21.8,
-          "weight": 0.0456,
+          "entry_price": 22.67,
+          "limit_price": 22.67,
+          "weight": 0.043,
           "rank": 42,
           "reason": "モメンタムが強く過熱のため"
         },
         {
           "symbol": "NG",
           "side": "SELL",
-          "entry_price": 9.35,
-          "weight": 0.041,
+          "entry_price": 9.72,
+          "limit_price": 9.72,
+          "weight": 0.0393,
           "rank": 43,
           "reason": "モメンタムが強く過熱のため"
         }
@@ -178,7 +197,7 @@
       "n_signals_output": 10,
       "gate_survival_ratio": 1.0,
       "funnel": {
-        "target": 5249,
+        "target": 5247,
         "filter_pass": 1413,
         "setup_pass": 36,
         "candidate_count": 10,
@@ -191,37 +210,49 @@
         {
           "symbol": "TNON",
           "side": "BUY",
-          "entry_price": 6.31,
-          "weight": 0.0129,
+          "entry_price": 5.87,
+          "limit_price": 5.87,
+          "weight": 0.0149,
           "rank": 10,
           "reason": "3日下落率が5位（全949銘柄中）のため"
         },
         {
           "symbol": "IPW",
           "side": "BUY",
-          "entry_price": 2.25,
-          "weight": 0.0288,
+          "entry_price": 2.09,
+          "limit_price": 2.09,
+          "weight": 0.0261,
           "rank": 11,
           "reason": "3日下落率が11位（全949銘柄中）のため"
         },
         {
           "symbol": "MSS",
           "side": "BUY",
-          "entry_price": 1.39,
-          "weight": 0.0213,
+          "entry_price": 1.29,
+          "limit_price": 1.29,
+          "weight": 0.0194,
           "rank": 12,
           "reason": "3日下落率が12位（全949銘柄中）のため"
+        },
+        {
+          "symbol": "HAO",
+          "side": "BUY",
+          "entry_price": 2.8,
+          "limit_price": 2.8,
+          "weight": 0.0147,
+          "rank": 13,
+          "reason": "3日下落率が15位（全949銘柄中）のため"
         }
       ],
       "n_candidates_input": 10,
-      "n_signals_output": 3,
-      "gate_survival_ratio": 0.3,
+      "n_signals_output": 4,
+      "gate_survival_ratio": 0.4,
       "funnel": {
-        "target": 5249,
+        "target": 5247,
         "filter_pass": 949,
         "setup_pass": 20,
         "candidate_count": 10,
-        "entry_count": 3,
+        "entry_count": 4,
         "exit_count": null
       }
     },
@@ -231,7 +262,7 @@
       "n_signals_output": 0,
       "gate_survival_ratio": 0.0,
       "funnel": {
-        "target": 5249,
+        "target": 5247,
         "filter_pass": 507,
         "setup_pass": 377,
         "candidate_count": 10,
@@ -245,8 +276,8 @@
       "n_signals_output": 0,
       "gate_survival_ratio": 0.0,
       "funnel": {
-        "target": 5249,
-        "filter_pass": 1228,
+        "target": 5247,
+        "filter_pass": 1227,
         "setup_pass": 9,
         "candidate_count": 9,
         "entry_count": 0,
@@ -259,7 +290,7 @@
       "n_signals_output": 0,
       "gate_survival_ratio": 0.0,
       "funnel": {
-        "target": 5249,
+        "target": 5247,
         "filter_pass": 1082,
         "setup_pass": 0,
         "candidate_count": 0,
@@ -283,52 +314,58 @@
     }
   },
   "portfolio": {
-    "total_signals": 22,
-    "total_notional_usd": 19608.74,
+    "total_signals": 23,
+    "total_notional_usd": 20036.44,
     "hedge": null,
-    "universe_target": 5249,
+    "universe_target": 5247,
     "caps": {
       "applied": true,
       "held": {
-        "long": 28,
+        "long": 27,
         "short": 2,
-        "total": 30
+        "total": 29
       },
       "held_unmapped": {
-        "long": 28,
+        "long": 27,
         "short": 2,
-        "total": 30
+        "total": 29
       },
       "caps": {
         "max_total": 70,
         "max_long": 40,
         "max_short": 30,
-        "gross_cap_usd": 100000.0,
-        "net_cap_usd": 50000.0
+        "gross_cap_usd": 100900.84,
+        "net_cap_usd": 50450.42,
+        "equity_base_usd": 100900.84,
+        "equity_source": "alpaca"
       },
       "allow": {
-        "long": 12,
+        "long": 13,
         "short": 28,
-        "total": 40
+        "total": 41
       },
       "kept": {
-        "long": 12,
+        "long": 13,
         "short": 10,
-        "total": 22
+        "total": 23
       },
       "trimmed": {
-        "long_count": 21
+        "long_count": 20
       },
-      "new_long_usd": 6912.96,
-      "new_short_usd": 12695.78
+      "new_long_usd": 7181.58,
+      "new_short_usd": 12854.86
     }
   },
   "meta": {
     "cli_version": "0.1.0",
-    "run_id": "20260826_062525_0fa295",
-    "elapsed_seconds": 863.3,
+    "run_id": "20260826_223506_7f87b1",
+    "elapsed_seconds": 843.4,
+    "publish_delivery": {
+      "state": "not_attempted",
+      "attempted_at": null,
+      "channels": {}
+    },
     "status": "ok",
-    "abort_reason": null,
-    "publish_status": "ok"
+    "abort_reason": null
   }
 }
