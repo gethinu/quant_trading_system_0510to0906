@@ -133,7 +133,7 @@ export function PipelineSection({
       <details>
         <summary className="cursor-pointer select-none list-none flex items-baseline justify-between mb-1 gap-2">
           <h2 className="text-xs uppercase tracking-widest text-muted">
-            ▸ Signal Pipeline
+            ▸ Signal Pipeline <span className="normal-case tracking-normal">(6 phase × 7 system)</span>
           </h2>
           <span className="text-[10px] text-muted tabular-nums shrink-0">
             {payload?.date ?? ''}
@@ -141,6 +141,8 @@ export function PipelineSection({
         </summary>
 
         <p className="text-[10px] text-muted mb-3 mt-2 leading-snug">
+          「なぜ Entry が 0 か」は上の<span className="text-cardfg">枠ビュー</span>が答えます。
+          こちらは絞込の内訳を見たい時だけ開いてください。<br />
           Tgt → FILpass → STUpass → TRDlist → Entry → Exit の 6 phase 絞込フロー。
           数値は<span className="text-cardfg"> 絞込透明性のための参考値</span>で、
           通過率は評価軸ではありません (厳しい gate ほど TRDlist/Entry は少数になる設計)。

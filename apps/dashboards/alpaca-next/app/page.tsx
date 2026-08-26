@@ -1,5 +1,9 @@
 import { loadDashboardBundle } from '@/lib/loadDashboardBundle';
+import { loadSlotFlowArtifacts } from '@/lib/loadSlotFlow';
+import { buildSlotFlowModel, type SlotFlowModel } from '@/lib/slotModel';
 import { NarrativeCard } from '@/components/NarrativeCard';
+import { SlotGridSection } from '@/components/SlotGridSection';
+import { FlowSection } from '@/components/FlowSection';
 import { PipelineSection } from '@/components/PipelineSection';
 import { SignalsSection } from '@/components/SignalsSection';
 import { AlpacaSection } from '@/components/AlpacaSection';
@@ -58,11 +62,15 @@ function SignalsView({
   pipeline,
   narrative,
   notifyDelivery,
+  slotFlow,
+  slotFlowMissing,
 }: {
   signals: SignalsPayload | null;
   pipeline: PipelinePayload | null;
   narrative: Narrative | null;
   notifyDelivery: NotifyDelivery | null;
+  slotFlow: SlotFlowModel | null;
+  slotFlowMissing: string[];
 }) {
   const universe = universeOf(pipeline);
   const total = signals?.portfolio.total_signals ?? 0;
@@ -112,9 +120,19 @@ function SignalsView({
       <NarrativeCard narrative={narrative} />
 
       <div className="grid grid-cols-1 gap-4 items-start">
-        {/* signals first (subscriber pitch: 実データが見出しの直下) */}
+        {/* 枠 → フローが主役。「なぜ Entry が 0 か」の答えを最上部に置く。 */}
+        {slotFlow ? <SlotGridSection model={slotFlow} /> : null}
+        {slotFlow ? <FlowSection model={slotFlow} /> : null}
+        {slotFlow && slotFlowMissing.length > 0 ? (
+          <p className="rounded-lg border border-white/10 bg-card px-3 py-2 text-[10px] leading-relaxed text-muted">
+            未 publish の補助 artifact: {slotFlowMissing.join(' / ')}
+            。これが届くと、エントリーの skip 理由と寄り前ポジションが実測になります
+            （届くまでは today_signals / alpaca_snapshot から読める範囲で表示）。
+          </p>
+        ) : null}
+        {/* signals は一覧 (銘柄・価格) */}
         <SignalsSection payload={signals} notifyDelivery={notifyDelivery} />
-        {/* pipeline は詳細 (default collapsed via <details>) */}
+        {/* ファネル 6 phase × 7 system は情報密度が高いので既定で畳む (details) */}
         <PipelineSection
           payload={pipeline}
           signalsRunId={signals?.meta.run_id}
@@ -182,6 +200,20 @@ export default function Home() {
   }
   const uniqueBundleIssues = [...new Set(bundleIssues)];
 
+  // 枠 / フロービュー。bundle の fail-closed 判定には一切影響させない
+  // (補助 artifact が欠けても signals / pipeline の表示は止めない)。
+  const slotArtifacts = loadSlotFlowArtifacts(signals?.date ?? null, bundle.manifest);
+  const slotFlow: SlotFlowModel | null = signals
+    ? buildSlotFlowModel({
+        signals,
+        snapshot: alpaca,
+        paperOrders: slotArtifacts.paperOrders,
+        exitProposal: slotArtifacts.exitProposal,
+        exitExecution: slotArtifacts.exitExecution,
+        sidecarVerified: slotArtifacts.verified,
+      })
+    : null;
+
   const total = signals?.portfolio.total_signals ?? 0;
   // 当日損益は「同一基準で計測できた時だけ」出す。measured=false の snapshot で
   // バッジにだけ数字が残ると、本文が「未計測」と言っているのに見出しは断言する、
@@ -215,6 +247,8 @@ export default function Home() {
             pipeline={pipeline}
             narrative={narrative}
             notifyDelivery={bundle.notifyDelivery}
+            slotFlow={slotFlow}
+            slotFlowMissing={slotArtifacts.missing}
           />
         }
         alpacaView={<AlpacaSection payload={alpaca} />}
@@ -230,6 +264,8 @@ export default function Home() {
           <span className="text-cardfg">pipeline</span>: pipeline_YYYYMMDD.json (v1) ·{' '}
           <span className="text-cardfg">alpaca</span>: alpaca_snapshot_YYYYMMDD.json
           (read-only/paper) ·{' '}
+          <span className="text-cardfg">枠/フロー</span>: paper_orders_YYYYMMDD.json ·
+          exit_orders_YYYYMMDD_proposal.json ·{' '}
           <span className="text-cardfg">narrator</span>: Claude Haiku 4.5
         </div>
         <div className="mt-1">Static export via Next.js. Data 更新は日次バッチ。</div>

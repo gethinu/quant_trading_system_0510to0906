@@ -406,13 +406,18 @@ def materialize_dashboard_bundle(
             "name": recon_path.name,
             "sha256": _sha256(recon_path),
         }
-    for key, stem in (
-        ("narrative", "narrative"),
-        ("alpaca_snapshot", "alpaca_snapshot"),
+    for key, filename in (
+        ("narrative", f"narrative_{compact}.json"),
+        ("alpaca_snapshot", f"alpaca_snapshot_{compact}.json"),
         # execution summary の ntfy 配信状態 (夜の実績通知)。無い日もあるので optional。
-        ("notify_delivery", "notify_delivery"),
+        ("notify_delivery", f"notify_delivery_{compact}.json"),
+        # 枠 / フロービューが読む sidecar。エントリーの skip 理由と、当日の broker
+        # 実測ポジションはここにしか無い。欠けても表示は止めない (optional)。
+        ("paper_orders", f"paper_orders_{compact}.json"),
+        ("exit_orders_proposal", f"exit_orders_{compact}_proposal.json"),
+        ("exit_orders_execution", f"exit_orders_{compact}_execution.json"),
     ):
-        optional_path = results_dir / f"{stem}_{compact}.json"
+        optional_path = results_dir / filename
         if optional_path.exists():
             try:
                 optional = _load_json(optional_path)
@@ -438,6 +443,19 @@ def materialize_dashboard_bundle(
                         raise BundleContractError(
                             f"unknown delivery state {optional.get('state')!r}"
                         )
+                if key == "paper_orders":
+                    if not isinstance(optional.get("orders"), list):
+                        raise BundleContractError("orders[] missing")
+                    stamped = optional.get("source_signals_run_id")
+                    current = str((signals.get("meta") or {}).get("run_id") or "")
+                    # 別 run の発注結果を今日の枠ビューに載せない。
+                    if stamped and current and str(stamped) != current:
+                        raise BundleContractError("run_id mismatch")
+                if key in ("exit_orders_proposal", "exit_orders_execution"):
+                    if not isinstance(
+                        optional.get("positions"), list
+                    ) or not isinstance(optional.get("exits"), list):
+                        raise BundleContractError("positions[]/exits[] missing")
                 if key == "alpaca_snapshot":
                     equity = (optional.get("account") or {}).get("equity")
                     if (

@@ -26,7 +26,7 @@ export interface DashboardBundleLoad {
   issues: string[];
 }
 
-function tryDirs(): string[] {
+export function tryDirs(): string[] {
   return [
     path.join(process.cwd(), 'data'),
     path.join(REPO_ROOT, 'results_csv'),
@@ -51,7 +51,7 @@ function latestManifest(dir: string): string | null {
 const CR = 0x0d;
 const LF = 0x0a;
 
-function sha256(file: string): string {
+export function sha256(file: string): string {
   const buf = fs.readFileSync(file);
   // Drop each CR that immediately precedes an LF, without building strings
   // (avoids any encoding round-trip on binary-ish content).

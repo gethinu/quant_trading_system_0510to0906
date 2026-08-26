@@ -337,7 +337,13 @@ $patterns = @(
     "notify_delivery_$DateCompact.json",
     # Alpaca paper 口座の read-only スナップショット (scripts/export_alpaca_snapshot.py)。
     # monitor の Alpaca タブがこれを読む。無い日は skip される (copy loop で握り潰し)。
-    "alpaca_snapshot_$DateCompact.json"
+    "alpaca_snapshot_$DateCompact.json",
+    # 枠 (スロット) / フロービューの sidecar。エントリーの skip 理由 (already_held /
+    # standing_cap) と、当日の broker 実測ポジションはこの 2 つにしか無い。
+    # 無い日は stage loop が skip する (publish の成否には影響しない)。
+    "paper_orders_$DateCompact.json",
+    "exit_orders_${DateCompact}_proposal.json",
+    "exit_orders_${DateCompact}_execution.json"
 )
 
 # 当日 JSON は後段の「data commit」節で results_csv から git index へ直接 stage する
@@ -441,6 +447,13 @@ function Test-PublishServed {
 # 世代整理の対象 prefix (data/ 内の日付付き JSON 群)。
 $prefixes = @("today_signals_", "pipeline_", "dashboard_bundle_", "polygon_daily_coverage_", "narrative_", "alpaca_snapshot_", "exit_ledger_")
 
+# 日付のあとに役割 suffix が付く sidecar。$prefixes の正規表現 (\d{8}\.json$) では
+# 一致しないため別枠で世代整理する。**data/ の index だけ**が対象 (results_csv は不可侵)。
+$suffixedPrefixes = @(
+    @{ Prefix = "paper_orders_"; Suffixes = @("") },
+    @{ Prefix = "exit_orders_";  Suffixes = @("_proposal", "_execution") }
+)
+
 # base tip を解決 (origin 優先 = Vercel が build で読む ref)。current HEAD は使わない。
 & git fetch origin $Branch 2>&1 | ForEach-Object { Write-Log $_ }
 $Base = & git rev-parse --verify -q "refs/remotes/origin/$Branch"
@@ -493,6 +506,22 @@ function New-DataCommitOnBase {
                 $names | Select-Object -Skip $KeepDays | ForEach-Object {
                     & git update-index --force-remove -- $_ 2>&1 | ForEach-Object { Write-Log $_ }
                     Write-Log "pruned: $_"
+                }
+            }
+        }
+
+        # 日付のうしろに役割 suffix が付く sidecar (枠/フロービュー用) の世代整理。
+        # suffix ごとに独立した世代として数える。**index のみ**を対象にし、
+        # results_csv 側の source は触らない (実行系の artifact を消さないため)。
+        foreach ($group in $suffixedPrefixes) {
+            foreach ($suffix in $group.Suffixes) {
+                $rx = "/$([regex]::Escape($group.Prefix))\d{8}$([regex]::Escape($suffix))\.json$"
+                $names = @($idxFiles | Where-Object { $_ -match $rx } | Sort-Object -Descending)
+                if ($names.Count -gt $KeepDays) {
+                    $names | Select-Object -Skip $KeepDays | ForEach-Object {
+                        & git update-index --force-remove -- $_ 2>&1 | ForEach-Object { Write-Log $_ }
+                        Write-Log "pruned: $_"
+                    }
                 }
             }
         }

@@ -95,10 +95,121 @@ export interface Hedge {
   entry_price?: number | null;
 }
 
+/**
+ * `core/final_allocation.py:_apply_portfolio_caps()` が吐く枠レポート。
+ * held(保有) / caps(上限) / allow(空き) / kept(採用) / trimmed(枠で落とした) の
+ * 5 点セットで「なぜ Entry がこの本数なのか」を artifact 側から説明できる。
+ * 旧 artifact には無いので全て optional。
+ */
+export interface CapsSide {
+  long: number;
+  short: number;
+  total: number;
+}
+
+export interface SignalsCaps {
+  applied?: boolean;
+  held?: CapsSide;
+  /** system 帰属が付かなかった保有。held と同数なら system 枠は素通りしている。 */
+  held_unmapped?: CapsSide;
+  caps?: {
+    max_total?: number;
+    max_long?: number;
+    max_short?: number;
+    gross_cap_usd?: number;
+    net_cap_usd?: number;
+    equity_base_usd?: number;
+    equity_source?: string;
+  };
+  allow?: CapsSide;
+  kept?: CapsSide;
+  trimmed?: {
+    long_count?: number;
+    short_count?: number;
+    total?: number;
+    gross_exposure?: number;
+    net_exposure?: number;
+  };
+  new_long_usd?: number;
+  new_short_usd?: number;
+}
+
 export interface SignalsPortfolio {
   total_signals: number;
   total_notional_usd: number;
   hedge: Hedge | null;
+  caps?: SignalsCaps | null;
+}
+
+// --- 枠 / フロービューが読む sidecar artifact ---------------------------------
+// どちらも既存のパイプライン出力 (新規 artifact は作っていない)。
+//   paper_orders_YYYYMMDD.json        … 当日エントリーの発注結果 (+ skip_reason)
+//   exit_orders_YYYYMMDD_*.json       … 当日の broker 実測ポジション + エグジット
+// bundle manifest に載る日は hash 検証済み、載らない日は date 一致だけで採用する
+// (どちらの状態かは UI 側で必ずラベルする)。
+
+export interface PaperOrderRow {
+  symbol: string;
+  system: string | null;
+  side: string | null;
+  qty?: number | null;
+  order_type?: string | null;
+  limit_price?: number | null;
+  notional_usd?: number | null;
+  status?: string | null;
+  /** null = 実際に submit された。値がある = submit 直前に落ちた理由。 */
+  skip_reason?: string | null;
+  dry_run?: boolean | null;
+  error?: string | null;
+}
+
+export interface PaperOrdersPayload {
+  version?: string;
+  date: string;
+  source_signals_run_id?: string | null;
+  /** "submitted" (22:35 の実発注) | "dry_run" (06:00 の提案)。 */
+  mode?: string | null;
+  count?: number;
+  submitted?: number;
+  failed?: number;
+  skipped?: number;
+  orders: PaperOrderRow[];
+}
+
+export interface ExitPositionRow {
+  symbol: string;
+  system?: string | null;
+  side?: string | null;
+  qty?: number | null;
+  avg_entry_price?: number | null;
+  market_value?: number | null;
+  unrealized_pl?: number | null;
+  entry_date?: string | null;
+}
+
+export interface ExitOrderRow {
+  symbol: string;
+  system?: string | null;
+  side?: string | null;
+  /** time_based / flatten_all = 決済。protect_* = 常駐保護注文 (当日は減らない)。 */
+  reason?: string | null;
+  status?: string | null;
+  skip_reason?: string | null;
+  dry_run?: boolean | null;
+}
+
+export interface ExitOrdersPayload {
+  version?: string;
+  date: string;
+  /** "proposal" (06:4x の broker read) | "execution" (22:4x の実発注)。 */
+  role?: string | null;
+  mode?: string | null;
+  written_at?: string | null;
+  count?: number;
+  submitted?: number;
+  positions: ExitPositionRow[];
+  exits: ExitOrderRow[];
+  unassigned_positions?: ExitPositionRow[];
 }
 
 export interface SignalsMeta {
