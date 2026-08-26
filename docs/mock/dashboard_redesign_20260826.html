@@ -1,0 +1,546 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>枠ダッシュボード 設計モック 2026-08-26</title>
+<style>
+:root{
+  --bg:#f6f7f9; --panel:#ffffff; --panel2:#f0f2f5; --line:#d8dce3;
+  --fg:#1a1d22; --fg2:#5b6472; --fg3:#8a93a1;
+  --long:#1f7a4d; --long-bg:#e3f4eb;
+  --short:#a33b3b; --short-bg:#fbe8e8;
+  --free:#ffffff; --free-line:#c3cad4;
+  --warn:#a86a00; --warn-bg:#fdf3e0;
+  --bad:#a33b3b; --bad-bg:#fbe8e8;
+  --ok:#1f7a4d;
+  --accent:#2a5db0;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#12151a; --panel:#1a1e25; --panel2:#22272f; --line:#2f353f;
+    --fg:#e8ecf2; --fg2:#a2acba; --fg3:#6f7986;
+    --long:#4ec98a; --long-bg:#16302322;
+    --short:#f08a8a; --short-bg:#3a1e1e55;
+    --free:#171b21; --free-line:#3a414c;
+    --warn:#e0a94a; --warn-bg:#3a2c0f;
+    --bad:#f08a8a; --bad-bg:#3a1e1e;
+    --ok:#4ec98a;
+    --accent:#7ba7ee;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+ font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",Segoe UI,sans-serif;
+ font-size:14px;line-height:1.55;-webkit-text-size-adjust:100%}
+.wrap{max-width:1080px;margin:0 auto;padding:20px 16px 80px}
+h1{font-size:19px;margin:0 0 2px;letter-spacing:.01em}
+h2{font-size:16px;margin:0;letter-spacing:.01em}
+.sub{color:var(--fg2);font-size:12px}
+.mono{font-family:var(--mono)}
+
+/* ---- mock banner ---- */
+.mockbar{background:var(--warn-bg);border:1px solid var(--warn);color:var(--warn);
+ border-radius:8px;padding:8px 12px;font-size:12px;margin-bottom:16px}
+.mockbar b{color:var(--warn)}
+
+/* ---- panels ---- */
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+ padding:16px;margin-bottom:16px}
+.phead{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+.badge{font-size:11px;padding:1px 7px;border-radius:99px;border:1px solid var(--line);
+ color:var(--fg2);background:var(--panel2);white-space:nowrap}
+.badge.measured{color:var(--ok);border-color:var(--ok)}
+.badge.projected{color:var(--warn);border-color:var(--warn)}
+.badge.gap{color:var(--bad);border-color:var(--bad)}
+
+/* ---- headline ---- */
+.headline{font-size:15px;line-height:1.7;background:var(--panel2);
+ border-left:3px solid var(--accent);border-radius:0 8px 8px 0;padding:10px 14px;margin-bottom:16px}
+.headline .k{font-weight:700}
+
+/* ---- meters ---- */
+.meters{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-bottom:18px}
+.meter{border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:var(--panel2)}
+.meter .mt{display:flex;justify-content:space-between;align-items:baseline;font-size:12px;color:var(--fg2)}
+.meter .mv{font-size:20px;font-weight:700;font-family:var(--mono)}
+.bar{height:9px;border-radius:99px;background:var(--free);border:1px solid var(--free-line);
+ overflow:hidden;display:flex;margin-top:6px}
+.bar i{display:block;height:100%}
+.bar i.held{background:var(--long)}
+.bar i.held.s{background:var(--short)}
+.bar i.new{background:var(--long);opacity:.45}
+.bar i.new.s{background:var(--short);opacity:.45}
+.legend{font-size:11px;color:var(--fg3);margin-top:5px}
+
+/* ---- slot grid ---- */
+table.slots{width:100%;border-collapse:collapse}
+table.slots th{font-size:11px;color:var(--fg3);text-align:left;font-weight:600;
+ padding:4px 8px;border-bottom:1px solid var(--line)}
+table.slots td{padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:middle}
+tr.grouphead td{background:var(--panel2);font-size:11px;color:var(--fg2);
+ letter-spacing:.06em;font-weight:700;padding:5px 8px}
+.sysname{font-weight:700;font-family:var(--mono);white-space:nowrap}
+.sysdesc{font-size:11px;color:var(--fg3);font-weight:400;font-family:inherit}
+.boxes{display:flex;gap:3px;flex-wrap:wrap}
+.box{width:16px;height:16px;border-radius:3px;border:1px solid var(--free-line);background:var(--free)}
+.box.f{background:var(--long);border-color:var(--long)}
+.box.f.s{background:var(--short);border-color:var(--short)}
+.box.n{background:var(--long);opacity:.42;border-color:var(--long)}
+.box.n.s{background:var(--short);opacity:.42;border-color:var(--short)}
+.box.over{background:var(--bad);border-color:var(--bad)}
+.cnt{font-family:var(--mono);font-size:13px;white-space:nowrap}
+.cnt b{font-size:15px}
+.why{font-size:12px}
+.why.blocked{color:var(--bad)}
+.why.ok{color:var(--fg2)}
+.why.warnc{color:var(--warn)}
+
+/* ---- flow ---- */
+.flowhead,.flowrow{display:grid;grid-template-columns:118px 1fr 1fr 1fr 1fr;gap:8px;align-items:start}
+.flowhead{font-size:11px;color:var(--fg3);font-weight:600;padding:0 0 6px;border-bottom:1px solid var(--line)}
+.flowhead div{padding:0 4px}
+.flowrow{padding:10px 0;border-bottom:1px solid var(--line)}
+.cell{background:var(--panel2);border-radius:6px;padding:6px 7px;min-height:44px}
+.cell.empty{background:transparent;border:1px dashed var(--line)}
+.cell .n{font-family:var(--mono);font-size:15px;font-weight:700;line-height:1.2}
+.cell .n.plus{color:var(--long)}
+.cell .n.minus{color:var(--short)}
+.chips{display:flex;flex-wrap:wrap;gap:3px;margin-top:4px}
+.chip{font-family:var(--mono);font-size:10.5px;padding:0 4px;border-radius:3px;
+ background:var(--panel);border:1px solid var(--line);color:var(--fg2);white-space:nowrap}
+.chip.dup{border-color:var(--warn);color:var(--warn)}
+.chip.out{text-decoration:line-through;opacity:.6}
+.note{font-size:11px;color:var(--fg3);margin-top:4px}
+.rowsys{padding-top:6px}
+.rowsys .sysname{font-size:13px}
+
+/* ---- generic table ---- */
+table.tbl{width:100%;border-collapse:collapse;font-size:13px}
+table.tbl th{text-align:left;font-size:11px;color:var(--fg3);font-weight:600;
+ padding:5px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+table.tbl td{padding:5px 8px;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:12.5px}
+table.tbl td.txt{font-family:inherit}
+.scrollx{overflow-x:auto}
+
+details{border:1px solid var(--line);border-radius:8px;background:var(--panel);margin-bottom:16px}
+summary{cursor:pointer;padding:11px 14px;font-size:13px;font-weight:600;color:var(--fg2);list-style:none}
+summary::-webkit-details-marker{display:none}
+summary:before{content:"▸ ";color:var(--fg3)}
+details[open] summary:before{content:"▾ "}
+details .body{padding:0 14px 14px}
+
+.pass{color:var(--ok);font-weight:700}
+.fail{color:var(--bad);font-weight:700}
+footer{color:var(--fg3);font-size:11px;margin-top:24px;line-height:1.8}
+
+@media (max-width:720px){
+  .flowhead,.flowrow{grid-template-columns:1fr 1fr;gap:6px}
+  .flowhead{display:none}
+  .rowsys{grid-column:1 / -1;border-top:2px solid var(--line);padding-top:8px}
+  .cell:before{content:attr(data-label);display:block;font-size:10px;color:var(--fg3);margin-bottom:2px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="mockbar">
+<b>設計モック（STATIC / 承認前）</b> — 本番ダッシュボードには未接続。数値は
+<span class="mono">results_csv/</span> の 2026-08-26 実 artifact から抽出した<b>実データ</b>。
+「今日ポジション」列のみ<b>見込み（未実測）</b>。
+</div>
+
+<h1>枠（スロット）ダッシュボード — 2026-08-26</h1>
+<div class="sub mono">run_id 20260826_062525_0fa295 ／ 出所: today_signals_20260826.json · paper_orders_20260826.json · exit_orders_20260826_proposal.json · pipeline_20260826.json</div>
+
+<div class="headline" style="margin-top:14px">
+今日のエントリーは <span class="k">22 本</span>（S1 9 / S2 10 / S3 3）。<br>
+<span class="k">S4 は 10 候補 → 0 本、S5 は 9 候補 → 0 本</span>。理由は候補が悪いからではなく
+<span class="k">ロング枠が満杯</span>（保有 28 / 上限 40 → 空き 12 を S1 と S3 が先に取った）。
+</div>
+
+<!-- ================= VIEW B : SLOT ================= -->
+<div class="panel">
+  <div class="phead">
+    <h2>枠ビュー — long枠 / short枠 × system枠</h2>
+    <span class="badge measured">実測 06:42 JST broker read</span>
+  </div>
+
+  <div class="meters" id="meters"></div>
+
+  <div class="scrollx">
+  <table class="slots">
+    <thead><tr>
+      <th style="width:130px">system</th>
+      <th style="width:210px">枠 10（■保有 ▨本日 □空き）</th>
+      <th style="width:96px">使用</th>
+      <th>候補 → エントリー / 理由</th>
+    </tr></thead>
+    <tbody id="slotbody"></tbody>
+  </table>
+  </div>
+
+  <div class="legend" style="margin-top:10px">
+    ■ = 既保有で埋まっている枠　▨ = 本日のエントリーで埋まる枠　□ = 空き枠
+    <span style="color:var(--bad)">■(赤)</span> = 枠を超えた分（現在コード上は強制されていない）
+  </div>
+</div>
+
+<!-- ================= VIEW A : FLOW ================= -->
+<div class="panel">
+  <div class="phead">
+    <h2>フロービュー — 昨日 → 今日の出入り → 今日</h2>
+    <span class="badge measured">左3列 実測</span>
+    <span class="badge projected">右1列 見込み</span>
+  </div>
+
+  <div class="flowhead">
+    <div>system</div>
+    <div>昨日ポジション<br><span class="sub">08-25 引け後</span></div>
+    <div>今日エグジット −<br><span class="sub">決済のみ（保護注文は別）</span></div>
+    <div>今日エントリー +<br><span class="sub">提案 22 本</span></div>
+    <div>今日ポジション<br><span class="sub">見込み</span></div>
+  </div>
+  <div id="flowbody"></div>
+
+  <div class="note" style="margin-top:12px">
+    ・「今日エントリー」の <span class="chip dup">黄枠</span> は<b>既に保有中の銘柄</b>。発注時に
+      <span class="mono">already_held</span> で skip されるため、枠は増えない（今日は 22 本中 7 本）。<br>
+    ・「今日エグジット」は<b>決済（time_based / 利確・損切りの約定）だけ</b>を数えている。
+      同じ artifact に入っている <span class="mono">protect_stop / protect_target / protect_trailing</span> 9 件は
+      <b>常駐の保護注文を置くだけ</b>で、置いた日にポジションは減らない。<br>
+    ・「今日ポジション」は <b>昨日 − 決済 + 新規</b> の算術。実測スナップショットは当日 22:5x にしか出ないため、
+      朝の時点では見込み値。
+  </div>
+</div>
+
+<!-- ================= detail toggles ================= -->
+<details>
+  <summary>ファネル詳細（6 フェーズ × 7 システム）</summary>
+  <div class="body scrollx">
+    <table class="tbl" id="funnel"></table>
+    <div class="note">Tgt=ユニバース対象 / FILpass=フィルタ通過 / STUpass=セットアップ成立 / TRDlist=候補 / Entry=採用 / Exit=当日決済。
+    出所 <span class="mono">pipeline_20260826.json</span>（全 35 セル measured）。</div>
+  </div>
+</details>
+
+<details>
+  <summary>枠モデル（コード上の正）と本日値の自己検査</summary>
+  <div class="body scrollx">
+    <table class="tbl" id="model"></table>
+    <div class="note" style="margin-top:10px">出所:
+      <span class="mono">config/config.yaml</span> risk.max_positions / risk.portfolio,
+      <span class="mono">config/settings.py</span> ui.long_allocations · short_allocations,
+      <span class="mono">core/final_allocation.py</span> _resolve_max_positions · _load_portfolio_caps · _apply_portfolio_caps · _sort_final_frame。
+    </div>
+    <h3 style="font-size:13px;margin:18px 0 6px">自己検査</h3>
+    <table class="tbl" id="selfcheck"></table>
+  </div>
+</details>
+
+<details>
+  <summary>本日の枠計算トレース（候補 → 割当 → 枠適用）</summary>
+  <div class="body scrollx">
+    <table class="tbl" id="trace"></table>
+  </div>
+</details>
+
+<footer>
+設計モック（承認前 / 本番未接続）。実データ抽出日 2026-08-26。<br>
+本番ダッシュボード（Next.js <span class="mono">apps/dashboards/alpaca-next</span>）へは一切変更を加えていない。
+</footer>
+
+</div>
+
+<script>
+/* ============================================================
+   実 artifact から抽出したデータ（2026-08-26）
+   ============================================================ */
+const D = {
+  date: "2026-08-26",
+
+  // config/config.yaml risk.portfolio （実行時 caps report と一致）
+  caps: { max_total:70, max_long:40, max_short:30 },
+  // today_signals_20260826.json portfolio.caps
+  held:  { long:28, short:2, total:30 },
+  allow: { long:12, short:28, total:40 },
+  kept:  { long:12, short:10, total:22 },
+  trimmed: { long_count:21 },
+
+  systems: [
+    { id:"system1", short:"S1", side:"long",  slots:10, prio:1, w:0.25,
+      desc:"ロング・トレンド",
+      heldSyms:["AEHR","AMCR","BNY","ERAS","FBRX","IPST","SLS","WETO"],
+      cand:10, entry:9,
+      entrySyms:["WETO","BNY","IPST","ASST","SLS","ERAS","FBRX","AMCR","AMIX"],
+      dupSyms:["WETO","BNY","IPST","SLS","ERAS","FBRX","AMCR"],
+      closeSyms:[], protectN:4,
+      why:{ tone:"ok", text:"候補 10 → 9 本。ロング枠の空き 12 を最優先で確保（優先度 1 位）" } },
+
+    { id:"system3", short:"S3", side:"long",  slots:10, prio:2, w:0.25,
+      desc:"ロング・押し目買い",
+      heldSyms:[],
+      cand:10, entry:3,
+      entrySyms:["TNON","IPW","MSS"], dupSyms:[],
+      closeSyms:[], protectN:0,
+      why:{ tone:"warnc", text:"候補 10 → 3 本。残り 7 本は ✗ロング枠切れ（S1 が 9 使い、残り 3 だけ）" } },
+
+    { id:"system4", short:"S4", side:"long",  slots:10, prio:3, w:0.25,
+      desc:"ロング・低ボラ",
+      heldSyms:["AON","BURL","DE","FTV","ITW","PCAR","ROST","SAN","SNA","TROW"],
+      cand:10, entry:0,
+      entrySyms:[], dupSyms:[], closeSyms:[], protectN:1,
+      why:{ tone:"blocked", text:"候補 10 → 0 本 ✗ロング枠 満杯（S1+S3 が 12 を使い切り）／自身の枠も 10/10 で満杯" } },
+
+    { id:"system5", short:"S5", side:"long",  slots:10, prio:4, w:0.25,
+      desc:"ロング・ADX リバーサル",
+      heldSyms:["BWIN","FIGS","GCT","NEWP","PAVS","PAY","VOYG","ZETA"],
+      cand:9, entry:0,
+      entrySyms:[], dupSyms:[],
+      closeSyms:["BWIN","FIGS","GCT","NEWP","PAVS","PAY","VOYG","ZETA"], protectN:0,
+      why:{ tone:"blocked", text:"候補 9 → 0 本 ✗ロング枠 満杯（優先度 4 位＝最後尾）。※本日 8 枠が決済で空くが、その空きは翌日まで使われない" } },
+
+    { id:"system2", short:"S2", side:"short", slots:10, prio:5, w:0.40,
+      desc:"ショート RSI スラスト",
+      heldSyms:["MRVI","SSRM"],
+      cand:10, entry:10,
+      entrySyms:["XNCR","RGEN","OMER","HTFL","NIQ","SII","ATRC","AEM","IAG","NG"], dupSyms:[],
+      closeSyms:[], protectN:4,
+      why:{ tone:"warnc", text:"候補 10 → 10 本（ショート枠は 2/30 でガラ空き）。ただし自身の枠は 2+10=12 で 10 を超過" } },
+
+    { id:"system6", short:"S6", side:"short", slots:10, prio:6, w:0.40,
+      desc:"ショート・ミーンリバージョン",
+      heldSyms:[], cand:0, entry:0, entrySyms:[], dupSyms:[], closeSyms:[], protectN:0,
+      why:{ tone:"ok", text:"候補 0（セットアップ成立 0 件）＝枠ではなく相場条件" } },
+
+    { id:"system7", short:"S7", side:"short", slots:10, prio:7, w:0.20,
+      desc:"SPY カタストロフィーヘッジ",
+      heldSyms:[], cand:0, entry:0, entrySyms:[], dupSyms:[], closeSyms:[], protectN:0,
+      why:{ tone:"ok", text:"候補 0（SPY のヘッジ条件 未成立）＝枠ではなく相場条件" } },
+  ],
+
+  orphan: { side:"long", syms:["CDTX","FOLD"],
+            note:"system 帰属なし（delisted/orphan）。ロング枠を 2 つ占有する" },
+
+  funnel: {
+    phases:["Tgt","FILpass","STUpass","TRDlist","Entry","Exit"],
+    rows:[
+      ["S1",5249,1432,633,10,9,0],
+      ["S2",5249,1413, 36,10,10,0],
+      ["S3",5249, 949, 20,10,3,0],
+      ["S4",5249, 507,377,10,0,0],
+      ["S5",5249,1228,  9, 9,0,0],
+      ["S6",5249,1082,  0, 0,0,0],
+      ["S7",   1,   1,  0, 0,0,0],
+    ]
+  }
+};
+
+/* ---------- helpers ---------- */
+const el = (h)=>{const t=document.createElement('template');t.innerHTML=h.trim();return t.content.firstChild;};
+const esc = (s)=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+/* ---------- meters ---------- */
+(function(){
+  const M = [
+    { k:"ロング枠", side:"long",  used:D.held.long,  cap:D.caps.max_long,  add:D.kept.long,
+      note:"S1 9 + S3 3 で空き 12 を使い切り → S4/S5 は 0" },
+    { k:"ショート枠", side:"short", used:D.held.short, cap:D.caps.max_short, add:D.kept.short,
+      note:"空き 28。S2 が 10 本、S6/S7 は候補 0" },
+    { k:"合計枠", side:"long", used:D.held.total, cap:D.caps.max_total, add:D.kept.total,
+      note:"70 のうち 30 使用。合計枠では今日は詰まっていない" },
+  ];
+  const box = document.getElementById('meters');
+  M.forEach(m=>{
+    const s = m.side==='short' ? ' s' : '';
+    const pUsed = m.used/m.cap*100, pAdd = Math.min(m.add, m.cap-m.used)/m.cap*100;
+    box.appendChild(el(`<div class="meter">
+      <div class="mt"><span>${m.k}</span><span class="mono">上限 ${m.cap}</span></div>
+      <div class="mv">${m.used} <span style="font-size:12px;color:var(--fg2)">保有</span>
+        <span style="opacity:.55">+${m.add}</span> <span style="font-size:12px;color:var(--fg2)">本日</span></div>
+      <div class="bar"><i class="held${s}" style="width:${pUsed}%"></i><i class="new${s}" style="width:${pAdd}%"></i></div>
+      <div class="legend">${esc(m.note)}</div>
+    </div>`));
+  });
+})();
+
+/* ---------- slot grid ---------- */
+(function(){
+  const tb = document.getElementById('slotbody');
+  const groups = [
+    { label:`LONG 枠  —  保有 ${D.held.long} / 上限 ${D.caps.max_long}　空き ${D.allow.long}`, side:"long" },
+    { label:`SHORT 枠  —  保有 ${D.held.short} / 上限 ${D.caps.max_short}　空き ${D.allow.short}`, side:"short" },
+  ];
+  groups.forEach(g=>{
+    tb.appendChild(el(`<tr class="grouphead"><td colspan="4">${esc(g.label)}</td></tr>`));
+    D.systems.filter(s=>s.side===g.side).forEach(s=>{
+      const s2 = s.side==='short' ? ' s' : '';
+      const held = s.heldSyms.length;
+      const net  = s.entry - s.dupSyms.length;      // 実際に枠を増やす本数
+      const fill = Math.min(held + net, s.slots);
+      const over = Math.max(0, held + net - s.slots);
+      let boxes = '';
+      for(let i=0;i<s.slots;i++){
+        if(i<held) boxes += `<span class="box f${s2}" title="既保有"></span>`;
+        else if(i<fill) boxes += `<span class="box n${s2}" title="本日エントリー"></span>`;
+        else boxes += `<span class="box" title="空き"></span>`;
+      }
+      for(let i=0;i<over;i++) boxes += `<span class="box over" title="枠超過（未強制）"></span>`;
+      const overTag = over ? ` <span class="badge gap">枠超過 +${over}</span>` : '';
+      const dupTag = s.dupSyms.length ? ` <span class="badge">うち既保有 ${s.dupSyms.length}</span>` : '';
+      tb.appendChild(el(`<tr>
+        <td><div class="sysname">${s.short} <span class="sysdesc">${esc(s.desc)}</span></div>
+            <div class="sysdesc mono">優先度 ${s.prio} ／ 配分 ${(s.w*100).toFixed(0)}%</div></td>
+        <td><div class="boxes">${boxes}</div></td>
+        <td class="cnt"><b>${held+net}</b>/${s.slots}${overTag}</td>
+        <td><div class="why ${s.why.tone}">${esc(s.why.text)}</div>
+            <div class="sysdesc mono">候補 ${s.cand} → エントリー ${s.entry}${dupTag}</div></td>
+      </tr>`));
+    });
+    if(g.side==='long'){
+      tb.appendChild(el(`<tr>
+        <td><div class="sysname" style="color:var(--fg3)">— <span class="sysdesc">orphan</span></div></td>
+        <td><div class="boxes">${D.orphan.syms.map(()=>'<span class="box f" style="opacity:.4"></span>').join('')}</div></td>
+        <td class="cnt">${D.orphan.syms.length}</td>
+        <td><div class="why warnc">${esc(D.orphan.note)}</div>
+            <div class="sysdesc mono">${D.orphan.syms.join(' · ')}</div></td>
+      </tr>`));
+    }
+  });
+})();
+
+/* ---------- flow ---------- */
+(function(){
+  const fb = document.getElementById('flowbody');
+  const order = ["system1","system3","system4","system5","system2","system6","system7"];
+  let t = {y:0, out:0, inn:0, now:0};
+  order.forEach(id=>{
+    const s = D.systems.find(x=>x.id===id);
+    if(!s) return;
+    const y = s.heldSyms.length, out = s.closeSyms.length;
+    const net = s.entry - s.dupSyms.length, now = y - out + net;
+    if(y===0 && out===0 && s.entry===0) {
+      fb.appendChild(el(`<div class="flowrow" style="opacity:.5">
+        <div class="rowsys"><span class="sysname">${s.short}</span>
+          <div class="sysdesc">${esc(s.desc)}</div></div>
+        <div class="cell empty" data-label="昨日"><div class="n">0</div></div>
+        <div class="cell empty" data-label="エグジット"><div class="n">0</div></div>
+        <div class="cell empty" data-label="エントリー"><div class="n">0</div><div class="note">候補 0</div></div>
+        <div class="cell empty" data-label="今日"><div class="n">0</div></div>
+      </div>`));
+      return;
+    }
+    t.y+=y; t.out+=out; t.inn+=net; t.now+=now;
+    const chips=(a,cls)=>a.map(x=>`<span class="chip ${cls||''}">${esc(x)}</span>`).join('');
+    const entryChips = s.entrySyms.map(x=>
+      `<span class="chip ${s.dupSyms.includes(x)?'dup':''}">${esc(x)}</span>`).join('');
+    const protectNote = s.protectN ? `<div class="note">保護注文 ${s.protectN} 件（減らない）</div>` : '';
+    fb.appendChild(el(`<div class="flowrow">
+      <div class="rowsys"><span class="sysname">${s.short}</span>
+        <div class="sysdesc">${esc(s.desc)}</div>
+        <div class="sysdesc mono">${s.side}</div></div>
+      <div class="cell" data-label="昨日ポジション">
+        <div class="n">${y}</div><div class="chips">${chips(s.heldSyms)}</div></div>
+      <div class="cell" data-label="今日エグジット">
+        <div class="n ${out?'minus':''}">${out?'−'+out:'0'}</div>
+        <div class="chips">${chips(s.closeSyms,'out')}</div>${protectNote}</div>
+      <div class="cell" data-label="今日エントリー">
+        <div class="n ${net?'plus':''}">${s.entry?'+'+s.entry:'0'}</div>
+        <div class="chips">${entryChips}</div>
+        ${s.dupSyms.length?`<div class="note">うち ${s.dupSyms.length} は既保有 → 実質 +${net}</div>`:''}</div>
+      <div class="cell" data-label="今日ポジション（見込み）">
+        <div class="n">${now}</div>
+        <div class="note">${y} − ${out} + ${net}</div></div>
+    </div>`));
+  });
+  fb.appendChild(el(`<div class="flowrow" style="opacity:.75">
+    <div class="rowsys"><span class="sysname" style="color:var(--fg3)">orphan</span></div>
+    <div class="cell" data-label="昨日"><div class="n">2</div>
+      <div class="chips"><span class="chip">CDTX</span><span class="chip">FOLD</span></div></div>
+    <div class="cell empty" data-label="エグジット"><div class="n">0</div></div>
+    <div class="cell empty" data-label="エントリー"><div class="n">0</div></div>
+    <div class="cell" data-label="今日"><div class="n">2</div></div>
+  </div>`));
+  fb.appendChild(el(`<div class="flowrow" style="border-bottom:none;padding-top:14px">
+    <div class="rowsys"><span class="sysname">合計</span></div>
+    <div class="cell" data-label="昨日"><div class="n">${t.y+2}</div><div class="note">L28 / S2</div></div>
+    <div class="cell" data-label="エグジット"><div class="n minus">−${t.out}</div><div class="note">保護注文 9 件は別</div></div>
+    <div class="cell" data-label="エントリー"><div class="n plus">+${t.inn}</div><div class="note">提案 22 − 既保有 7</div></div>
+    <div class="cell" data-label="今日"><div class="n">${t.now+2}</div><div class="note">L25 / S12（見込み）</div></div>
+  </div>`));
+})();
+
+/* ---------- funnel ---------- */
+(function(){
+  const t = document.getElementById('funnel');
+  t.innerHTML = `<thead><tr><th>system</th>${D.funnel.phases.map(p=>`<th style="text-align:right">${p}</th>`).join('')}</tr></thead>`
+    + `<tbody>${D.funnel.rows.map(r=>`<tr><td class="txt"><b>${r[0]}</b></td>`
+    + r.slice(1).map((v,i)=>`<td style="text-align:right${i===4&&v===0?';color:var(--bad);font-weight:700':''}">${v.toLocaleString()}</td>`).join('')
+    + `</tr>`).join('')}</tbody>`;
+})();
+
+/* ---------- model table ---------- */
+(function(){
+  const t = document.getElementById('model');
+  const rows = D.systems.map(s=>[
+    s.short, s.id, s.side, s.slots, s.prio, (s.w*100).toFixed(0)+"%", s.desc
+  ]);
+  t.innerHTML = `<thead><tr><th></th><th>system</th><th>side</th><th>枠(max_positions)</th><th>優先度</th><th>資金配分</th><th class="txt">説明</th></tr></thead>`
+   + `<tbody>${rows.map(r=>`<tr><td><b>${r[0]}</b></td><td>${r[1]}</td><td>${r[2]}</td>
+      <td style="text-align:right">${r[3]}</td><td style="text-align:right">${r[4]}</td>
+      <td style="text-align:right">${r[5]}</td><td class="txt">${esc(r[6])}</td></tr>`).join('')}
+      <tr><td colspan="7" style="font-family:inherit;padding-top:10px">
+        <b>ポートフォリオ上限</b>　合計 ${D.caps.max_total} ／ ロング ${D.caps.max_long} ／ ショート ${D.caps.max_short}
+        ・gross ≤ equity×100% ・|net| ≤ equity×50%<br>
+        <b>プール</b>　ロングとショートは<b>別プール</b>（40 と 30 で独立に判定。合計 70 が最後に効く）
+      </td></tr></tbody>`;
+})();
+
+/* ---------- self-check ---------- */
+(function(){
+  const held = D.systems.reduce((a,s)=>a+(s.side==='long'?s.heldSyms.length:0),0) + 2;
+  const heldS = D.systems.reduce((a,s)=>a+(s.side==='short'?s.heldSyms.length:0),0);
+  const sumSlotsL = D.systems.filter(s=>s.side==='long').reduce((a,s)=>a+s.slots,0);
+  const sumSlotsS = D.systems.filter(s=>s.side==='short').reduce((a,s)=>a+s.slots,0);
+  const entries = D.systems.reduce((a,s)=>a+s.entry,0);
+  const rows = [
+    ["long 系統の枠合計 = max_long", `${sumSlotsL} = ${D.caps.max_long}`, sumSlotsL===D.caps.max_long],
+    ["short 系統の枠合計 = max_short", `${sumSlotsS} = ${D.caps.max_short}`, sumSlotsS===D.caps.max_short],
+    ["枠合計 = max_total", `${sumSlotsL+sumSlotsS} = ${D.caps.max_total}`, sumSlotsL+sumSlotsS===D.caps.max_total],
+    ["モックの保有 long（系統別+orphan） = artifact held.long", `${held} = ${D.held.long}`, held===D.held.long],
+    ["モックの保有 short = artifact held.short", `${heldS} = ${D.held.short}`, heldS===D.held.short],
+    ["allow.long = max_long − held.long", `${D.caps.max_long-D.held.long} = ${D.allow.long}`, D.caps.max_long-D.held.long===D.allow.long],
+    ["allow.short = max_short − held.short", `${D.caps.max_short-D.held.short} = ${D.allow.short}`, D.caps.max_short-D.held.short===D.allow.short],
+    ["採用 long = allow.long（＝枠を使い切った）", `${D.kept.long} = ${D.allow.long}`, D.kept.long===D.allow.long],
+    ["モックのエントリー合計 = kept.total", `${entries} = ${D.kept.total}`, entries===D.kept.total],
+    ["S1+S3 のエントリー = kept.long", `9+3 = ${D.kept.long}`, 12===D.kept.long],
+  ];
+  const t=document.getElementById('selfcheck');
+  t.innerHTML = `<thead><tr><th class="txt">検査</th><th>値</th><th>結果</th></tr></thead><tbody>`
+   + rows.map(r=>`<tr><td class="txt">${esc(r[0])}</td><td>${esc(r[1])}</td>
+      <td class="${r[2]?'pass':'fail'}">${r[2]?'一致':'不一致'}</td></tr>`).join('')
+   + `</tbody>`;
+})();
+
+/* ---------- trace ---------- */
+(function(){
+  const t=document.getElementById('trace');
+  const rows=[
+    ["ロング候補（TRDlist 合計）","S1 10 + S3 10 + S4 10 + S5 9","39",""],
+    ["割当段階に入った行数","kept.long 12 + trimmed.long_count 21","33","差 6 は artifact に記録が無い（重複除去 or サイジング予算切れ）"],
+    ["ロング枠の空き","max_long 40 − held.long 28","12",""],
+    ["優先度順に 12 本だけ採用","S1 9 → S3 3 → (S4 0) → (S5 0)","12","優先度は side 昇順 → system 番号昇順（_sort_final_frame）"],
+    ["枠で落ちた行","trimmed.long_count","21","S3 の残り 7 + S4 10 + S5 4 相当"],
+    ["ショート候補","S2 10 + S6 0 + S7 0","10",""],
+    ["ショート枠の空き","max_short 30 − held.short 2","28","→ 全 10 本採用"],
+  ];
+  t.innerHTML=`<thead><tr><th class="txt">段階</th><th class="txt">計算</th><th>件数</th><th class="txt">備考</th></tr></thead><tbody>`
+   + rows.map(r=>`<tr><td class="txt">${esc(r[0])}</td><td class="txt mono" style="font-size:12px">${esc(r[1])}</td>
+      <td style="text-align:right"><b>${r[2]}</b></td><td class="txt" style="font-size:12px;color:var(--fg2)">${esc(r[3])}</td></tr>`).join('')
+   + `</tbody>`;
+})();
+</script>
+</body>
+</html>
