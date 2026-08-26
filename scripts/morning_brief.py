@@ -405,7 +405,12 @@ def adapter_quant(primary_root: Path, today_yyyymmdd: int) -> ProjectStatus:
 def _run_zombie_audit(mt5_root: Path, timeout: float) -> dict:
     """audit_terminal_zombies.py を read-only(--json) で走らせ集計を返す。
 
-    MQL5/Logs の INIT census のみ読む (端末は起こさない・.chr 不使用)。失敗しても
+    MQL5/Logs の INIT census に加え、--mcp で「今まさに走っている端末」に
+    list_open_charts を直接問い合わせる (2026-08-26)。INIT census だけだと
+    「アタッチ済みだが当該窓に INIT 行が無い」脚 (n0130 の XAU/DAX/CAC/UST30Y 等) を
+    欠落と誤判定し、毎朝 PARTIAL_SLEEVE の偽陽性を出していたため。--mcp は
+    既起動の端末に接続するだけで端末を起こさない (.chr 不使用・発注もしない)。
+    MCP が落ちていれば log census のみへ自動縮退するので self-healing。失敗しても
     ブリーフは落とさず {'ok': False, ...} を返す。
     """
     script = mt5_root / "scripts" / "audit_terminal_zombies.py"
@@ -416,7 +421,7 @@ def _run_zombie_audit(mt5_root: Path, timeout: float) -> dict:
     env["PYTHONIOENCODING"] = "utf-8"
     try:
         proc = subprocess.run(
-            [sys.executable, str(script), "--json", "--days", "3"],
+            [sys.executable, str(script), "--json", "--days", "3", "--mcp"],
             cwd=str(mt5_root),
             capture_output=True,
             text=True,
