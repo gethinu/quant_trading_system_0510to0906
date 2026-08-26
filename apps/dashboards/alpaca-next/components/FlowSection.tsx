@@ -65,7 +65,15 @@ function ChipRow({ label, children }: { label: string; children: React.ReactNode
   );
 }
 
-function FlowRow({ row, measured }: { row: SystemSlotRow; measured: boolean }) {
+function FlowRow({
+  row,
+  measured,
+  postEntry,
+}: {
+  row: SystemSlotRow;
+  measured: boolean;
+  postEntry: boolean;
+}) {
   const y = row.held;
   const out = row.closes.length;
   const inn = row.netEntries;
@@ -80,14 +88,16 @@ function FlowRow({ row, measured }: { row: SystemSlotRow; measured: boolean }) {
       <div className="flex flex-wrap items-baseline gap-x-2">
         <span className="font-semibold">{row.spec.short}</span>
         <span className="text-[11px] text-muted">{row.spec.desc}</span>
-        <span className="ml-auto text-[10px] tabular-nums text-muted">
-          {y} − {out} + {inn} = {projected}
-          {hasMeasured && row.measuredNow !== projected ? ` ／ 実測 ${row.measuredNow}` : ''}
-        </span>
+        {postEntry ? null : (
+          <span className="ml-auto text-[10px] tabular-nums text-muted">
+            {y} − {out} + {inn} = {projected}
+            {hasMeasured && row.measuredNow !== projected ? ` ／ 実測 ${row.measuredNow}` : ''}
+          </span>
+        )}
       </div>
 
       <div className="mt-2 grid grid-cols-4 gap-1.5">
-        <Num label="昨日" value={String(y)} />
+        <Num label={postEntry ? '現在の保有' : '昨日'} value={String(y)} />
         <Num
           label="エグジット"
           value={out > 0 ? `−${out}` : '0'}
@@ -102,12 +112,12 @@ function FlowRow({ row, measured }: { row: SystemSlotRow; measured: boolean }) {
         <Num
           label={measured ? '今日 実測' : '今日 見込み'}
           value={String(now)}
-          sub={measured ? undefined : `${y}−${out}+${inn}`}
+          sub={measured || postEntry ? undefined : `${y}−${out}+${inn}`}
         />
       </div>
 
       {row.heldSymbols.length > 0 ? (
-        <ChipRow label="昨日">
+        <ChipRow label={postEntry ? '保有' : '昨日'}>
           {row.heldSymbols.map((s) => (
             <Chip key={s} text={s} />
           ))}
@@ -156,9 +166,15 @@ function FlowRow({ row, measured }: { row: SystemSlotRow; measured: boolean }) {
 export function FlowSection({ model }: { model: SlotFlowModel }) {
   if (model.unavailable) return null;
   const measured = model.basis.todayBook === 'measured';
+  // 寄り前 (エントリー前) の保有 read が publish されていない日は、左端が
+  // 「昨日」ではなく「本日分を含む現在」になる。連続性の算術は成立しないので、
+  // 名前も算術も出さずに、何がどう違うのかを先に断る。
+  const postEntry = model.basis.holdings === 'post_entry';
   const t = model.totals;
   const now = measured && t.measuredNow != null ? t.measuredNow : t.projectedNow;
-  const diff = measured && t.measuredNow != null ? t.measuredNow - t.projectedNow : 0;
+  const diff = !postEntry && measured && t.measuredNow != null
+    ? t.measuredNow - t.projectedNow
+    : 0;
 
   return (
     <section className="rounded-xl bg-card p-4 shadow-lg">
@@ -176,7 +192,13 @@ export function FlowSection({ model }: { model: SlotFlowModel }) {
         <span className="ml-auto text-[10px] tabular-nums text-muted">{model.date}</span>
       </div>
 
-      {!measured ? (
+      {postEntry ? (
+        <p className="mt-2 rounded border border-warn/25 bg-warn/10 px-2 py-1.5 text-[11px] leading-snug text-warn">
+          エントリー前のポジション実測（<span className="tabular-nums">exit_orders_*_proposal</span>）が
+          この日は publish されていないため、<b>昨日 → 今日 の連続性は出せません</b>。左端は
+          「本日のエントリーを含む現在の保有」です。
+        </p>
+      ) : !measured ? (
         <p className="mt-2 rounded border border-warn/25 bg-warn/10 px-2 py-1.5 text-[11px] leading-snug text-warn">
           「今日ポジション」は <b>昨日 − 決済 + 新規</b> の見込みです。実測スナップショットは
           当日 22:5x にしか生成されないため、引け前は確定値を出せません。
@@ -185,7 +207,7 @@ export function FlowSection({ model }: { model: SlotFlowModel }) {
 
       <div className="mt-2">
         {model.rows.map((row) => (
-          <FlowRow key={row.spec.id} row={row} measured={measured} />
+          <FlowRow key={row.spec.id} row={row} measured={measured} postEntry={postEntry} />
         ))}
 
         {model.orphan ? (
@@ -198,7 +220,7 @@ export function FlowSection({ model }: { model: SlotFlowModel }) {
               </span>
             </div>
             <div className="mt-2 grid grid-cols-4 gap-1.5">
-              <Num label="昨日" value={String(model.orphan.count)} />
+              <Num label={postEntry ? '現在の保有' : '昨日'} value={String(model.orphan.count)} />
               <Num label="エグジット" value="0" />
               <Num label="エントリー" value="0" />
               <Num
@@ -217,7 +239,7 @@ export function FlowSection({ model }: { model: SlotFlowModel }) {
         <div className="mt-1 border-t border-white/10 pt-3">
           <div className="mb-1 text-[11px] font-semibold">合計</div>
           <div className="grid grid-cols-4 gap-1.5">
-            <Num label="昨日" value={String(t.held)} />
+            <Num label={postEntry ? '現在の保有' : '昨日'} value={String(t.held)} />
             <Num
               label="エグジット"
               value={t.closes > 0 ? `−${t.closes}` : '0'}
@@ -237,7 +259,7 @@ export function FlowSection({ model }: { model: SlotFlowModel }) {
             <Num
               label={measured ? '今日 実測' : '今日 見込み'}
               value={String(now)}
-              sub={measured ? undefined : `${t.held}−${t.closes}+${t.entriesNet}`}
+              sub={measured || postEntry ? undefined : `${t.held}−${t.closes}+${t.entriesNet}`}
             />
           </div>
           {measured && diff !== 0 ? (

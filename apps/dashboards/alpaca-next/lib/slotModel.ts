@@ -112,6 +112,11 @@ export interface SlotFlowBasis {
   todayBook: BookBasis;
   /** sidecar を bundle manifest の content hash で検証できたか。 */
   sidecarVerified: boolean;
+  /**
+   * system 別の保有内訳がどこからも取れなかった日。枠メーター (caps) だけが
+   * 信用でき、各行の ■保有 は 0 に見えてしまうので UI 側で必ず断る。
+   */
+  holdingsUnavailable: boolean;
 }
 
 export interface PoolMeter {
@@ -239,13 +244,20 @@ function pickHoldings(
     };
   }
   if (snapshot && Array.isArray(snapshot.positions) && snapshot.positions.length > 0) {
+    // alpaca_snapshot の生成時刻は日によって 06:2x (エントリー前) と 22:5x
+    // (引け後) にばらつく。時刻を推測せず、**allocator が見た保有数と一致するか**
+    // で観測点を決める。一致すれば同じ瞬間 = エントリー前。
+    const basis: HoldingsBasis =
+      expectedHeldTotal != null && snapshot.positions.length === expectedHeldTotal
+        ? 'pre_entry'
+        : 'post_entry';
     return {
       rows: snapshot.positions.map((p) => ({
         symbol: p.symbol,
         system: normalizeSystem(p.system),
         side: normalizeSide(p.side),
       })),
-      basis: 'post_entry',
+      basis,
       source: 'alpaca_snapshot',
       observedAt: snapshot.generated_at ?? null,
     };
@@ -597,6 +609,7 @@ export function buildSlotFlowModel(input: {
       exitsSource: null,
       todayBook: 'projected',
       sidecarVerified: false,
+      holdingsUnavailable: true,
     },
     totals: {
       held: 0,
@@ -710,10 +723,11 @@ export function buildSlotFlowModel(input: {
       .map(([category, count]) => ({ category, label: skipLabelOf(category), count }));
 
     const held = heldSymbols.length;
-    // holdings が引け後実測 (post_entry) の日は「保有 = 本日分込み」なので
-    // 二重計上しないよう used は held のみにする。
-    const used = holdings?.basis === 'post_entry' ? held : held + netEntries;
-    const projectedNow = held - closes.length + netEntries;
+    // holdings が引け後実測 (post_entry) の日は「保有 = 本日分込み」。used も
+    // projectedNow も本日分を足し直すと二重計上になるので held をそのまま使う。
+    const postEntry = holdings?.basis === 'post_entry';
+    const used = postEntry ? held : held + netEntries;
+    const projectedNow = postEntry ? held : held - closes.length + netEntries;
     return {
       spec,
       heldSymbols,
@@ -755,6 +769,7 @@ export function buildSlotFlowModel(input: {
     exitsSource: exits.source || null,
     todayBook: measuredTotal != null ? 'measured' : 'projected',
     sidecarVerified,
+    holdingsUnavailable: holdings == null,
   };
 
   // 見出し: 「なぜ 0 なのか」を 1 文で先に答える。

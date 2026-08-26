@@ -186,6 +186,14 @@ export function SlotGridSection({ model }: { model: SlotFlowModel }) {
         <span className="ml-auto text-[10px] tabular-nums text-muted">{model.date}</span>
       </div>
 
+      {model.basis.holdingsUnavailable ? (
+        <p className="mt-2 rounded border border-warn/25 bg-warn/10 px-2 py-1.5 text-[11px] leading-snug text-warn">
+          system 別の保有内訳をどの artifact からも取得できませんでした。下の
+          <b> ■保有 </b>は 0 として描かれています。信用できるのは上の枠メーター
+          （<span className="tabular-nums">today_signals.portfolio.caps</span>）だけです。
+        </p>
+      ) : null}
+
       {model.headline ? (
         <p className="mt-3 rounded-lg border-l-2 border-sky-400/70 bg-white/[0.04] px-3 py-2 text-[13px] leading-relaxed">
           {model.headline}
