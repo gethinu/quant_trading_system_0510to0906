@@ -143,7 +143,11 @@ from common.utils_spy import (
 )
 from config.environment import get_env_config
 from config.settings import get_settings
-from core.final_allocation import finalize_allocation, load_symbol_system_map
+from core.final_allocation import (
+    count_positions_with_unmapped,
+    finalize_allocation,
+    load_symbol_system_map,
+)
 from core.system1 import summarize_system1_diagnostics
 from core.system5 import DEFAULT_ATR_PCT_THRESHOLD
 
@@ -2227,8 +2231,46 @@ def _resolve_positions_for_allocation() -> tuple[list[Any] | None, Any | None]:
         )
         return None, symbol_system_map
 
-    if not symbol_system_map and fetched_map:
-        symbol_system_map = fetched_map
+    # ``_fetch_positions_and_symbol_map`` は static map に **entry coid 由来の帰属を
+    # coid 優先でマージ** した map を返す。旧コードはそれを
+    # ``if not symbol_system_map`` ―― つまり **static が空のときだけ** 取り込んでいた。
+    # ``data/symbol_system_map.json`` は 1 件でも入っていれば truthy なので
+    # (実測 84 銘柄・最終更新 2026-07-01)、**coid 由来の帰属が丸ごと捨てられていた**。
+    # 2026-08-26 22:35 の実 run でも coid map 277 銘柄を構築した上で破棄しており、
+    # 保有 29 件が 1 件も system に帰属できず (``held_unmapped == held``)、
+    # ``available_slots[s] = max_positions - 0`` で全 system 10 に張り付いていた
+    # (= system 別の枠が素通り)。よって **常にマージ (fetched 優先)** へ修正する。
+    # 参照: docs/SLOT_MODEL_AND_DASHBOARD_REDESIGN_20260826.md §3.1、
+    #      docs/SLOT_PER_SYSTEM_ATTRIBUTION_FIX_20260826.md。
+    if fetched_map:
+        merged_map: dict[str, Any] = dict(symbol_system_map or {})
+        merged_map.update(fetched_map)
+        symbol_system_map = merged_map
+
+    # 帰属カバレッジの見える化: 全滑りを黙って通さない。coid 取得失敗や
+    # coid 規則変更で再発したときに、この行が唯一の早期警報になる。
+    try:
+        _per_sys, _unmapped = count_positions_with_unmapped(
+            positions, symbol_system_map
+        )
+        _attributed = int(sum(_per_sys.values()))
+        _orphan = int(_unmapped.get("total", 0))
+        _counted = _attributed + _orphan
+        if _counted and _attributed == 0:
+            _log(
+                f"⚠️ 保有 {_counted} 件を 1 件も system に帰属できません "
+                "(entry coid / symbol_system_map ともに空振り)。"
+                "available_slots が全 system で max_positions に張り付き、"
+                "system 別の枠が実質無効になります。",
+                level="WARNING",
+            )
+        elif _counted:
+            _log(
+                f"🧮 保有 system 帰属: {_attributed}/{_counted} 件 "
+                f"(未帰属 {_orphan} 件 = delisted/orphan) → {dict(sorted(_per_sys.items()))}"
+            )
+    except Exception:
+        pass
     try:
         _log(
             f"📊 現保有ポジション {len(positions)} 件を配分の空き枠算出に反映 "
