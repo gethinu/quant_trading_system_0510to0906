@@ -1,34 +1,34 @@
 {
   "schema": "dashboard_bundle/v1",
   "date": "2026-08-27",
-  "source_run_id": "20260827_062650_0c71b1",
-  "materialized_at": "2026-08-26T21:44:56+00:00",
+  "source_run_id": "20260827_223507_72c5a9",
+  "materialized_at": "2026-08-27T14:00:14+00:00",
   "files": {
     "today_signals": {
       "name": "today_signals_20260827.json",
-      "sha256": "c3813a1a2dd3e02cdf149ce247a9c92aec3b6a96d1bc09a45031db0c82099a5f"
+      "sha256": "185c30175b40b52476053dcd7b7611cbeb2967c398b8c46e526d53d75be73658"
     },
     "pipeline": {
       "name": "pipeline_20260827.json",
-      "sha256": "ade83bd2917383423dbc24d6ad1d050da5ad13afe54ae4703cbe8b0728498548"
+      "sha256": "4e53397b69e621a9e595d7e1a3ce2cc2887c6bcaf291577e7a030b510446091a"
     },
     "narrative": {
       "name": "narrative_20260827.json",
       "sha256": "041e50df1ab746f57b15f0293b3c8a56e10dba09f7b42492ec7b539cb8bfcae1"
     },
-    "paper_orders": {
-      "name": "paper_orders_20260827.json",
-      "sha256": "6ce9708dae54d654b4de179146caf857e5ad0f15bfaba5b2c11ec7c3c979192d"
+    "alpaca_snapshot": {
+      "name": "alpaca_snapshot_20260827.json",
+      "sha256": "6867a6adb18590d31797383035206a41dac259907be1b5825b3a50233821ca3c"
     },
-    "exit_orders_proposal": {
-      "name": "exit_orders_20260827_proposal.json",
-      "sha256": "453dd8217fbd02a390e7fb4c579e0d410f43d73511b7760126c6ce248f1c7bb8"
+    "notify_delivery": {
+      "name": "notify_delivery_20260827.json",
+      "sha256": "c2546c2b1f417d2bffbf50d7c7f84b364755f0f7d03e1aa28a0a6b02ce2faa97"
     }
   },
   "sources": {
     "recon": {
       "name": "recon_20260827.json",
-      "sha256": "d08a340604b377854ac88bb7b2b462f96add5fc40dac23908c4223ebc1915955"
+      "sha256": "3eb078cd6bc2be5cae4f125e262f5448779f7145c4e1a1eef4f84d277e54bba9"
     }
   },
   "measurement": {
@@ -36,9 +36,7 @@
     "funnel_total": 35,
     "exit_measured": 7
   },
-  "warnings": [
-    "legacy recon lineage verified by generated_at only; upgrade producer to source_signals_run_id"
-  ],
+  "warnings": [],
   "materialization": {
     "funnel_status": "ok",
     "exit_status": "ok"
