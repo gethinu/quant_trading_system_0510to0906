@@ -1,0 +1,38 @@
+{
+  "schema": "dashboard_bundle/v1",
+  "date": "2026-08-28",
+  "source_run_id": "20260828_062653_ad21f6",
+  "materialized_at": "2026-08-27T21:44:58+00:00",
+  "files": {
+    "today_signals": {
+      "name": "today_signals_20260828.json",
+      "sha256": "2fe102f87c7be3548197a4465a6088c74f4d9cfadb0246112f23456b70c1f336"
+    },
+    "pipeline": {
+      "name": "pipeline_20260828.json",
+      "sha256": "29dac1d2af46eb4bdb4a35b7e025930a69222442a91b740d5912db372877a938"
+    },
+    "narrative": {
+      "name": "narrative_20260828.json",
+      "sha256": "b8028fb8d88b658fc6944b25947de818bbf1297e9f3b4f57721af7d6320509c9"
+    }
+  },
+  "sources": {
+    "recon": {
+      "name": "recon_20260828.json",
+      "sha256": "e760506efcc8e0ea9d91277f9620c1a2567794ef2e0ede5ddd9bee60489070c5"
+    }
+  },
+  "measurement": {
+    "funnel_measured": 35,
+    "funnel_total": 35,
+    "exit_measured": 7
+  },
+  "warnings": [
+    "legacy recon lineage verified by generated_at only; upgrade producer to source_signals_run_id"
+  ],
+  "materialization": {
+    "funnel_status": "ok",
+    "exit_status": "ok"
+  }
+}
