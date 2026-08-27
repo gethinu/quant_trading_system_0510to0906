@@ -4,12 +4,15 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from functools import lru_cache
 import json
+import logging
 import math
 import os
 from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
+
+_LOGGER = logging.getLogger(__name__)
 
 validate_config_dict: Callable[[Mapping[str, object]], Any] | None
 try:  # optional import for validation
@@ -302,7 +305,26 @@ def _coerce_float(val: Any, default: float) -> float:
     return parsed if math.isfinite(parsed) else default
 
 
-def _coerce_bool(val: Any, default: bool) -> bool:
+def _coerce_positive_ratio(val: Any, default: float) -> float:
+    """Coerce a 0<x<=1 ratio; anything else falls back with a loud warning.
+
+    ``0`` (and any non-finite / out-of-range value) would silently zero every
+    derived slot, which is indistinguishable from a full stop.  Refuse it here
+    instead of letting it reach the allocator.
+    """
+    parsed = _coerce_float(val, float("nan"))
+    if math.isfinite(parsed) and 0.0 < parsed <= 1.0:
+        return parsed
+    _LOGGER.warning(
+        "[CAPITAL_SLOTS] slots_from_capital_gross_budget_factor=%r is outside "
+        "(0, 1]; falling back to %s",
+        val,
+        default,
+    )
+    return default
+
+
+def _coerce_bool(val: Any, default: bool, *, source: str | None = None) -> bool:
     """Parse explicit YAML-style booleans without treating non-empty text as true."""
     if isinstance(val, bool):
         return val
@@ -312,6 +334,13 @@ def _coerce_bool(val: Any, default: bool) -> bool:
             return True
         if text in {"0", "false", "no", "off"}:
             return False
+        if source:
+            _LOGGER.warning(
+                "[CAPITAL_SLOTS] %s=%r is not a boolean; falling back to %s",
+                source,
+                val,
+                default,
+            )
     return default
 
 
@@ -449,10 +478,14 @@ def _build_risk_config(cfg: dict[str, Any]) -> RiskConfig:
         risk_pct=float(os.getenv("RISK_PCT", cfg.get("risk_pct", 0.02))),
         max_positions=max_pos_val,
         max_pct=float(os.getenv("MAX_PCT", cfg.get("max_pct", 0.10))),
+        # env override は運用の非常口。未設定なら YAML、YAML も無ければ OFF。
+        # 解釈できない値は YAML 値へ落とすが、必ず警告を残す (silent OFF 防止)。
         slots_from_capital=_coerce_bool(
-            cfg.get("slots_from_capital", False), False
+            os.getenv("SLOTS_FROM_CAPITAL"),
+            _coerce_bool(cfg.get("slots_from_capital", False), False),
+            source="SLOTS_FROM_CAPITAL",
         ),
-        slots_from_capital_gross_budget_factor=_coerce_float(
+        slots_from_capital_gross_budget_factor=_coerce_positive_ratio(
             cfg.get("slots_from_capital_gross_budget_factor", 1.0), 1.0
         ),
         slots_from_capital_min_slots=_coerce_int(

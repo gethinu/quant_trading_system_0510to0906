@@ -115,22 +115,51 @@ class CapitalSlotDerivation:
     side_caps_applied: dict[str, int]
 
 
+def _finite_or(value: Any, default: float) -> float:
+    """Return ``float(value)`` when it is finite, otherwise ``default``.
+
+    Guards the slot derivation against ``nan``/``inf`` leaking in from YAML or
+    from an upstream calculation: a single non-finite input would drive every
+    system to zero slots, which looks exactly like a deliberate full stop.
+    """
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if math.isfinite(parsed) else default
+
+
 def _load_capital_slot_policy() -> CapitalSlotPolicy:
-    """Read the opt-in slot policy; any bad config leaves legacy mode intact."""
+    """Read the opt-in slot policy; any bad config leaves legacy mode intact.
+
+    A settings failure here silently disables the feature, which is the safe
+    direction but is indistinguishable from "the operator left it off".  Log it
+    so a misconfiguration is never a silent OFF.
+    """
     try:
         from config.settings import get_settings
 
         risk = get_settings().risk
         factor = float(getattr(risk, "slots_from_capital_gross_budget_factor", 1.0))
         minimum = int(getattr(risk, "slots_from_capital_min_slots", 1))
+        # F は 0 < F <= 1。0 や非有限は「全 system 0 枠」と等価なので受け付けない。
+        if not math.isfinite(factor) or factor <= 0.0 or factor > 1.0:
+            logger.warning(
+                "[CAPITAL_SLOTS] gross_budget_factor=%r is outside (0, 1]; using 1.0",
+                factor,
+            )
+            factor = 1.0
         return CapitalSlotPolicy(
             enabled=bool(getattr(risk, "slots_from_capital", False)),
-            gross_budget_factor=(
-                min(1.0, max(0.0, factor)) if math.isfinite(factor) else 1.0
-            ),
+            gross_budget_factor=factor,
             min_slots=max(0, minimum),
         )
-    except Exception:
+    except Exception:  # noqa: BLE001 - 設定不備は legacy へ退避するが黙らせない
+        logger.warning(
+            "[CAPITAL_SLOTS] could not read the slot policy from settings; "
+            "staying on legacy max_positions",
+            exc_info=True,
+        )
         return CapitalSlotPolicy()
 
 
@@ -219,19 +248,28 @@ def derive_capital_weighted_slots(
     ``N_i`` deliberately uses the fixed configured maximum-notional ceiling,
     not a candidate's ATR or price.  Position sizing and the separate order
     deploy budget remain unchanged.
+
+    **The result is equity-independent.**  ``E`` appears in both ``B_i`` and
+    ``N_i`` and cancels:  ``raw_slots_i = G*F*side_share_s*weight_i / max_pct_i``.
+    Equity is carried through only so the audit record (budget in dollars, cost
+    of one slot in dollars) is readable; a different account size does not move
+    the slot counts.  Do not read a change in these numbers as "equity moved".
     """
-    equity_value = float(equity)
+    equity_value = _finite_or(equity, float("nan"))
     if not math.isfinite(equity_value) or equity_value <= 0:
         raise ValueError("equity must be a positive finite value")
-    gross = max(0.0, float(gross_exposure_pct)) * min(
-        1.0, max(0.0, float(gross_budget_factor))
+    # 非有限が一つでも混ざると全 system が 0 枠になり、設定ミスと全停止が
+    # 見分けられなくなる。ここで既定値へ寄せて、呼び出し元に落とさない。
+    gross = max(0.0, _finite_or(gross_exposure_pct, 0.0)) * min(
+        1.0, max(0.0, _finite_or(gross_budget_factor, 1.0))
     )
-    requested_long_share = min(1.0, max(0.0, float(long_ratio)))
+    requested_long_share = min(1.0, max(0.0, _finite_or(long_ratio, 0.5)))
+    min_slots = max(0, int(min_slots) if math.isfinite(float(min_slots)) else 0)
     # Preserve the configured net-exposure ceiling in the planning budget.
     # With long/short shares summing to one, net/gross is |2*long_share - 1|.
     if gross > 0:
         allowed_deviation = min(
-            1.0, max(0.0, float(max_net_exposure_pct)) / gross
+            1.0, max(0.0, _finite_or(max_net_exposure_pct, 0.0)) / gross
         )
         long_share = min(
             (1.0 + allowed_deviation) / 2.0,
@@ -241,7 +279,12 @@ def derive_capital_weighted_slots(
         long_share = requested_long_share
     side_specs = (
         ("long", long_allocations, long_share, max(0, int(max_long_positions))),
-        ("short", short_allocations, 1.0 - long_share, max(0, int(max_short_positions))),
+        (
+            "short",
+            short_allocations,
+            1.0 - long_share,
+            max(0, int(max_short_positions)),
+        ),
     )
     requested: dict[str, int] = {}
     raw_slots: dict[str, float] = {}
@@ -254,12 +297,9 @@ def derive_capital_weighted_slots(
         side_raw: dict[str, float] = {}
         for name, weight in weights.items():
             key = str(name).strip().lower()
-            normalized_weight = max(0.0, float(weight))
-            try:
-                max_pct = float(max_pct_by_system.get(key, 0.0))
-            except (TypeError, ValueError):
-                max_pct = 0.0
-            if not math.isfinite(max_pct) or max_pct <= 0:
+            normalized_weight = max(0.0, _finite_or(weight, 0.0))
+            max_pct = _finite_or(max_pct_by_system.get(key, 0.0), 0.0)
+            if max_pct <= 0:
                 max_pct = 0.0
             budget = equity_value * gross * side_share * normalized_weight
             needed = equity_value * max_pct
@@ -288,7 +328,10 @@ def derive_capital_weighted_slots(
                 side_results["long"], raw_slots, side_cap=long_cap, min_slots=min_slots
             ),
             **_cap_slots_by_side(
-                side_results["short"], raw_slots, side_cap=short_cap, min_slots=min_slots
+                side_results["short"],
+                raw_slots,
+                side_cap=short_cap,
+                min_slots=min_slots,
             ),
         }
 
@@ -1322,7 +1365,17 @@ def _allocate_by_capital(
     weights: Mapping[str, float],
     side: str,
     active_positions: Mapping[str, int],
+    slot_limits: Mapping[str, int] | None = None,
 ) -> CapitalAllocationResult:
+    """Size candidates against a per-side budget.
+
+    ``slot_limits``, when given, is the already-net-of-holdings per-system
+    position ceiling resolved by the caller (``finalize_allocation``'s
+    ``available_slots``).  It exists because this function otherwise rebuilds
+    its own ceiling from ``strategy.config['max_positions']`` and would ignore
+    a capital-derived ceiling entirely.  ``None`` keeps the legacy behaviour
+    byte-for-byte.
+    """
     env = get_env_config()
     debug_mode = env.allocation_debug
     # デバッグ時は簡潔に呼び出し元の欠落コンテキストを警告するが、
@@ -1448,6 +1501,17 @@ def _allocate_by_capital(
             max_pos_map[name] = max(0, max_pos - taken)
         except Exception:
             max_pos_map[name] = 0
+        # 呼び出し元が解決済みの枠を渡してきた場合はそれを上限として尊重する。
+        # (capital-derived slots は既に保有を差し引いた値なので再度引かない)
+        if slot_limits is not None and name in slot_limits:
+            try:
+                max_pos_map[name] = max(0, int(slot_limits[name]))
+            except (TypeError, ValueError):
+                logger.warning(
+                    "[CAPITAL_SLOTS] %s: unusable slot limit %r; keeping legacy",
+                    name,
+                    slot_limits[name],
+                )
 
     if debug_mode:
         logger.debug(f"[ALLOC_DEBUG] Max positions available: {dict(max_pos_map)}")
@@ -2156,66 +2220,125 @@ def finalize_allocation(
     capital_slot_derivation: CapitalSlotDerivation | None = None
     capital_slot_policy = _load_capital_slot_policy()
     slot_equity_source: str | None = None
+    equity_for_slots: float | None = None
+    legacy_max_pos_map = dict(max_pos_map)
     if capital_slot_policy.enabled:
-        equity_for_slots = _safe_positive_float(slot_capital_equity)
-        if equity_for_slots is not None:
-            slot_equity_source = "account_start_equity"
-        if equity_for_slots is None:
-            equity_for_slots = _safe_positive_float(default_capital)
+        # ここは fail-SAFE。どこで失敗しても legacy max_positions のまま
+        # 進めるのが正しく、その日の枠を 0 にして全停止させてはならない。
+        try:
+            equity_for_slots = _safe_positive_float(slot_capital_equity)
             if equity_for_slots is not None:
-                slot_equity_source = "finalize_default_capital"
-        if equity_for_slots is None:
-            logger.warning(
-                "[CAPITAL_SLOTS] positive equity unavailable; retaining legacy max_positions"
-            )
-        else:
-            default_max_pct = AllocationConstants.DEFAULT_MAX_PCT
-            try:
-                from config.settings import get_settings
-
-                default_max_pct = float(get_settings().risk.max_pct)
-            except Exception:
-                pass
-            max_pct_by_system: dict[str, float] = {
-                name: default_max_pct for name in systems
-            }
-            for name, strategy in (strategies or {}).items():
-                key = str(name).strip().lower()
-                config = getattr(strategy, "config", {}) or {}
-                try:
-                    max_pct_by_system[key] = float(
-                        config.get("max_pct", default_max_pct)
+                slot_equity_source = "account_start_equity"
+            if equity_for_slots is None:
+                equity_for_slots = _safe_positive_float(default_capital)
+                if equity_for_slots is not None:
+                    slot_equity_source = "finalize_default_capital"
+                    # 枠の値そのものは equity に依存しない (E は約分される) が、
+                    # 監査記録の $ 表記が実口座と無関係な数字になるため明示する。
+                    logger.warning(
+                        "[CAPITAL_SLOTS] account equity unavailable; the audit "
+                        "record falls back to default_capital=%s (slot counts "
+                        "are equity-independent, only the $ figures change)",
+                        default_capital,
                     )
-                except (AttributeError, TypeError, ValueError):
-                    max_pct_by_system[key] = default_max_pct
-            portfolio_caps_for_slots = _load_portfolio_caps()
-            capital_slot_derivation = derive_capital_weighted_slots(
-                long_allocations=long_alloc,
-                short_allocations=short_alloc,
-                max_pct_by_system=max_pct_by_system,
-                equity=equity_for_slots,
-                long_ratio=default_long_ratio,
-                gross_exposure_pct=float(
-                    portfolio_caps_for_slots["max_gross_exposure_pct"]
-                ),
-                gross_budget_factor=capital_slot_policy.gross_budget_factor,
-                min_slots=capital_slot_policy.min_slots,
-                max_long_positions=int(portfolio_caps_for_slots["max_long_positions"]),
-                max_short_positions=int(
-                    portfolio_caps_for_slots["max_short_positions"]
-                ),
-                max_total_positions=int(
-                    portfolio_caps_for_slots["max_total_positions"]
-                ),
-                max_net_exposure_pct=float(
-                    portfolio_caps_for_slots["max_net_exposure_pct"]
-                ),
-            )
-            max_pos_map = {
-                name: int(capital_slot_derivation.slots.get(name, 0))
-                for name in systems
-            }
+            if equity_for_slots is None:
+                logger.warning(
+                    "[CAPITAL_SLOTS] positive equity unavailable; retaining legacy max_positions"
+                )
+            else:
+                default_max_pct = AllocationConstants.DEFAULT_MAX_PCT
+                try:
+                    from config.settings import get_settings
 
+                    default_max_pct = float(get_settings().risk.max_pct)
+                except Exception:  # noqa: BLE001 - 既定値で続行する
+                    logger.warning(
+                        "[CAPITAL_SLOTS] could not read risk.max_pct; using %s",
+                        default_max_pct,
+                    )
+                max_pct_by_system: dict[str, float] = {
+                    name: default_max_pct for name in systems
+                }
+                for name, strategy in (strategies or {}).items():
+                    key = str(name).strip().lower()
+                    config = getattr(strategy, "config", {}) or {}
+                    try:
+                        max_pct_by_system[key] = float(
+                            config.get("max_pct", default_max_pct)
+                        )
+                    except (AttributeError, TypeError, ValueError):
+                        max_pct_by_system[key] = default_max_pct
+                portfolio_caps_for_slots = _load_portfolio_caps()
+                capital_slot_derivation = derive_capital_weighted_slots(
+                    long_allocations=long_alloc,
+                    short_allocations=short_alloc,
+                    max_pct_by_system=max_pct_by_system,
+                    equity=equity_for_slots,
+                    long_ratio=default_long_ratio,
+                    gross_exposure_pct=float(
+                        portfolio_caps_for_slots["max_gross_exposure_pct"]
+                    ),
+                    gross_budget_factor=capital_slot_policy.gross_budget_factor,
+                    min_slots=capital_slot_policy.min_slots,
+                    max_long_positions=int(
+                        portfolio_caps_for_slots["max_long_positions"]
+                    ),
+                    max_short_positions=int(
+                        portfolio_caps_for_slots["max_short_positions"]
+                    ),
+                    max_total_positions=int(
+                        portfolio_caps_for_slots["max_total_positions"]
+                    ),
+                    max_net_exposure_pct=float(
+                        portfolio_caps_for_slots["max_net_exposure_pct"]
+                    ),
+                )
+                derived_slots = capital_slot_derivation.slots
+                if sum(int(v) for v in derived_slots.values()) <= 0:
+                    # 導出合計 0 = その日は 1 銘柄も建てられない。設定ミスと
+                    # 「意図した全停止」を区別できないので legacy へ戻す。
+                    logger.error(
+                        "[CAPITAL_SLOTS] derived slot total is 0 (weights=%s/%s, "
+                        "factor=%s); falling back to legacy max_positions",
+                        dict(long_alloc),
+                        dict(short_alloc),
+                        capital_slot_policy.gross_budget_factor,
+                    )
+                    capital_slot_derivation = None
+                else:
+                    # 資金配分に現れない system は「枠 0」ではなく legacy 据え置き。
+                    # 新 system (例: System8) を ui.*_allocations へ足し忘れた時に
+                    # 黙って締め出さないための退避。
+                    unweighted = [
+                        name
+                        for name in systems
+                        if name not in long_alloc and name not in short_alloc
+                    ]
+                    if unweighted:
+                        logger.warning(
+                            "[CAPITAL_SLOTS] %s have no capital weight in "
+                            "ui.long_allocations/ui.short_allocations; keeping "
+                            "their legacy max_positions instead of 0 slots",
+                            unweighted,
+                        )
+                    max_pos_map = {
+                        name: (
+                            int(derived_slots[name])
+                            if name in derived_slots
+                            else int(
+                                legacy_max_pos_map.get(name, default_max_positions)
+                            )
+                        )
+                        for name in systems
+                    }
+        except Exception:  # noqa: BLE001 - 枠導出の失敗で当日を潰さない
+            logger.error(
+                "[CAPITAL_SLOTS] slot derivation failed; retaining legacy "
+                "max_positions for this run",
+                exc_info=True,
+            )
+            capital_slot_derivation = None
+            max_pos_map = dict(legacy_max_pos_map)
     active_positions = count_active_positions_by_system(positions, symbol_system_map)
     available_slots: dict[str, int] = {}
     for name in systems:
@@ -2351,6 +2474,13 @@ def finalize_allocation(
         # but fallback succeeded.
         raise RuntimeError("finalize_allocation: strategies required")
 
+    # capital-derived slots が実際に効いた run だけ、解決済みの枠を下流の
+    # sizing/選抜へ渡す。None のときは従来どおり strategy.config の
+    # max_positions から下流が自前で上限を組む (OFF 完全後方互換)。
+    capital_slot_limits: dict[str, int] | None = (
+        dict(available_slots) if capital_slot_derivation is not None else None
+    )
+
     # Determine allocation mode.
     mode = "slot"
     if capital_long is not None or capital_short is not None:
@@ -2450,6 +2580,7 @@ def finalize_allocation(
                     weights=long_alloc,
                     side="long",
                     active_positions=active_positions,
+                    slot_limits=capital_slot_limits,
                 )
                 short_sized = _allocate_by_capital(
                     selected_per_system_short,
@@ -2458,6 +2589,7 @@ def finalize_allocation(
                     weights=short_alloc,
                     side="short",
                     active_positions=active_positions,
+                    slot_limits=capital_slot_limits,
                 )
 
                 # 非空のみ連結（FutureWarning 回避のため all-NA は除外）
@@ -2528,6 +2660,7 @@ def finalize_allocation(
             weights=long_alloc,
             side="long",
             active_positions=active_positions,
+            slot_limits=capital_slot_limits,
         )
         short_result = _allocate_by_capital(
             per_system_norm,
@@ -2536,6 +2669,7 @@ def finalize_allocation(
             weights=short_alloc,
             side="short",
             active_positions=active_positions,
+            slot_limits=capital_slot_limits,
         )
         # Concatenate non-empty and non-all-NA frames only to avoid
         # pandas FutureWarning about dtype inference with empty/all-NA entries

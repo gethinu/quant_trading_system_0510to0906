@@ -30,7 +30,9 @@ class RiskModel(BaseModel):
     max_positions: int = Field(10, ge=0)
     max_pct: float = Field(0.10, ge=0, lt=1)
     slots_from_capital: bool = False
-    slots_from_capital_gross_budget_factor: float = Field(1.0, ge=0, le=1)
+    # 0 は「全 system の枠を 0 にする」= 実質全停止であり、設定ミスと区別できない。
+    # 意図は 0 < F <= 1 (gross 上限を越えない係数) なので下限を排他にする。
+    slots_from_capital_gross_budget_factor: float = Field(1.0, gt=0, le=1)
     slots_from_capital_min_slots: int = Field(1, ge=0)
     portfolio: PortfolioRiskModel = PortfolioRiskModel()
 

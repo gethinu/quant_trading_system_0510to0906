@@ -1,8 +1,14 @@
 """Replay a published signal/order artifact through capital-derived slot limits.
 
-This is deliberately read-only: it reads a YAML configuration and two JSON
+This is deliberately read-only: it reads a YAML configuration and JSON
 artifacts, then prints a report.  It neither imports the order publisher nor
 loads environment files.
+
+A derived slot count is a *standing* ceiling, not a per-run entry quota: the
+allocator spends it as ``available = max(0, derived - held_by_system)``.  Pass
+``--positions <alpaca_snapshot.json>`` to replay on that basis.  Without it the
+report is a capacity view only and labels itself as such, because ignoring
+holdings overstates how many new entries the new slots would actually allow.
 """
 
 from __future__ import annotations
@@ -33,6 +39,50 @@ def _as_float(value: Any, default: float) -> float:
         return default
 
 
+def held_by_system(
+    snapshot: dict[str, Any],
+    *,
+    exclude_entry_date: str | None = None,
+) -> dict[str, Any]:
+    """Count open positions per system from an Alpaca snapshot artifact.
+
+    ``exclude_entry_date`` drops rows opened on the replayed date.  A snapshot
+    written after the 22:35 run contains that run's own fills; counting them as
+    "already held" would double-charge the very entries being replayed.
+
+    Positions whose ``system`` is missing / ``delisted`` / ``unknown`` are
+    reported separately: they occupy the portfolio pool but no per-system slot,
+    so they must not be silently folded into some system's held count.
+    """
+    rows = [row for row in snapshot.get("positions", []) if isinstance(row, dict)]
+    considered: list[dict[str, Any]] = []
+    excluded_same_day = 0
+    for row in rows:
+        entry_date = row.get("entry_date")
+        if exclude_entry_date and str(entry_date) == str(exclude_entry_date):
+            excluded_same_day += 1
+            continue
+        considered.append(row)
+    held: dict[str, int] = {system: 0 for system in SYSTEMS}
+    unattributed: list[str] = []
+    for row in considered:
+        key = str(row.get("system") or "").strip().lower()
+        if key in held:
+            held[key] += 1
+        else:
+            unattributed.append(str(row.get("symbol", "")))
+    return {
+        "held": held,
+        "unattributed_count": len(unattributed),
+        "unattributed_symbols": sorted(unattributed),
+        "positions_in_snapshot": len(rows),
+        "positions_considered": len(considered),
+        "excluded_same_day_entries": excluded_same_day,
+        "snapshot_generated_at": snapshot.get("generated_at"),
+        "snapshot_date": snapshot.get("date"),
+    }
+
+
 def _artifact_signals(payload: dict[str, Any], system: str) -> list[dict[str, Any]]:
     raw = payload.get("systems", {}).get(f"sys{system.removeprefix('system')}", {})
     signals = list(raw.get("signals", [])) if isinstance(raw, dict) else []
@@ -50,8 +100,15 @@ def build_replay(
     config: dict[str, Any],
     signals_payload: dict[str, Any],
     orders_payload: dict[str, Any],
+    holdings: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Calculate the artifact's post-export selection under the new slot limits."""
+    """Calculate the artifact's post-export selection under the new slot limits.
+
+    With ``holdings`` the selection uses the allocator's real basis,
+    ``available = max(0, derived - held_by_system)``.  Without it the selection
+    uses the raw derived ceiling, which is a capacity figure and not the number
+    of new entries the day would have produced.
+    """
     risk = config.get("risk", {})
     portfolio = risk.get("portfolio", {})
     ui = config.get("ui", {})
@@ -87,10 +144,24 @@ def build_replay(
     orders = [
         item for item in orders_payload.get("orders", []) if isinstance(item, dict)
     ]
+    held_map: dict[str, int] = dict((holdings or {}).get("held", {}))
+    basis = "available_after_holdings" if holdings else "derived_capacity_only"
+    available_slots = {
+        system: max(
+            0, int(derivation.slots.get(system, 0)) - int(held_map.get(system, 0))
+        )
+        for system in SYSTEMS
+    }
+
     rows: list[dict[str, Any]] = []
     for system in SYSTEMS:
         before = _artifact_signals(signals_payload, system)
-        after = before[: derivation.slots.get(system, 0)]
+        limit = (
+            available_slots[system]
+            if holdings
+            else int(derivation.slots.get(system, 0))
+        )
+        after = before[:limit]
         selected_symbols = {str(item.get("symbol", "")) for item in after}
         before_orders = [item for item in orders if item.get("system") == system]
         after_orders = [
@@ -113,6 +184,9 @@ def build_replay(
                 ),
                 "raw_slots": derivation.raw_slots.get(system, 0.0),
                 "slots": derivation.slots.get(system, 0),
+                "held_by_system": int(held_map.get(system, 0)),
+                "available_slots": available_slots[system],
+                "applied_limit": limit,
                 "signals_before": len(before),
                 "signals_after": len(after),
                 "signal_delta": len(after) - len(before),
@@ -152,7 +226,11 @@ def build_replay(
         "source_signals_run_id": orders_payload.get("source_signals_run_id"),
         "equity_usd": equity,
         "equity_source": orders_payload.get("equity_source"),
+        "basis": basis,
+        "holdings": holdings,
         "slots": derivation.slots,
+        "available_slots": available_slots,
+        "new_entries_after": sum(row["signals_after"] for row in rows),
         "slot_totals": {
             "long": sum(derivation.slots.get(system, 0) for system in LONG_SYSTEMS),
             "short": sum(
@@ -170,6 +248,25 @@ def main() -> int:
     parser.add_argument("--config", type=Path, default=Path("config/config.yaml"))
     parser.add_argument("--signals", type=Path, required=True)
     parser.add_argument("--paper-orders", type=Path, required=True)
+    parser.add_argument(
+        "--positions",
+        type=Path,
+        default=None,
+        help=(
+            "Alpaca snapshot JSON. Applies available = max(0, derived - held). "
+            "Omit only for a capacity-only view."
+        ),
+    )
+    parser.add_argument(
+        "--positions-basis",
+        choices=("pre-run", "as-is"),
+        default="pre-run",
+        help=(
+            "pre-run (default): drop snapshot rows whose entry_date equals the "
+            "replayed date, because a post-run snapshot already contains that "
+            "run's own fills. as-is: count every row."
+        ),
+    )
     args = parser.parse_args()
     with args.config.open(encoding="utf-8") as handle:
         config = yaml.safe_load(handle)
@@ -177,9 +274,20 @@ def main() -> int:
         signals = json.load(handle)
     with args.paper_orders.open(encoding="utf-8") as handle:
         orders = json.load(handle)
+    holdings: dict[str, Any] | None = None
+    if args.positions is not None:
+        with args.positions.open(encoding="utf-8") as handle:
+            snapshot = json.load(handle)
+        exclude = signals.get("date") if args.positions_basis == "pre-run" else None
+        holdings = held_by_system(snapshot, exclude_entry_date=exclude)
     print(
         json.dumps(
-            build_replay(config=config, signals_payload=signals, orders_payload=orders),
+            build_replay(
+                config=config,
+                signals_payload=signals,
+                orders_payload=orders,
+                holdings=holdings,
+            ),
             ensure_ascii=False,
             indent=2,
         )
