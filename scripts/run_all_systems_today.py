@@ -5331,6 +5331,8 @@ def compute_today_signals(  # noqa: C901  # type: ignore[reportGeneralTypeIssues
             slots_short=slots_short,
             capital_long=capital_long,
             capital_short=capital_short,
+            # Flag ON の capital-derived slots 専用。OFF の既存 sizing には不介入。
+            slot_capital_equity=ctx.start_equity,
             system_diagnostics=ctx.system_diagnostics,
             market_data_dict=ctx.basic_data,
             signal_date=ctx.today,
