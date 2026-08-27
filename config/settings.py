@@ -62,6 +62,10 @@ class RiskConfig:
     slots_from_capital: bool = False
     slots_from_capital_gross_budget_factor: float = 1.0
     slots_from_capital_min_slots: int = 1
+    # OFF の間は portfolio プール上限が効いたときの切り捨て順を現行のまま
+    # (side 昇順 -> system 番号昇順の末尾切り) にする。ON のときだけ system 横断の
+    # round-robin へ差し替える。詳細: docs/FAIR_POOL_TRIM_20260828.md。
+    fair_pool_trim: bool = False
     portfolio: PortfolioRiskConfig = field(default_factory=PortfolioRiskConfig)
 
 
@@ -324,7 +328,9 @@ def _coerce_positive_ratio(val: Any, default: float) -> float:
     return default
 
 
-def _coerce_bool(val: Any, default: bool, *, source: str | None = None) -> bool:
+def _coerce_bool(
+    val: Any, default: bool, *, source: str | None = None, tag: str = "CAPITAL_SLOTS"
+) -> bool:
     """Parse explicit YAML-style booleans without treating non-empty text as true."""
     if isinstance(val, bool):
         return val
@@ -336,7 +342,8 @@ def _coerce_bool(val: Any, default: bool, *, source: str | None = None) -> bool:
             return False
         if source:
             _LOGGER.warning(
-                "[CAPITAL_SLOTS] %s=%r is not a boolean; falling back to %s",
+                "[%s] %s=%r is not a boolean; falling back to %s",
+                tag,
                 source,
                 val,
                 default,
@@ -490,6 +497,13 @@ def _build_risk_config(cfg: dict[str, Any]) -> RiskConfig:
         ),
         slots_from_capital_min_slots=_coerce_int(
             cfg.get("slots_from_capital_min_slots", 1), 1
+        ),
+        # env override は運用の非常口。解釈できない値は YAML 値へ落として警告を残す。
+        fair_pool_trim=_coerce_bool(
+            os.getenv("FAIR_POOL_TRIM"),
+            _coerce_bool(cfg.get("fair_pool_trim", False), False),
+            source="FAIR_POOL_TRIM",
+            tag="FAIR_TRIM",
         ),
         portfolio=_build_portfolio_risk_config(cfg),
     )

@@ -17,6 +17,12 @@ risk:
   slots_from_capital_gross_budget_factor: 1.0
   # 正の資金配分を持つ system に保証する最小枠。0 を許す場合は明示的に 0。
   slots_from_capital_min_slots: 1
+  # portfolio プール上限 (long40/short30/total70) が効いたときの切り捨て順。
+  # OFF = 現行どおり side 昇順 -> system 番号昇順の末尾から切る (S5/S7 が構造的に
+  # 最初の犠牲になる)。ON = system 横断の round-robin (max-min fair) で 1 枠ずつ
+  # 配り、1 ラウンド未満の端数だけ signal_date 由来の offset で回す。
+  # 上限の「値」は変えない。順序だけ。詳細: docs/FAIR_POOL_TRIM_20260828.md。
+  fair_pool_trim: false
   # portfolio-level 管理上限 (Phase 5, 2026-07-07)。
   # デフォルトは既存ルール(per-system10/50-50/bucket)から導出した no-op。
   # 締め付け値・根拠は docs/POSITION_MANAGEMENT_PHASE5_20260707.md。

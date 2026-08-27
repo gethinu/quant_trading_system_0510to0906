@@ -163,12 +163,124 @@ def _load_capital_slot_policy() -> CapitalSlotPolicy:
         return CapitalSlotPolicy()
 
 
+def _load_fair_pool_trim_enabled() -> bool:
+    """Read the opt-in fair-trim flag; any settings failure keeps legacy order.
+
+    A settings failure here silently disables the feature, which is the safe
+    direction but is indistinguishable from "the operator left it off".  Log it
+    so a misconfiguration is never a silent OFF (same idiom as the slot policy).
+    """
+    try:
+        from config.settings import get_settings
+
+        return bool(getattr(get_settings().risk, "fair_pool_trim", False))
+    except Exception:  # noqa: BLE001 - 設定不備は legacy へ退避するが黙らせない
+        logger.warning(
+            "[FAIR_TRIM] could not read risk.fair_pool_trim from settings; "
+            "staying on the legacy tail-drop order",
+            exc_info=True,
+        )
+        return False
+
+
+def _fair_trim_epoch(signal_date: Any) -> int | None:
+    """Turn the run's own signal date into the rotation offset.
+
+    Only the *residue* of a round-robin round is decided by this number, so it
+    moves at most one slot per binding pool (G3 in
+    ``docs/FAIR_POOL_TRIM_20260828.md``).  It is a pure function of a date that
+    is already known when the decision is made: no look-ahead, no persisted
+    state, and ``scripts/replay_portfolio_caps.py`` reproduces it exactly.
+    ``None`` means "no date available" -> rotation 0, which still keeps the
+    round-robin quota fairness and only degrades the residue tie-break back to
+    system order.
+    """
+    if signal_date is None:
+        return None
+    try:
+        stamp = pd.Timestamp(signal_date)
+    except (TypeError, ValueError):
+        return None
+    try:
+        if stamp is None or pd.isna(stamp):
+            return None
+        return int(stamp.toordinal())
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        return None
+
+
+def _rotated_rank(name: str, ordered: Sequence[str], rotation: int) -> int:
+    """Rank ``name`` within ``ordered``, shifted by ``rotation``.
+
+    ``rotation == 0`` reproduces the plain position in ``ordered`` (and hence
+    the legacy alphabetical tie-break byte-for-byte).
+    """
+    total = len(ordered)
+    if total <= 0:
+        return 0
+    try:
+        base = list(ordered).index(name)
+    except ValueError:
+        return total
+    return (base - int(rotation)) % total
+
+
+def _fair_deal_order(df: pd.DataFrame, *, rotation: int = 0) -> list[int]:
+    """Positional order that hands one candidate to each system per round.
+
+    Running the existing greedy cap loop over this order *is* progressive fill:
+    every system gets its first slot before any system gets its second, so a
+    binding pool is rationed max-min fair instead of being consumed by whichever
+    system happened to sort first.  Intra-system priority (``score``) is left
+    untouched — that ordering carries real information; only the cross-system
+    ordering was an information-free by-product of ``_sort_final_frame``.
+
+    ``rotation`` shifts which system opens each round and therefore decides only
+    the sub-unit residue.  ``rotation == 0`` starts from the same system order as
+    the legacy path.
+    """
+    if df is None or getattr(df, "empty", True):
+        return []
+    total = len(df)
+    if "system" not in df.columns:
+        return list(range(total))
+    buckets: dict[str, list[int]] = {}
+    try:
+        values = list(df["system"])
+    except Exception:  # noqa: BLE001 - 壊れたフレームでは legacy 順へ退避
+        return list(range(total))
+    for pos, value in enumerate(values):
+        key = str(value).strip().lower()
+        buckets.setdefault(key, []).append(pos)
+    names = sorted(buckets)
+    if len(names) <= 1:
+        return list(range(total))
+    shift = int(rotation) % len(names)
+    deal_order = names[shift:] + names[:shift]
+    cursor = {name: 0 for name in names}
+    out: list[int] = []
+    while len(out) < total:
+        progressed = False
+        for name in deal_order:
+            bucket = buckets[name]
+            pos = cursor[name]
+            if pos >= len(bucket):
+                continue
+            out.append(bucket[pos])
+            cursor[name] = pos + 1
+            progressed = True
+        if not progressed:  # pragma: no cover - 全 bucket 消化済みなら while が終わる
+            break
+    return out
+
+
 def _cap_slots_by_side(
     requested: Mapping[str, int],
     raw_slots: Mapping[str, float],
     *,
     side_cap: int,
     min_slots: int,
+    rotation: int = 0,
 ) -> dict[str, int]:
     """Keep a derived side quota within its hard pool without sort-order bias.
 
@@ -176,6 +288,11 @@ def _cap_slots_by_side(
     reserve the configured floor first and allocate the remainder by largest
     remainder on the raw capital-derived slot values.  A later portfolio cap
     still remains the final defence for held positions and exposure.
+
+    ``rotation`` (0 = legacy) shifts the largest-remainder tie-break so an exact
+    tie does not always resolve to the alphabetically-first system.  With equal
+    remainders the legacy key handed every residual unit to system1/system2 and
+    took it from system5/system7; the shift moves at most one unit per side.
     """
     names = [name for name, value in requested.items() if value > 0]
     if side_cap <= 0 or not names:
@@ -200,9 +317,13 @@ def _cap_slots_by_side(
         add = min(requested[name] - result[name], int(math.floor(provisional[name])))
         result[name] += max(0, add)
     remaining = side_cap - sum(result.values())
+    ordered_names = sorted(names)
     ranked_names = sorted(
         names,
-        key=lambda item: (-(provisional[item] - math.floor(provisional[item])), item),
+        key=lambda item: (
+            -(provisional[item] - math.floor(provisional[item])),
+            _rotated_rank(item, ordered_names, rotation),
+        ),
     )
     # A largest-remainder pass can leave units if a high-ranked system has
     # already reached its own requested count.  Repeat only across systems
@@ -236,6 +357,7 @@ def derive_capital_weighted_slots(
     max_short_positions: int,
     max_total_positions: int,
     max_net_exposure_pct: float,
+    slot_rotation: int = 0,
 ) -> CapitalSlotDerivation:
     """Derive stable per-system capacity from capital allocation weights.
 
@@ -313,7 +435,11 @@ def derive_capital_weighted_slots(
             notional[key] = needed
             raw_slots[key] = raw
         side_results[side] = _cap_slots_by_side(
-            side_requested, side_raw, side_cap=side_cap, min_slots=min_slots
+            side_requested,
+            side_raw,
+            side_cap=side_cap,
+            min_slots=min_slots,
+            rotation=slot_rotation,
         )
         requested.update(side_results[side])
 
@@ -325,13 +451,18 @@ def derive_capital_weighted_slots(
         short_cap = min(max_short_positions, total_cap - long_cap)
         requested = {
             **_cap_slots_by_side(
-                side_results["long"], raw_slots, side_cap=long_cap, min_slots=min_slots
+                side_results["long"],
+                raw_slots,
+                side_cap=long_cap,
+                min_slots=min_slots,
+                rotation=slot_rotation,
             ),
             **_cap_slots_by_side(
                 side_results["short"],
                 raw_slots,
                 side_cap=short_cap,
                 min_slots=min_slots,
+                rotation=slot_rotation,
             ),
         }
 
@@ -1993,6 +2124,54 @@ def _load_portfolio_caps() -> dict[str, float]:
         return defaults
 
 
+def _fair_trim_report(
+    before: pd.DataFrame,
+    after: pd.DataFrame,
+    *,
+    deal_order: Sequence[int],
+    rotation: int,
+    epoch: int | None,
+) -> dict[str, Any]:
+    """Machine-readable record of which system gave up a slot, and why.
+
+    Only emitted when ``risk.fair_pool_trim`` is ON: the OFF report must stay
+    byte-identical to the legacy one.  ``demand`` is what each system brought to
+    the pool, ``kept`` is what survived the caps, ``dropped`` is the difference —
+    so "why is system5 short two names today" is answerable from the artifact
+    instead of only from an INFO log line.
+    """
+
+    def _counts(df: pd.DataFrame) -> dict[str, int]:
+        if df is None or getattr(df, "empty", True) or "system" not in df.columns:
+            return {}
+        try:
+            series = df["system"].astype(str).str.strip().str.lower()
+            return {str(k): int(v) for k, v in series.value_counts().items()}
+        except Exception:  # noqa: BLE001 - 観測性のために allocation を壊さない
+            return {}
+
+    demand = _counts(before)
+    kept = _counts(after)
+    order: list[str] = []
+    try:
+        systems = list(before["system"].astype(str).str.strip().str.lower())
+        for pos in deal_order:
+            name = systems[pos]
+            if name not in order:
+                order.append(name)
+    except Exception:  # noqa: BLE001
+        order = sorted(demand)
+    return {
+        "enabled": True,
+        "epoch": epoch,
+        "rotation": int(rotation) % len(order) if order else 0,
+        "deal_order": order,
+        "demand": {k: demand[k] for k in sorted(demand)},
+        "kept": {k: int(kept.get(k, 0)) for k in sorted(demand)},
+        "dropped": {k: int(demand[k]) - int(kept.get(k, 0)) for k in sorted(demand)},
+    }
+
+
 def _apply_portfolio_caps(
     final_df: pd.DataFrame,
     *,
@@ -2003,6 +2182,8 @@ def _apply_portfolio_caps(
     short_systems: Sequence[str],
     equity: float,
     equity_source: str | None = None,
+    fair_trim: bool = False,
+    fair_trim_epoch: int | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """優先度順 final_df に portfolio 上限 (件数 total/long/short + gross/net exposure)
     を適用し、超過分を末尾から trim する。
@@ -2015,6 +2196,14 @@ def _apply_portfolio_caps(
     - exposure は ``position_value`` 列がある時のみ (新規分の gross/net を equity×pct と比較)。
     - default caps は no-op (現状 allocation は上限を超えない) なので通常は無 trim。
     戻り値: (trimmed_df, report)。report は観測性のため summary に載せる。
+
+    ``fair_trim`` / ``fair_trim_epoch`` は ``risk.fair_pool_trim`` (既定 OFF) 専用の
+    additive 引数。OFF のとき deal 順は ``range(len(final_df))`` = 従来の末尾切りで、
+    report にもキーを足さないので出力は byte 一致する。ON のときだけ system 横断の
+    round-robin (max-min fair) 順で同じ上限判定をなめるので、long40/short30/total70 が
+    束縛したときに「ソート順で最後に来る system が総取りで 0 本」にならない。
+    **上限の値・サイジング・リスク計算は不変で、変わるのは切り捨て順だけ。**
+    根拠と保証 (G1..G7): ``docs/FAIR_POOL_TRIM_20260828.md``。
     """
     report: dict[str, Any] = {"applied": False}
     if final_df is None or getattr(final_df, "empty", True):
@@ -2047,12 +2236,23 @@ def _apply_portfolio_caps(
     allow_total = max(0, max_total - held_total)
 
     has_pv = "position_value" in final_df.columns
-    kept_idx: list[Any] = []
+    labels = list(final_df.index)
+    # 上限判定をなめる順序。OFF は現行どおりフレーム順 = 末尾切り。
+    rotation = 0
+    if fair_trim:
+        rotation = 0 if fair_trim_epoch is None else int(fair_trim_epoch)
+        deal_order = _fair_deal_order(final_df, rotation=rotation) or list(
+            range(len(final_df))
+        )
+    else:
+        deal_order = list(range(len(final_df)))
+    kept_pos: list[int] = []
     n_long = n_short = n_total = 0
     long_usd = short_usd = 0.0
     trims: dict[str, int] = {}
 
-    for idx, row in final_df.iterrows():
+    for pos in deal_order:
+        row = final_df.iloc[pos]
         side = str(row.get("side", "")).strip().lower()
         if n_total >= allow_total:
             trims["total"] = trims.get("total", 0) + 1
@@ -2077,14 +2277,17 @@ def _apply_portfolio_caps(
                 trims["net_exposure"] = trims.get("net_exposure", 0) + 1
                 continue
             long_usd, short_usd = new_long, new_short
-        kept_idx.append(idx)
+        kept_pos.append(pos)
         n_total += 1
         if side == "long":
             n_long += 1
         elif side == "short":
             n_short += 1
 
-    if len(kept_idx) < len(final_df):
+    if len(kept_pos) < len(final_df):
+        # 判定順は round-robin でも、出力フレームの行順は従来の提示順 (side ->
+        # system 番号 -> score) を保つ。変わるのは「どの行が残るか」だけ。
+        kept_idx = [labels[pos] for pos in sorted(kept_pos)]
         trimmed_df = final_df.loc[kept_idx].copy().reset_index(drop=True)
     else:
         trimmed_df = final_df
@@ -2111,10 +2314,43 @@ def _apply_portfolio_caps(
     if equity_source:
         report["caps"]["equity_base_usd"] = round(float(equity), 2)
         report["caps"]["equity_source"] = str(equity_source)
+    if fair_trim:
+        # ON のときだけ足す (OFF の report は従来と byte 一致させる契約)。
+        # 「どの system が何枠譲ったか」を機械可読で残すのが目的。
+        report["fair_trim"] = _fair_trim_report(
+            final_df,
+            trimmed_df,
+            deal_order=deal_order,
+            rotation=rotation,
+            epoch=fair_trim_epoch,
+        )
     if trims:
         logger.info(
             "[PORTFOLIO_CAP] trimmed %s (held L%d/S%d)", trims, held_long, held_short
         )
+    if fair_trim:
+        fair = report["fair_trim"]
+        dropped = {k: v for k, v in fair["dropped"].items() if v}
+        if dropped:
+            logger.info(
+                "[FAIR_TRIM] round-robin deal order=%s (epoch=%s rotation=%s); "
+                "slots given up per system=%s of demand=%s "
+                "(pool bound: %s)",
+                fair["deal_order"],
+                fair["epoch"],
+                fair["rotation"],
+                dropped,
+                fair["demand"],
+                trims or "none",
+            )
+        else:
+            logger.info(
+                "[FAIR_TRIM] round-robin deal order=%s (epoch=%s rotation=%s); "
+                "no pool bound, nothing given up",
+                fair["deal_order"],
+                fair["epoch"],
+                fair["rotation"],
+            )
     # signals JSON へ「なぜその system が 0 本なのか」を運ぶ (観測性のみ。挙動は不変)。
     # per-system funnel は生成側しか語らないため、cand が健全でも cap で 0 に落ちた
     # 事実は [PORTFOLIO_CAP] の INFO ログにしか残らない。実際 2026-07-21..27 は
@@ -2192,6 +2428,16 @@ def finalize_allocation(
                 "[ALLOC_DEBUG] called without symbol_system_map; "
                 "active counts may be incomplete"
             )
+
+    # risk.fair_pool_trim (既定 OFF)。OFF のときは epoch も rotation も 0 のままで、
+    # 切り捨て順・端数 tie-break の両方が従来と byte 一致する。
+    # ON のときだけ当日の signal_date から rotation offset を作る (look-ahead なし、
+    # 永続 state なし、replay 再現可能)。docs/FAIR_POOL_TRIM_20260828.md。
+    fair_trim_enabled = _load_fair_pool_trim_enabled()
+    fair_trim_epoch = _fair_trim_epoch(signal_date) if fair_trim_enabled else None
+    fair_slot_rotation = (
+        int(fair_trim_epoch) if fair_trim_enabled and fair_trim_epoch is not None else 0
+    )
 
     per_system_norm: dict[str, pd.DataFrame] = {}
     for name, df in per_system.items():
@@ -2292,6 +2538,8 @@ def finalize_allocation(
                     max_net_exposure_pct=float(
                         portfolio_caps_for_slots["max_net_exposure_pct"]
                     ),
+                    # 0 = 従来の名前順 tie-break。ON のときだけ端数を回す。
+                    slot_rotation=fair_slot_rotation,
                 )
                 derived_slots = capital_slot_derivation.slots
                 if sum(int(v) for v in derived_slots.values()) <= 0:
@@ -2780,6 +3028,8 @@ def finalize_allocation(
             short_systems=list(short_alloc.keys()),
             equity=float(equity_base),
             equity_source=equity_source,
+            fair_trim=fair_trim_enabled,
+            fair_trim_epoch=fair_trim_epoch,
         )
         try:
             existing_diag = summary.system_diagnostics or {}
