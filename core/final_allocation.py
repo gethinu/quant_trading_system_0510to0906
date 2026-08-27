@@ -90,6 +90,221 @@ class AllocationConstants:
     MSG_EMPTY_DATA = "No data available for system {}"
 
 
+@dataclass(frozen=True)
+class CapitalSlotPolicy:
+    """Flag-gated policy for deriving per-system position limits from capital.
+
+    ``max_pct`` remains the sizing ceiling.  Here it is also the fixed
+    *capacity notional* for one slot, so a symbol's daily ATR/price never
+    makes the number of slots oscillate.
+    """
+
+    enabled: bool = False
+    gross_budget_factor: float = 1.0
+    min_slots: int = 1
+
+
+@dataclass(frozen=True)
+class CapitalSlotDerivation:
+    """Auditable output of the capital-to-slots calculation."""
+
+    slots: dict[str, int]
+    raw_slots: dict[str, float]
+    system_budgets: dict[str, float]
+    per_position_notional: dict[str, float]
+    side_caps_applied: dict[str, int]
+
+
+def _load_capital_slot_policy() -> CapitalSlotPolicy:
+    """Read the opt-in slot policy; any bad config leaves legacy mode intact."""
+    try:
+        from config.settings import get_settings
+
+        risk = get_settings().risk
+        factor = float(getattr(risk, "slots_from_capital_gross_budget_factor", 1.0))
+        minimum = int(getattr(risk, "slots_from_capital_min_slots", 1))
+        return CapitalSlotPolicy(
+            enabled=bool(getattr(risk, "slots_from_capital", False)),
+            gross_budget_factor=(
+                min(1.0, max(0.0, factor)) if math.isfinite(factor) else 1.0
+            ),
+            min_slots=max(0, minimum),
+        )
+    except Exception:
+        return CapitalSlotPolicy()
+
+
+def _cap_slots_by_side(
+    requested: Mapping[str, int],
+    raw_slots: Mapping[str, float],
+    *,
+    side_cap: int,
+    min_slots: int,
+) -> dict[str, int]:
+    """Keep a derived side quota within its hard pool without sort-order bias.
+
+    When a configuration would request more slots than a side pool permits,
+    reserve the configured floor first and allocate the remainder by largest
+    remainder on the raw capital-derived slot values.  A later portfolio cap
+    still remains the final defence for held positions and exposure.
+    """
+    names = [name for name, value in requested.items() if value > 0]
+    if side_cap <= 0 or not names:
+        return {name: 0 for name in requested}
+    if sum(requested.values()) <= side_cap:
+        return dict(requested)
+
+    floor = min(max(0, min_slots), side_cap // len(names))
+    result = {name: min(requested[name], floor) for name in requested}
+    remaining = side_cap - sum(result.values())
+    if remaining <= 0:
+        return result
+
+    total_raw = sum(max(0.0, float(raw_slots.get(name, 0.0))) for name in names)
+    if total_raw <= 0:
+        total_raw = float(len(names))
+    provisional: dict[str, float] = {
+        name: remaining * max(0.0, float(raw_slots.get(name, 0.0))) / total_raw
+        for name in names
+    }
+    for name in names:
+        add = min(requested[name] - result[name], int(math.floor(provisional[name])))
+        result[name] += max(0, add)
+    remaining = side_cap - sum(result.values())
+    ranked_names = sorted(
+        names,
+        key=lambda item: (-(provisional[item] - math.floor(provisional[item])), item),
+    )
+    # A largest-remainder pass can leave units if a high-ranked system has
+    # already reached its own requested count.  Repeat only across systems
+    # that still have capacity so the hard pool is fully usable when possible.
+    while remaining > 0:
+        progressed = False
+        for name in ranked_names:
+            if result[name] >= requested[name]:
+                continue
+            result[name] += 1
+            remaining -= 1
+            progressed = True
+            if remaining <= 0:
+                break
+        if not progressed:
+            break
+    return result
+
+
+def derive_capital_weighted_slots(
+    *,
+    long_allocations: Mapping[str, float],
+    short_allocations: Mapping[str, float],
+    max_pct_by_system: Mapping[str, float],
+    equity: float,
+    long_ratio: float,
+    gross_exposure_pct: float,
+    gross_budget_factor: float,
+    min_slots: int,
+    max_long_positions: int,
+    max_short_positions: int,
+    max_total_positions: int,
+    max_net_exposure_pct: float,
+) -> CapitalSlotDerivation:
+    """Derive stable per-system capacity from capital allocation weights.
+
+    For a system ``i`` on side ``s``:
+
+    ``slots_i = max(min_slots, floor(B_i / N_i))``
+    ``B_i = equity * gross_exposure_pct * gross_budget_factor * side_share_s * weight_i``
+    ``N_i = equity * max_pct_i``
+
+    ``N_i`` deliberately uses the fixed configured maximum-notional ceiling,
+    not a candidate's ATR or price.  Position sizing and the separate order
+    deploy budget remain unchanged.
+    """
+    equity_value = float(equity)
+    if not math.isfinite(equity_value) or equity_value <= 0:
+        raise ValueError("equity must be a positive finite value")
+    gross = max(0.0, float(gross_exposure_pct)) * min(
+        1.0, max(0.0, float(gross_budget_factor))
+    )
+    requested_long_share = min(1.0, max(0.0, float(long_ratio)))
+    # Preserve the configured net-exposure ceiling in the planning budget.
+    # With long/short shares summing to one, net/gross is |2*long_share - 1|.
+    if gross > 0:
+        allowed_deviation = min(
+            1.0, max(0.0, float(max_net_exposure_pct)) / gross
+        )
+        long_share = min(
+            (1.0 + allowed_deviation) / 2.0,
+            max((1.0 - allowed_deviation) / 2.0, requested_long_share),
+        )
+    else:
+        long_share = requested_long_share
+    side_specs = (
+        ("long", long_allocations, long_share, max(0, int(max_long_positions))),
+        ("short", short_allocations, 1.0 - long_share, max(0, int(max_short_positions))),
+    )
+    requested: dict[str, int] = {}
+    raw_slots: dict[str, float] = {}
+    budgets: dict[str, float] = {}
+    notional: dict[str, float] = {}
+    side_results: dict[str, dict[str, int]] = {}
+
+    for side, weights, side_share, side_cap in side_specs:
+        side_requested: dict[str, int] = {}
+        side_raw: dict[str, float] = {}
+        for name, weight in weights.items():
+            key = str(name).strip().lower()
+            normalized_weight = max(0.0, float(weight))
+            try:
+                max_pct = float(max_pct_by_system.get(key, 0.0))
+            except (TypeError, ValueError):
+                max_pct = 0.0
+            if not math.isfinite(max_pct) or max_pct <= 0:
+                max_pct = 0.0
+            budget = equity_value * gross * side_share * normalized_weight
+            needed = equity_value * max_pct
+            raw = budget / needed if needed > 0 else 0.0
+            slots = max(0, int(math.floor(raw)))
+            if budget > 0 and needed > 0 and min_slots > 0:
+                slots = max(slots, int(min_slots))
+            side_requested[key] = slots
+            side_raw[key] = raw
+            budgets[key] = budget
+            notional[key] = needed
+            raw_slots[key] = raw
+        side_results[side] = _cap_slots_by_side(
+            side_requested, side_raw, side_cap=side_cap, min_slots=min_slots
+        )
+        requested.update(side_results[side])
+
+    total_cap = max(0, int(max_total_positions))
+    if sum(requested.values()) > total_cap:
+        # Total cap is a final count guard.  Split it in the configured
+        # long/short proportions, then reapply the side allocator.
+        long_cap = min(max_long_positions, int(math.floor(total_cap * long_share)))
+        short_cap = min(max_short_positions, total_cap - long_cap)
+        requested = {
+            **_cap_slots_by_side(
+                side_results["long"], raw_slots, side_cap=long_cap, min_slots=min_slots
+            ),
+            **_cap_slots_by_side(
+                side_results["short"], raw_slots, side_cap=short_cap, min_slots=min_slots
+            ),
+        }
+
+    return CapitalSlotDerivation(
+        slots=requested,
+        raw_slots=raw_slots,
+        system_budgets=budgets,
+        per_position_notional=notional,
+        side_caps_applied={
+            "long": max(0, int(max_long_positions)),
+            "short": max(0, int(max_short_positions)),
+            "total": max(0, int(max_total_positions)),
+        },
+    )
+
+
 DEFAULT_LONG_ALLOCATIONS: dict[str, float] = {
     "system1": 0.25,
     "system3": 0.25,
@@ -1869,6 +2084,7 @@ def finalize_allocation(
     cap_equity: float | None = None,
     cap_equity_source: str | None = None,
     default_long_ratio: float = 0.5,
+    slot_capital_equity: float | None = None,
     default_max_positions: int = 10,
     system_diagnostics: Mapping[str, Any] | None = None,
     market_data_dict: Mapping[str, pd.DataFrame] | None = None,
@@ -1937,6 +2153,68 @@ def finalize_allocation(
 
     systems = sorted({*per_system_norm.keys(), *long_alloc.keys(), *short_alloc.keys()})
     max_pos_map = _resolve_max_positions(strategies, systems, default_max_positions)
+    capital_slot_derivation: CapitalSlotDerivation | None = None
+    capital_slot_policy = _load_capital_slot_policy()
+    slot_equity_source: str | None = None
+    if capital_slot_policy.enabled:
+        equity_for_slots = _safe_positive_float(slot_capital_equity)
+        if equity_for_slots is not None:
+            slot_equity_source = "account_start_equity"
+        if equity_for_slots is None:
+            equity_for_slots = _safe_positive_float(default_capital)
+            if equity_for_slots is not None:
+                slot_equity_source = "finalize_default_capital"
+        if equity_for_slots is None:
+            logger.warning(
+                "[CAPITAL_SLOTS] positive equity unavailable; retaining legacy max_positions"
+            )
+        else:
+            default_max_pct = AllocationConstants.DEFAULT_MAX_PCT
+            try:
+                from config.settings import get_settings
+
+                default_max_pct = float(get_settings().risk.max_pct)
+            except Exception:
+                pass
+            max_pct_by_system: dict[str, float] = {
+                name: default_max_pct for name in systems
+            }
+            for name, strategy in (strategies or {}).items():
+                key = str(name).strip().lower()
+                config = getattr(strategy, "config", {}) or {}
+                try:
+                    max_pct_by_system[key] = float(
+                        config.get("max_pct", default_max_pct)
+                    )
+                except (AttributeError, TypeError, ValueError):
+                    max_pct_by_system[key] = default_max_pct
+            portfolio_caps_for_slots = _load_portfolio_caps()
+            capital_slot_derivation = derive_capital_weighted_slots(
+                long_allocations=long_alloc,
+                short_allocations=short_alloc,
+                max_pct_by_system=max_pct_by_system,
+                equity=equity_for_slots,
+                long_ratio=default_long_ratio,
+                gross_exposure_pct=float(
+                    portfolio_caps_for_slots["max_gross_exposure_pct"]
+                ),
+                gross_budget_factor=capital_slot_policy.gross_budget_factor,
+                min_slots=capital_slot_policy.min_slots,
+                max_long_positions=int(portfolio_caps_for_slots["max_long_positions"]),
+                max_short_positions=int(
+                    portfolio_caps_for_slots["max_short_positions"]
+                ),
+                max_total_positions=int(
+                    portfolio_caps_for_slots["max_total_positions"]
+                ),
+                max_net_exposure_pct=float(
+                    portfolio_caps_for_slots["max_net_exposure_pct"]
+                ),
+            )
+            max_pos_map = {
+                name: int(capital_slot_derivation.slots.get(name, 0))
+                for name in systems
+            }
 
     active_positions = count_active_positions_by_system(positions, symbol_system_map)
     available_slots: dict[str, int] = {}
@@ -1997,6 +2275,21 @@ def finalize_allocation(
     diagnostics["active_positions"] = dict(active_positions)
     diagnostics["available_slots"] = dict(available_slots)
     diagnostics["max_pos_map"] = dict(max_pos_map)
+    if capital_slot_derivation is not None:
+        diagnostics["capital_slots"] = {
+            "enabled": True,
+            "gross_budget_factor": capital_slot_policy.gross_budget_factor,
+            "min_slots": capital_slot_policy.min_slots,
+            "equity": equity_for_slots,
+            "equity_source": slot_equity_source,
+            "slots": dict(capital_slot_derivation.slots),
+            "raw_slots": dict(capital_slot_derivation.raw_slots),
+            "system_budgets": dict(capital_slot_derivation.system_budgets),
+            "per_position_notional": dict(
+                capital_slot_derivation.per_position_notional
+            ),
+            "side_caps": dict(capital_slot_derivation.side_caps_applied),
+        }
 
     # Fallbacks: if callers didn't provide strategies or symbol_system_map,
     # attempt to build safe defaults. This reduces the chance of getting

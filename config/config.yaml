@@ -8,6 +8,14 @@ risk:
   max_positions: 10
   # 1トレードの最大ポジション比率（資金に対する%）
   max_pct: 0.10
+  # OFF の間は従来どおり全 system が max_positions を共有する。
+  # ON の時だけ、資金配分から system 別の保有枠を導出する。
+  slots_from_capital: false
+  # 導出に使う gross exposure 予算への係数。1.0 = portfolio の gross 上限そのまま。
+  # 既存の portfolio gross 上限を越えないよう、0.0〜1.0 に限る。
+  slots_from_capital_gross_budget_factor: 1.0
+  # 正の資金配分を持つ system に保証する最小枠。0 を許す場合は明示的に 0。
+  slots_from_capital_min_slots: 1
   # portfolio-level 管理上限 (Phase 5, 2026-07-07)。
   # デフォルトは既存ルール(per-system10/50-50/bucket)から導出した no-op。
   # 締め付け値・根拠は docs/POSITION_MANAGEMENT_PHASE5_20260707.md。

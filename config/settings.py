@@ -4,6 +4,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from functools import lru_cache
 import json
+import math
 import os
 from pathlib import Path
 from typing import Any
@@ -54,6 +55,10 @@ class RiskConfig:
     risk_pct: float = 0.02
     max_positions: int = 10
     max_pct: float = 0.10
+    # OFF の間は max_positions の従来契約を完全に維持する。
+    slots_from_capital: bool = False
+    slots_from_capital_gross_budget_factor: float = 1.0
+    slots_from_capital_min_slots: int = 1
     portfolio: PortfolioRiskConfig = field(default_factory=PortfolioRiskConfig)
 
 
@@ -288,6 +293,28 @@ def _coerce_int(val: Any, default: int) -> int:
     return default
 
 
+def _coerce_float(val: Any, default: float) -> float:
+    """Best-effort finite float coercion for YAML-backed settings."""
+    try:
+        parsed = float(val)
+    except (TypeError, ValueError):
+        return default
+    return parsed if math.isfinite(parsed) else default
+
+
+def _coerce_bool(val: Any, default: bool) -> bool:
+    """Parse explicit YAML-style booleans without treating non-empty text as true."""
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, str):
+        text = val.strip().lower()
+        if text in {"1", "true", "yes", "on"}:
+            return True
+        if text in {"0", "false", "no", "off"}:
+            return False
+    return default
+
+
 def _positive_int_or_none(value: object | None) -> int | None:
     if value is None:
         return None
@@ -422,6 +449,15 @@ def _build_risk_config(cfg: dict[str, Any]) -> RiskConfig:
         risk_pct=float(os.getenv("RISK_PCT", cfg.get("risk_pct", 0.02))),
         max_positions=max_pos_val,
         max_pct=float(os.getenv("MAX_PCT", cfg.get("max_pct", 0.10))),
+        slots_from_capital=_coerce_bool(
+            cfg.get("slots_from_capital", False), False
+        ),
+        slots_from_capital_gross_budget_factor=_coerce_float(
+            cfg.get("slots_from_capital_gross_budget_factor", 1.0), 1.0
+        ),
+        slots_from_capital_min_slots=_coerce_int(
+            cfg.get("slots_from_capital_min_slots", 1), 1
+        ),
         portfolio=_build_portfolio_risk_config(cfg),
     )
 

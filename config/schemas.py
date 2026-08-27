@@ -29,6 +29,9 @@ class RiskModel(BaseModel):
     risk_pct: float = Field(0.02, ge=0, lt=1)
     max_positions: int = Field(10, ge=0)
     max_pct: float = Field(0.10, ge=0, lt=1)
+    slots_from_capital: bool = False
+    slots_from_capital_gross_budget_factor: float = Field(1.0, ge=0, le=1)
+    slots_from_capital_min_slots: int = Field(1, ge=0)
     portfolio: PortfolioRiskModel = PortfolioRiskModel()
 
 
