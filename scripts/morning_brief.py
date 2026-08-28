@@ -405,8 +405,17 @@ def adapter_quant(primary_root: Path, today_yyyymmdd: int) -> ProjectStatus:
 def _run_zombie_audit(mt5_root: Path, timeout: float) -> dict:
     """audit_terminal_zombies.py を read-only(--json) で走らせ集計を返す。
 
-    MQL5/Logs の INIT census のみ読む (端末は起こさない・.chr 不使用)。失敗しても
-    ブリーフは落とさず {'ok': False, ...} を返す。
+    MQL5/Logs の INIT census に加え、`--mcp` で「今動いている端末」に list_open_charts を
+    直接問い合わせる (端末は起こさない・新規起動しない・.chr 不使用)。log census は
+    「init 行 − removal 行」の推論なので、窓から漏れた脚を拾い損ねて PARTIAL_SLEEVE を
+    誤検知する。MCP は端末自身の答なので、漏れた chart を足し、log 由来の残骸を削る。
+    MCP が落ちていても auditor 側が log-only census に自動縮退するだけで、ブリーフは
+    落とさず {'ok': False, ...} を返す。
+
+    CAVEAT (ADR-0012): `--mcp` 単体は list_open_charts に依存するが、これは「実際には
+    動いていない EA を alive と報告し得る」。つまり本物の dark leg を *隠す* 方向にも
+    倒れる。恒久版は Journal の `loaded successfully` と突合すべき — TODO(follow-up)、
+    本コミットでは未実装。
     """
     script = mt5_root / "scripts" / "audit_terminal_zombies.py"
     if not script.exists():
@@ -416,7 +425,7 @@ def _run_zombie_audit(mt5_root: Path, timeout: float) -> dict:
     env["PYTHONIOENCODING"] = "utf-8"
     try:
         proc = subprocess.run(
-            [sys.executable, str(script), "--json", "--days", "3"],
+            [sys.executable, str(script), "--json", "--days", "3", "--mcp"],
             cwd=str(mt5_root),
             capture_output=True,
             text=True,
