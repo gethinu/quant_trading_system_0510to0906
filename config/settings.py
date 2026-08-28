@@ -66,6 +66,11 @@ class RiskConfig:
     # (side 昇順 -> system 番号昇順の末尾切り) にする。ON のときだけ system 横断の
     # round-robin へ差し替える。詳細: docs/FAIR_POOL_TRIM_20260828.md。
     fair_pool_trim: bool = False
+    # OFF の間は全建玉が件数上限 (per-system / long40 / short30 / total70) を占有する。
+    # ON のときだけ「system 帰属が無く、かつ broker で取引不能 (上場廃止) と確認できた」
+    # 建玉を件数上限から外し、その市場価値を gross/net exposure 側へ付け替える。
+    # 枠は返すが資金は返さない。詳細: docs/ORPHAN_SLOT_EXCLUSION_20260828.md。
+    exclude_orphans_from_slots: bool = False
     portfolio: PortfolioRiskConfig = field(default_factory=PortfolioRiskConfig)
 
 
@@ -504,6 +509,13 @@ def _build_risk_config(cfg: dict[str, Any]) -> RiskConfig:
             _coerce_bool(cfg.get("fair_pool_trim", False), False),
             source="FAIR_POOL_TRIM",
             tag="FAIR_TRIM",
+        ),
+        # env override は運用の非常口。解釈できない値は YAML 値へ落として警告を残す。
+        exclude_orphans_from_slots=_coerce_bool(
+            os.getenv("EXCLUDE_ORPHANS_FROM_SLOTS"),
+            _coerce_bool(cfg.get("exclude_orphans_from_slots", False), False),
+            source="EXCLUDE_ORPHANS_FROM_SLOTS",
+            tag="ORPHAN_SLOTS",
         ),
         portfolio=_build_portfolio_risk_config(cfg),
     )

@@ -183,6 +183,26 @@ def _load_fair_pool_trim_enabled() -> bool:
         return False
 
 
+def _load_exclude_orphans_from_slots() -> bool:
+    """Read the opt-in orphan slot-exclusion flag; any failure keeps legacy counting.
+
+    A settings failure disables the feature (orphans keep occupying slots, which
+    is the *conservative* direction) but is indistinguishable from "the operator
+    left it off", so log it — same idiom as the slot policy and the fair trim.
+    """
+    try:
+        from config.settings import get_settings
+
+        return bool(getattr(get_settings().risk, "exclude_orphans_from_slots", False))
+    except Exception:  # noqa: BLE001 - 設定不備は legacy へ退避するが黙らせない
+        logger.warning(
+            "[ORPHAN_SLOTS] could not read risk.exclude_orphans_from_slots from "
+            "settings; orphans keep occupying pool slots (legacy)",
+            exc_info=True,
+        )
+        return False
+
+
 def _fair_trim_epoch(signal_date: Any) -> int | None:
     """Turn the run's own signal date into the rotation offset.
 
@@ -801,6 +821,129 @@ def count_positions_with_unmapped(
             continue
 
     return per_system, unmapped
+
+
+def count_frozen_orphans(
+    positions: Sequence[object] | None,
+    symbol_system_map: Mapping[str, Any] | None,
+    frozen_symbols: Any = None,
+) -> dict[str, Any]:
+    """Tally the *frozen* orphans: unmapped **and** confirmed untradable holdings.
+
+    ``risk.exclude_orphans_from_slots`` (既定 OFF) 専用の additive helper。既定 OFF の
+    間は誰も呼ばないので、既存経路には一切影響しない。
+
+    「orphan」には 2 種類あって、両者を同じ扱いにしてはいけない:
+
+    - **system 帰属だけが欠けている保有** — 取引可能なので exit も追撃もできる。
+      これは生きた建玉であり、枠を占有し続けるのが正しい (帰属を直せば守れる)。
+    - **上場廃止 (delisted) で broker から close できない保有** — 例 FOLD / CDTX。
+      資金は broker 側の清算まで凍結され、こちらからは何もできない。枠 (件数上限)
+      だけを永久に食い潰す。
+
+    そこで **2 条件の AND** でだけ「凍結」と判定する。``frozen_symbols`` は呼び出し側
+    (broker への read-only な tradable 照会) が確定させた「取引不能」集合で、
+    確認できなかった銘柄は **含めない** = 従来どおり枠を占有する (fail-closed。
+    ``tests/test_orphan_untradable_classification.py`` と同じ「確認できない時は
+    断定しない」規約)。
+
+    返すのは件数だけでなく **市場価値 (USD)** も含む。枠は返しても *資金は凍結された
+    まま* なので、exposure 上限の側では引き続き占有として数えるために使う
+    (docs/ORPHAN_SLOT_EXCLUSION_20260828.md §3)。``market_value`` が読めない建玉は
+    0.0 として計上せず ``unpriced`` にだけ数えて **枠は返さない** (値が読めない建玉の
+    枠を返すと exposure に付け替えられないまま新規が乗る)。
+    """
+    frozen_set: set[str] = set()
+    for sym in frozen_symbols or ():
+        try:
+            text = str(sym).strip().upper()
+        except Exception:  # noqa: BLE001 - 入力は呼び出し側次第
+            continue
+        if text:
+            frozen_set.add(text)
+
+    out: dict[str, Any] = {
+        "long": 0,
+        "short": 0,
+        "total": 0,
+        "long_usd": 0.0,
+        "short_usd": 0.0,
+        "unpriced": 0,
+        "symbols": [],
+    }
+    if not frozen_set or not positions:
+        return out
+
+    normalized: SymbolSystemMap = {}
+    if symbol_system_map:
+        for key, value in symbol_system_map.items():
+            try:
+                symbol = str(key).strip().upper()
+            except Exception:
+                continue
+            if not symbol:
+                continue
+            systems = coerce_system_list(value, ensure_all=False)
+            if systems:
+                normalized[symbol] = systems
+
+    symbols: list[str] = []
+    for pos in positions or []:
+        try:
+            symbol_raw = _get_position_attr(pos, "symbol")
+            if symbol_raw is None:
+                continue
+            sym = str(symbol_raw).strip().upper()
+            if not sym or sym not in frozen_set:
+                continue
+            qty_raw = _get_position_attr(pos, "qty")
+            try:
+                qty_val = float(qty_raw) if qty_raw is not None else 0.0
+            except (TypeError, ValueError):
+                qty_val = 0.0
+            if qty_val == 0.0:
+                continue
+
+            side_raw = _get_position_attr(pos, "side")
+            side = str(side_raw).strip().lower() if side_raw is not None else ""
+
+            # 帰属できている保有は、たとえ取引不能でも「凍結 orphan」ではない。
+            # per-system 枠が既にその建玉を数えているので、ここで抜くと二重に緩む。
+            primary_system = resolve_primary_system(normalized.get(sym))
+            if not primary_system and sym == "SPY" and side == "short":
+                primary_system = "system7"
+            if primary_system:
+                continue
+
+            mv_raw = _get_position_attr(pos, "market_value")
+            try:
+                mv = abs(float(mv_raw)) if mv_raw is not None else None
+            except (TypeError, ValueError):
+                mv = None
+            if mv is None or not math.isfinite(mv):
+                # 値が読めない = exposure 側に付け替えられない。枠だけ返すと
+                # 「凍結資金の上に新規を積む」穴になるので、この建玉は従来どおり
+                # 枠を占有させたまま据え置く (fail-closed)。
+                out["unpriced"] = int(out["unpriced"]) + 1
+                continue
+
+            is_short = side == "short" or qty_val < 0
+            out["total"] = int(out["total"]) + 1
+            if is_short:
+                out["short"] = int(out["short"]) + 1
+                out["short_usd"] = float(out["short_usd"]) + mv
+            else:
+                out["long"] = int(out["long"]) + 1
+                out["long_usd"] = float(out["long_usd"]) + mv
+            symbols.append(sym)
+        except Exception as exc:  # noqa: BLE001 - defensive
+            logger.warning("count_frozen_orphans: skip position: %s", exc)
+            continue
+
+    out["symbols"] = sorted(symbols)
+    out["long_usd"] = round(float(out["long_usd"]), 2)
+    out["short_usd"] = round(float(out["short_usd"]), 2)
+    return out
 
 
 def _normalize_allocations(
@@ -2184,6 +2327,8 @@ def _apply_portfolio_caps(
     equity_source: str | None = None,
     fair_trim: bool = False,
     fair_trim_epoch: int | None = None,
+    exclude_frozen_slots: bool = False,
+    frozen_symbols: Any = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """優先度順 final_df に portfolio 上限 (件数 total/long/short + gross/net exposure)
     を適用し、超過分を末尾から trim する。
@@ -2204,6 +2349,15 @@ def _apply_portfolio_caps(
     束縛したときに「ソート順で最後に来る system が総取りで 0 本」にならない。
     **上限の値・サイジング・リスク計算は不変で、変わるのは切り捨て順だけ。**
     根拠と保証 (G1..G7): ``docs/FAIR_POOL_TRIM_20260828.md``。
+
+    ``exclude_frozen_slots`` / ``frozen_symbols`` は ``risk.exclude_orphans_from_slots``
+    (既定 OFF) 専用の additive 引数。OFF のとき件数も exposure も従来と完全一致し、
+    report にもキーを足さない。ON のときだけ「帰属が無く、かつ broker で取引不能
+    (上場廃止)」の建玉を **件数上限 (long/short/total) から外し、その市場価値を
+    gross/net exposure 上限の側へ付け替える**。枠は返すが資金は返さない、が全体の趣旨:
+    枠だけ空けて exposure からも落とすと、凍結資金の上に新規を積む over-leverage に
+    なる。net は符号付きなので付け替えが逆に緩む向きになりうるが、そちらへは倒さない
+    (フラグは締める方向にしか効かない)。詳細: ``docs/ORPHAN_SLOT_EXCLUSION_20260828.md``。
     """
     report: dict[str, Any] = {"applied": False}
     if final_df is None or getattr(final_df, "empty", True):
@@ -2224,6 +2378,21 @@ def _apply_portfolio_caps(
         unmapped.get("short", 0)
     )
     held_total = sum(active_by_system.values()) + int(unmapped.get("total", 0))
+
+    # risk.exclude_orphans_from_slots (既定 OFF)。ON のときだけ、帰属が無く **かつ**
+    # broker で取引不能と確認できた建玉 (上場廃止 orphan) を件数上限から外す。
+    # 外した分の市場価値は下の exposure 判定へ持ち越す (枠は返すが資金は返さない)。
+    frozen: dict[str, Any] = {}
+    frozen_long_usd = frozen_short_usd = 0.0
+    if exclude_frozen_slots:
+        frozen = count_frozen_orphans(
+            active_positions, symbol_system_map, frozen_symbols
+        )
+        held_long = max(0, held_long - int(frozen.get("long", 0)))
+        held_short = max(0, held_short - int(frozen.get("short", 0)))
+        held_total = max(0, held_total - int(frozen.get("total", 0)))
+        frozen_long_usd = float(frozen.get("long_usd", 0.0) or 0.0)
+        frozen_short_usd = float(frozen.get("short_usd", 0.0) or 0.0)
 
     max_total = int(caps.get("max_total_positions", 70))
     max_long = int(caps.get("max_long_positions", 40))
@@ -2270,10 +2439,25 @@ def _apply_portfolio_caps(
                 pv = 0.0
             new_long = long_usd + (pv if side == "long" else 0.0)
             new_short = short_usd + (pv if side == "short" else 0.0)
-            if gross_cap > 0 and (new_long + new_short) > gross_cap:
+            # 凍結 orphan の資金をここで上乗せする (枠は返すが資金は返さない)。
+            # frozen_* は OFF のとき常に 0.0 なので、OFF の判定式は従来と同値。
+            #
+            # net は符号付きなので、凍結が long・新規が short 寄りの日には
+            # ``|net|`` が **小さく** なりうる (実測 2026-08-28: 7,857 -> 3,571)。
+            # 帰属済みの保有は exposure に入っていないのだから、凍結分だけを
+            # 符号付きで入れて net 上限が緩むのは筋が通らない。**フラグは締める方向
+            # にしか効かない**という契約にするため、緩む側には倒さない。
+            gross_new = new_long + new_short
+            net_new = abs(new_long - new_short)
+            gross_used = gross_new + frozen_long_usd + frozen_short_usd
+            net_used = max(
+                net_new,
+                abs((new_long + frozen_long_usd) - (new_short + frozen_short_usd)),
+            )
+            if gross_cap > 0 and gross_used > gross_cap:
                 trims["gross_exposure"] = trims.get("gross_exposure", 0) + 1
                 continue
-            if net_cap > 0 and abs(new_long - new_short) > net_cap:
+            if net_cap > 0 and net_used > net_cap:
                 trims["net_exposure"] = trims.get("net_exposure", 0) + 1
                 continue
             long_usd, short_usd = new_long, new_short
@@ -2314,6 +2498,24 @@ def _apply_portfolio_caps(
     if equity_source:
         report["caps"]["equity_base_usd"] = round(float(equity), 2)
         report["caps"]["equity_source"] = str(equity_source)
+    if exclude_frozen_slots:
+        # ON のときだけ足す (OFF の report は従来と byte 一致させる契約)。
+        # 「何枠返して、そのぶん何ドルを exposure 側へ付け替えたか」を機械可読に残す。
+        report["frozen_orphans"] = {
+            "enabled": True,
+            "count": {
+                "long": int(frozen.get("long", 0)),
+                "short": int(frozen.get("short", 0)),
+                "total": int(frozen.get("total", 0)),
+            },
+            "exposure_usd": {
+                "long": round(frozen_long_usd, 2),
+                "short": round(frozen_short_usd, 2),
+                "gross": round(frozen_long_usd + frozen_short_usd, 2),
+            },
+            "unpriced_kept_in_slots": int(frozen.get("unpriced", 0)),
+            "symbols": list(frozen.get("symbols", []) or []),
+        }
     if fair_trim:
         # ON のときだけ足す (OFF の report は従来と byte 一致させる契約)。
         # 「どの system が何枠譲ったか」を機械可読で残すのが目的。
@@ -2327,6 +2529,16 @@ def _apply_portfolio_caps(
     if trims:
         logger.info(
             "[PORTFOLIO_CAP] trimmed %s (held L%d/S%d)", trims, held_long, held_short
+        )
+    if exclude_frozen_slots and int(frozen.get("total", 0)):
+        logger.info(
+            "[ORPHAN_SLOTS] freed %d slot(s) held by untradable orphans %s "
+            "(L%d/S%d); their $%.2f gross stays charged against the exposure caps",
+            int(frozen.get("total", 0)),
+            list(frozen.get("symbols", []) or []),
+            int(frozen.get("long", 0)),
+            int(frozen.get("short", 0)),
+            frozen_long_usd + frozen_short_usd,
         )
     if fair_trim:
         fair = report["fair_trim"]
@@ -2390,6 +2602,10 @@ def finalize_allocation(
     market_data_dict: Mapping[str, pd.DataFrame] | None = None,
     signal_date: Any | None = None,
     include_trade_management: bool = False,
+    # risk.exclude_orphans_from_slots (既定 OFF) 専用の additive 引数。呼び出し側が
+    # broker への read-only 照会で確定させた「取引不能 (上場廃止) の保有銘柄」集合。
+    # 既定 None = 従来どおり全建玉が件数上限を占有する。
+    frozen_symbols: Any = None,
 ) -> tuple[pd.DataFrame, AllocationSummary]:
     """Combine per-system candidates into the final trade list.
 
@@ -2434,6 +2650,9 @@ def finalize_allocation(
     # ON のときだけ当日の signal_date から rotation offset を作る (look-ahead なし、
     # 永続 state なし、replay 再現可能)。docs/FAIR_POOL_TRIM_20260828.md。
     fair_trim_enabled = _load_fair_pool_trim_enabled()
+    # risk.exclude_orphans_from_slots (既定 OFF)。OFF のときは件数も exposure も
+    # 従来と byte 一致する。docs/ORPHAN_SLOT_EXCLUSION_20260828.md。
+    exclude_frozen_slots = _load_exclude_orphans_from_slots()
     fair_trim_epoch = _fair_trim_epoch(signal_date) if fair_trim_enabled else None
     fair_slot_rotation = (
         int(fair_trim_epoch) if fair_trim_enabled and fair_trim_epoch is not None else 0
@@ -3030,6 +3249,8 @@ def finalize_allocation(
             equity_source=equity_source,
             fair_trim=fair_trim_enabled,
             fair_trim_epoch=fair_trim_epoch,
+            exclude_frozen_slots=exclude_frozen_slots,
+            frozen_symbols=frozen_symbols,
         )
         try:
             existing_diag = summary.system_diagnostics or {}
@@ -3195,6 +3416,7 @@ def to_allocation_summary_dict(summary: AllocationSummary | Any) -> dict[str, An
 __all__ = [
     "AllocationSummary",
     "count_active_positions_by_system",
+    "count_frozen_orphans",
     "finalize_allocation",
     "load_symbol_system_map",
     "to_allocation_summary_dict",

@@ -99,6 +99,7 @@ from common.alpaca_order import submit_orders_df
 from common.alpaca_trading import (  # noqa: E402
     parse_system_from_client_order_id as _parse_sys_coid,
 )
+from common.alpaca_trading import probe_asset_tradable
 from common.cache_manager import CacheManager
 from common.dataframe_utils import round_dataframe  # noqa: E402
 from common.indicator_access import get_indicator, is_true, to_float
@@ -2135,6 +2136,81 @@ def _build_coid_symbol_system_map(client: Any) -> dict[str, str]:
     except Exception:
         return out
     return out
+
+
+def _resolve_frozen_orphan_symbols(
+    positions: Sequence[Any] | None,
+    symbol_system_map: Any,
+) -> list[str]:
+    """``risk.exclude_orphans_from_slots`` ON のときだけ、枠を返してよい建玉を確定する。
+
+    「枠を返してよい」= **system 帰属が無く、かつ broker で取引可能でない**建玉。
+    上場廃止 (FOLD / CDTX) はこちらから close できず、資金は broker の清算まで凍結
+    される。それが件数上限を食い潰し続けるのを止めるのが目的。
+
+    - flag OFF (既定) は **broker を一切叩かず** 空リストを返す (完全後方互換)。
+    - 照会は read-only の ``get_asset`` (GET) のみ。発注・cancel は一切しない。
+    - 対象は「未帰属の建玉」だけ (帰属済みは per-system 枠が既に数えている)。
+    - ``tradable`` を確認できなかった銘柄は **含めない** = 従来どおり枠を占有する
+      (fail-closed。``tests/test_orphan_untradable_classification.py`` と同じ
+      「確認できない時は断定しない」規約)。
+    """
+    try:
+        from core.final_allocation import _load_exclude_orphans_from_slots
+
+        if not _load_exclude_orphans_from_slots():
+            return []
+    except Exception:  # noqa: BLE001 - 設定を読めないなら従来挙動
+        return []
+    if not positions:
+        return []
+
+    try:
+        _per_sys, unmapped = count_positions_with_unmapped(positions, symbol_system_map)
+    except Exception:  # noqa: BLE001 - 判定できないなら枠は返さない
+        return []
+    if not int(unmapped.get("total", 0)):
+        return []
+
+    # 未帰属の建玉だけを列挙する (帰属済みは照会しない = API 呼び出しの最小化)。
+    # map にキーがあるだけで「帰属済み」と見なすのは ``count_frozen_orphans`` より
+    # 甘い判定だが、外れる向きは「照会しない = 枠を返さない」なので安全側。
+    try:
+        mapped: set[str] = set()
+        for key, value in (symbol_system_map or {}).items():
+            try:
+                mapped.add(str(key).strip().upper())
+            except Exception:  # noqa: BLE001
+                continue
+        candidates: list[str] = []
+        for pos in positions:
+            sym = str(getattr(pos, "symbol", "") or "").strip().upper()
+            if not sym or sym in mapped or sym in candidates:
+                continue
+            candidates.append(sym)
+    except Exception:  # noqa: BLE001
+        return []
+
+    frozen: list[str] = []
+    unknown: list[str] = []
+    for sym in candidates:
+        tradable = probe_asset_tradable(sym)
+        if tradable is False:
+            frozen.append(sym)
+        elif tradable is None:
+            unknown.append(sym)
+    if unknown:
+        _log(
+            f"🧊 未帰属保有の取引可否を確認できませんでした: {unknown} → "
+            "従来どおり枠を占有させます (誤って枠を空けない fail-closed)",
+            level="WARNING",
+        )
+    if frozen:
+        _log(
+            f"🧊 上場廃止で close 不能な未帰属保有 {frozen} を件数上限から除外します "
+            "(資金は gross/net exposure 側で引き続き占有として計上)"
+        )
+    return frozen
 
 
 def _fetch_positions_and_symbol_map() -> tuple[list[Any], dict[str, str]]:
@@ -5655,6 +5731,11 @@ def compute_today_signals(  # noqa: C901  # type: ignore[reportGeneralTypeIssues
             market_data_dict=ctx.basic_data,
             signal_date=ctx.today,
             include_trade_management=True,
+            # risk.exclude_orphans_from_slots (既定 OFF)。OFF の間は空リストで、
+            # broker 照会もせず従来と完全に同じ経路を通る。
+            frozen_symbols=_resolve_frozen_orphan_symbols(
+                active_positions, symbol_system_map
+            ),
         )
     except PositionReconcileError as e:
         # P1 fail-closed: 現保有を確認できないので新規は一切出さない。

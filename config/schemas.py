@@ -36,8 +36,11 @@ class RiskModel(BaseModel):
     slots_from_capital_min_slots: int = Field(1, ge=0)
     # 宣言しないと model_dump() が YAML のキーを落とす (= YAML 設定が黙って無効化
     # され env override でしか効かなくなる) ため、フラグはここにも並べる。
-    # docs/FAIR_POOL_TRIM_20260828.md。既定 OFF (OFF は現行挙動と byte 一致)。
+    # いずれも既定 OFF (OFF は現行挙動と byte 一致)。
+    # docs/FAIR_POOL_TRIM_20260828.md
     fair_pool_trim: bool = False
+    # docs/ORPHAN_SLOT_EXCLUSION_20260828.md
+    exclude_orphans_from_slots: bool = False
     portfolio: PortfolioRiskModel = PortfolioRiskModel()
 
 
