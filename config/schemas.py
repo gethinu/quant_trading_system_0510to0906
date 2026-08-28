@@ -34,6 +34,10 @@ class RiskModel(BaseModel):
     # 意図は 0 < F <= 1 (gross 上限を越えない係数) なので下限を排他にする。
     slots_from_capital_gross_budget_factor: float = Field(1.0, gt=0, le=1)
     slots_from_capital_min_slots: int = Field(1, ge=0)
+    # 宣言しないと model_dump() が YAML のキーを落とす (= YAML 設定が黙って無効化
+    # され env override でしか効かなくなる) ため、フラグはここにも並べる。
+    # docs/FAIR_POOL_TRIM_20260828.md。既定 OFF (OFF は現行挙動と byte 一致)。
+    fair_pool_trim: bool = False
     portfolio: PortfolioRiskModel = PortfolioRiskModel()
 
 
