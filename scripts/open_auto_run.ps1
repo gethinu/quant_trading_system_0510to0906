@@ -22,11 +22,17 @@
     Exit codes propagate from open_auto_run.py
     (0 ok / 3 aborted-before-trades / 4 trades-complete, observability degraded).
     Keep this file ASCII-only; the Python side owns all Japanese output.
+
+    -AllowClosed only bypasses a KNOWN market-closed clock. A clock that cannot be
+    read at all (DNS/API outage) still aborts unless -AllowClockUnknown is given;
+    that hatch is OFF by default and is meant for a human-supervised run only.
+    The nightly scheduled task passes neither, so its behaviour is unchanged.
 #>
 param(
     [string]$Date = "",
     [switch]$DryRun = $false,
     [switch]$AllowClosed = $false,
+    [switch]$AllowClockUnknown = $false,
     [switch]$SkipSignals = $false,
     [switch]$Force = $false,
     [switch]$FlattenAll = $false,
@@ -112,6 +118,7 @@ $pyArgs += @("--min-signals", "$MinSignals", "--poll-timeout", "$PollTimeout")
 $pyArgs += @("--primary-root", $PrimaryRoot)
 if ($DryRun) { $pyArgs += "--dry-run" }
 if ($AllowClosed) { $pyArgs += "--allow-closed" }
+if ($AllowClockUnknown) { $pyArgs += "--allow-clock-unknown" }
 if ($SkipSignals) { $pyArgs += "--skip-signals" }
 if ($Force) { $pyArgs += "--force" }
 if ($FlattenAll) { $pyArgs += "--flatten-all" }
