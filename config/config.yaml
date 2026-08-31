@@ -22,7 +22,10 @@ risk:
   # 最初の犠牲になる)。ON = system 横断の round-robin (max-min fair) で 1 枠ずつ
   # 配り、1 ラウンド未満の端数だけ signal_date 由来の offset で回す。
   # 上限の「値」は変えない。順序だけ。詳細: docs/FAIR_POOL_TRIM_20260828.md。
-  fair_pool_trim: false
+  # 2026-08-31 有効化 (paper)。2026-08-31 の提案では long プールが束縛して
+  # S5 が 10 候補すべて「ロング枠切れ」で 0 本になった (S1 が 9 本総取り)。
+  # 実 _apply_portfolio_caps でのリプレイ: S1 9/S3 4/S4 1/S5 0 -> S1 4/S3 3/S4 3/S5 4。
+  fair_pool_trim: true
   # 上場廃止 (delisted) で broker から close できない「凍結」保有が件数上限
   # (per-system / long40 / short30 / total70) を食い潰し続ける問題への対処。
   # OFF = 現行どおり全建玉が枠を占有する。
@@ -31,7 +34,11 @@ risk:
   #      (枠は返すが資金は返さない = 凍結資金の上に新規を積ませない)。
   #      取引可能な未帰属保有・tradable を確認できなかった銘柄は従来どおり枠を占有。
   # 詳細: docs/ORPHAN_SLOT_EXCLUSION_20260828.md。
-  exclude_orphans_from_slots: false
+  # 2026-08-31 有効化 (paper)。FOLD / CDTX を read-only の get_asset で実測し
+  # tradable=False (取引不能) を確認済み。この 2 件が long40 のうち 2 枠を
+  # 恒久占有していた -> allow_long 14 -> 16。凍結資金 $4,285.87 は
+  # gross/net exposure 側へ付け替わる (枠は返すが資金は返さない)。
+  exclude_orphans_from_slots: true
   # portfolio-level 管理上限 (Phase 5, 2026-07-07)。
   # デフォルトは既存ルール(per-system10/50-50/bucket)から導出した no-op。
   # 締め付け値・根拠は docs/POSITION_MANAGEMENT_PHASE5_20260707.md。
