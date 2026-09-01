@@ -1,0 +1,119 @@
+{
+  "date": "2026-09-01",
+  "provider": "polygon_grouped_daily",
+  "n_candidates_total": 5179,
+  "survival_by_system": {
+    "sys1": {
+      "n_pass": 1380,
+      "n_total": 5179,
+      "ratio": 0.2665,
+      "warn_threshold": 0.05,
+      "status": "ok"
+    },
+    "sys2": {
+      "n_pass": 1830,
+      "n_total": 5179,
+      "ratio": 0.3534,
+      "warn_threshold": 0.06,
+      "status": "ok"
+    },
+    "sys3": {
+      "n_pass": 1830,
+      "n_total": 5179,
+      "ratio": 0.3534,
+      "warn_threshold": 0.06,
+      "status": "ok"
+    },
+    "sys4": {
+      "n_pass": 978,
+      "n_total": 5179,
+      "ratio": 0.1888,
+      "warn_threshold": 0.04,
+      "status": "ok"
+    },
+    "sys5": {
+      "n_pass": 3763,
+      "n_total": 5179,
+      "ratio": 0.7266,
+      "warn_threshold": 0.15,
+      "status": "ok"
+    },
+    "sys6": {
+      "n_pass": 2361,
+      "n_total": 5179,
+      "ratio": 0.4559,
+      "warn_threshold": 0.1,
+      "status": "ok"
+    },
+    "sys7": {
+      "n_pass": 1,
+      "n_total": 1,
+      "ratio": 1.0,
+      "warn_threshold": 1.0,
+      "status": "ok"
+    }
+  },
+  "rejected_top10": [
+    {
+      "symbol": "FNGR",
+      "reason": "price_below_5"
+    },
+    {
+      "symbol": "VMRK",
+      "reason": "no_dv20_cache"
+    },
+    {
+      "symbol": "KEEL",
+      "reason": "price_below_5"
+    },
+    {
+      "symbol": "CHAI",
+      "reason": "price_below_5"
+    },
+    {
+      "symbol": "TE",
+      "reason": "price_below_5"
+    },
+    {
+      "symbol": "AEMD",
+      "reason": "price_below_5"
+    },
+    {
+      "symbol": "DNN",
+      "reason": "price_below_5"
+    },
+    {
+      "symbol": "PLUG",
+      "reason": "price_below_5"
+    },
+    {
+      "symbol": "LPTH",
+      "reason": "dv20_below_50m"
+    },
+    {
+      "symbol": "GRAB",
+      "reason": "price_below_5"
+    }
+  ],
+  "delta_vs_previous": {
+    "sys1": 0.2665,
+    "sys2": 0.3534,
+    "sys3": 0.3534,
+    "sys4": 0.1888,
+    "sys5": 0.7266,
+    "sys6": 0.4559,
+    "sys7": 1.0
+  },
+  "consecutive_drops": {
+    "sys1": 0,
+    "sys2": 0,
+    "sys3": 0,
+    "sys4": 0,
+    "sys5": 0,
+    "sys6": 0,
+    "sys7": 0
+  },
+  "notes": [
+    "grouped_asof=2026-08-28 (target 2026-09-01 was non-trading)"
+  ]
+}
