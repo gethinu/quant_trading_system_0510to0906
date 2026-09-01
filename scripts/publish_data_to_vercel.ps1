@@ -145,7 +145,7 @@ function Send-PublishNtfy {
     $base = if ($env:NTFY_URL) { $env:NTFY_URL.TrimEnd('/') } else { "https://ntfy.sh" }
     try {
         $h = @{ "X-Title" = $Title; "X-Priority" = "5"; "X-Tags" = "warning" }
-        Invoke-RestMethod -Uri "$base/$($env:NTFY_TOPIC)" -Method Post -Headers $h -Body $Body | Out-Null
+        Invoke-RestMethod -Uri "$base/$($env:NTFY_TOPIC)" -Method Post -Headers $h -Body $Body -ContentType 'text/plain; charset=utf-8' | Out-Null
         Write-Log "ntfy WARN 送信済: $Title"
     }
     catch { Write-Log "ntfy WARN 送信失敗: $_" }

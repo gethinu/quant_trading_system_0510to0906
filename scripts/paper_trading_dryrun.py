@@ -228,6 +228,12 @@ def _dryrun_from_json(args):
             out_path,
             {
                 "date": str(json_data.get("date") or ""),
+                # どの signals run から生成された発注かを durable に残す。
+                # recon がこれを見て「同日だが別 run の残骸」を弾く。
+                "source_signals_run_id": str(
+                    (json_data.get("meta") or {}).get("run_id") or ""
+                )
+                or None,
                 "tier": args.tier,
                 "min_notional_usd": args.min_notional,
                 "prefer_fractional": (not args.no_fractional),

@@ -179,7 +179,7 @@ function Send-Warn {
     $base = if ($env:NTFY_URL) { $env:NTFY_URL.TrimEnd('/') } else { "https://ntfy.sh" }
     try {
         $headers = @{ "X-Title" = "daily_pipeline WARN $Date"; "X-Priority" = "5"; "X-Tags" = "warning" }
-        Invoke-RestMethod -Uri "$base/$topic" -Method Post -Headers $headers -Body $Text | Out-Null
+        Invoke-RestMethod -Uri "$base/$topic" -Method Post -Headers $headers -Body $Text -ContentType 'text/plain; charset=utf-8' | Out-Null
         Write-Log "ntfy WARN 送信済"
     }
     catch {
