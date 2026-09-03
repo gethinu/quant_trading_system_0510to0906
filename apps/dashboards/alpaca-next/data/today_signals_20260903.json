@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "date": "2026-09-03",
-  "generated_at": "2026-09-03T06:38:33+09:00",
+  "generated_at": "2026-09-03T22:48:53+09:00",
   "provider": "polygon",
   "systems": {
     "sys1": {
@@ -309,9 +309,9 @@
         "max_total": 70,
         "max_long": 40,
         "max_short": 30,
-        "gross_cap_usd": 99778.86,
-        "net_cap_usd": 49889.43,
-        "equity_base_usd": 99778.86,
+        "gross_cap_usd": 99858.96,
+        "net_cap_usd": 49929.48,
+        "equity_base_usd": 99858.96,
         "equity_source": "alpaca"
       },
       "allow": {
@@ -379,20 +379,14 @@
   },
   "meta": {
     "cli_version": "0.1.0",
-    "run_id": "20260903_062427_0cf076",
-    "elapsed_seconds": 845.7,
+    "run_id": "20260903_223508_5691ac",
+    "elapsed_seconds": 825.7,
     "publish_delivery": {
-      "state": "primary_accepted",
-      "attempted_at": "2026-09-02T21:41:37.152514+00:00",
-      "channels": {
-        "ntfy": {
-          "state": "accepted",
-          "status_code": 200
-        }
-      }
+      "state": "not_attempted",
+      "attempted_at": null,
+      "channels": {}
     },
     "status": "ok",
-    "abort_reason": null,
-    "publish_status": "ok"
+    "abort_reason": null
   }
 }
