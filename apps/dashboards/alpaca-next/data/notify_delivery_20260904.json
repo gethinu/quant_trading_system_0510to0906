@@ -1,0 +1,14 @@
+{
+  "schema": "notify_delivery/v1",
+  "kind": "execution_summary",
+  "date": "2026-09-04",
+  "source_signals_run_id": "20260904_062419_62fb92",
+  "state": "not_attempted",
+  "attempted_at": null,
+  "channels": {
+    "ntfy": {
+      "state": "not_attempted",
+      "status_code": null
+    }
+  }
+}
