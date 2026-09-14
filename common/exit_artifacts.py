@@ -98,6 +98,8 @@ def latest_execution(
     results_dir: Path,
     on_or_before: str | None = None,
     max_scanned: int = 15,
+    execution_scope: str | None = None,
+    allow_unscoped_legacy: bool = True,
 ) -> tuple[Path, dict[str, Any]] | None:
     """直近の **実発注** artifact を (path, payload) で返す。無ければ None。
 
@@ -131,6 +133,13 @@ def latest_execution(
         payload = load_artifact(path)
         if payload is None:
             continue
-        if artifact_role(payload) == ROLE_EXECUTION:
-            return path, payload
+        if artifact_role(payload) != ROLE_EXECUTION:
+            continue
+        if execution_scope is not None:
+            scope = payload.get("execution_scope")
+            if scope != execution_scope and not (
+                allow_unscoped_legacy and (scope is None or str(scope).strip() == "")
+            ):
+                continue
+        return path, payload
     return None

@@ -87,6 +87,17 @@ def count_trading_days(d0: date, d1: date) -> int:
         return int((d1 - d0).days)
 
 
+def previous_trading_day(d0: date) -> date:
+    """``d0`` より前の直近 NYSE 立会日。calendar 不在時は Mon-Fri へ退避。"""
+    sessions = _nyse_sessions(d0 - timedelta(days=21), d0 - timedelta(days=1))
+    if sessions:
+        return sessions[-1]
+    probe = d0 - timedelta(days=1)
+    while probe.weekday() >= 5:
+        probe -= timedelta(days=1)
+    return probe
+
+
 def add_trading_days(d0: date, n: int) -> date:
     """``d0`` から ``n`` 立会日後の日付。calendar → busday → 暦日 の順に退避する。
 
@@ -116,4 +127,9 @@ def add_trading_days(d0: date, n: int) -> date:
         return d0 + timedelta(days=n)
 
 
-__all__ = ["add_trading_days", "count_trading_days", "trading_days_between"]
+__all__ = [
+    "add_trading_days",
+    "count_trading_days",
+    "previous_trading_day",
+    "trading_days_between",
+]

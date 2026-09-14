@@ -132,3 +132,72 @@ def test_unparseable_artifact_is_skipped_not_fatal(tmp_path: Path):
     )
     found = latest_execution(tmp_path, on_or_before="2026-08-18")
     assert found is not None and found[1]["date"] == "2026-08-17"
+
+
+def test_latest_execution_scope_skips_scoped_safety_runs(tmp_path: Path):
+    """post-entry/migration execution must not masquerade as the nightly full exit run."""
+    write_with_sidecar(
+        tmp_path / "exit_orders_20260910.json",
+        {"date": "2026-09-10", "mode": "submitted", "exits": []},
+        ROLE_EXECUTION,
+    )
+    write_with_sidecar(
+        tmp_path / "exit_orders_20260911.json",
+        {
+            "date": "2026-09-11",
+            "mode": "submitted",
+            "execution_scope": "system5_migration_only",
+            "exits": [],
+        },
+        ROLE_EXECUTION,
+    )
+    write_with_sidecar(
+        tmp_path / "exit_orders_20260913_post_entry_sweep.json",
+        {
+            "date": "2026-09-13",
+            "mode": "submitted",
+            "execution_scope": "post_entry_protection_only",
+            "exits": [],
+        },
+        ROLE_EXECUTION,
+    )
+    found = latest_execution(
+        tmp_path,
+        on_or_before="2026-09-14",
+        max_scanned=60,
+        execution_scope="all_exits",
+        allow_unscoped_legacy=True,
+    )
+    assert found is not None
+    assert found[1]["date"] == "2026-09-10"
+
+
+def test_latest_execution_scope_prefers_explicit_all_exits(tmp_path: Path):
+    write_with_sidecar(
+        tmp_path / "exit_orders_20260911.json",
+        {
+            "date": "2026-09-11",
+            "mode": "submitted",
+            "execution_scope": "all_exits",
+            "exits": [],
+        },
+        ROLE_EXECUTION,
+    )
+    write_with_sidecar(
+        tmp_path / "exit_orders_20260913_post_entry_sweep.json",
+        {
+            "date": "2026-09-13",
+            "mode": "submitted",
+            "execution_scope": "post_entry_protection_only",
+            "exits": [],
+        },
+        ROLE_EXECUTION,
+    )
+    found = latest_execution(
+        tmp_path,
+        on_or_before="2026-09-14",
+        max_scanned=60,
+        execution_scope="all_exits",
+    )
+    assert found is not None
+    assert found[1]["date"] == "2026-09-11"

@@ -59,19 +59,26 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Parse publish scripts with PowerShell
+      - name: Parse scheduled PowerShell entrypoints
         shell: pwsh
         run: |
-          $contractTokens = $null
-          $contractErrors = $null
-          [System.Management.Automation.Language.Parser]::ParseFile(
-            (Resolve-Path "scripts/publish_data_to_vercel.ps1"),
-            [ref]$contractTokens,
-            [ref]$contractErrors
-          ) | Out-Null
-          if ($contractErrors.Count -gt 0) {
-            $contractErrors | ForEach-Object { Write-Error $_ }
-            exit 1
+          $scripts = @(
+            "scripts/publish_data_to_vercel.ps1",
+            "scripts/open_auto_run.ps1"
+          )
+          foreach ($script in $scripts) {
+            $contractTokens = $null
+            $contractErrors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $script),
+              [ref]$contractTokens,
+              [ref]$contractErrors
+            ) | Out-Null
+            if ($contractErrors.Count -gt 0) {
+              Write-Error "PowerShell parse failed: $script"
+              $contractErrors | ForEach-Object { Write-Error $_ }
+              exit 1
+            }
           }
       - name: Set up Python
         uses: actions/setup-python@v5

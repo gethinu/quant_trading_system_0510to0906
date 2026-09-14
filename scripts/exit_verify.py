@@ -31,7 +31,7 @@ Exit codes: 0=乖離なし, 2=discrepancy あり (WARN), 1=検証対象の実発
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 import json
 from pathlib import Path
 import sys
@@ -47,6 +47,7 @@ from common.exit_artifacts import (  # noqa: E402
     load_artifact,
 )
 from common.trade_management import SYSTEM_TRADE_RULES  # noqa: E402
+from common.trading_days import previous_trading_day  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -265,6 +266,12 @@ def _summary_lines(v: dict[str, Any]) -> list[str]:
         lines.append(
             f"[..] close pending(市場休場等): {', '.join(r['symbol'] for r in d['closes_pending'])}"
         )
+    if d.get("execution_date_missing"):
+        gap = d["execution_date_missing"]
+        lines.append(
+            "[WARN] 前営業日の all_exits execution 欠落: "
+            f"expected={gap['expected']} latest={gap['latest']}"
+        )
     if v["n_warn"] == 0:
         lines.append("[OK] 乖離なし (submitted close は fill 済 / 満期漏れなし)")
     return lines
@@ -328,6 +335,7 @@ def main(argv: list[str] | None = None) -> int:
 
     date_str = args.date or _today_str()
     results_dir = Path(args.results_dir)
+    expected_execution_date: str | None = None
 
     if args.exit_orders_json:
         exit_path = Path(args.exit_orders_json)
@@ -336,11 +344,20 @@ def main(argv: list[str] | None = None) -> int:
             print(f"[error] exit_orders JSON を読めない: {exit_path}")
             return 1
     else:
+        expected_execution_date = previous_trading_day(
+            date.fromisoformat(date_str)
+        ).isoformat()
         # 当日の artifact を直に読むと、朝 07:20 の時点では daily_pipeline が
         # 06:00 に書いた **提案** を掴む (夜 22:35 の実発注はまだ)。提案を実発注
         # として検証すると毎日「未送信」に見えるので、role が execution の直近
         # artifact を対象にする = 前営業日夜の実発注記録。
-        found = latest_execution(results_dir, on_or_before=date_str)
+        found = latest_execution(
+            results_dir,
+            on_or_before=date_str,
+            max_scanned=60,
+            execution_scope="all_exits",
+            allow_unscoped_legacy=True,
+        )
         if found is None:
             print(
                 f"[error] {date_str} 以前に実発注 (role=execution) の exit artifact "
@@ -364,6 +381,13 @@ def main(argv: list[str] | None = None) -> int:
     status_map = {} if args.no_alpaca else _live_status_map(order_ids)
 
     v = verify(exit_orders, verify_date, status_map)
+    if expected_execution_date and verify_date != expected_execution_date:
+        v["expected_execution_date"] = expected_execution_date
+        v["discrepancies"]["execution_date_missing"] = {
+            "expected": expected_execution_date,
+            "latest": verify_date,
+        }
+        v["n_warn"] += 1
     for ln in _summary_lines(v):
         print(ln)
 

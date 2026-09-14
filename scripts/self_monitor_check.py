@@ -42,7 +42,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -52,6 +52,9 @@ import sys
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from common.exit_artifacts import latest_execution  # noqa: E402
+from common.trading_days import previous_trading_day  # noqa: E402
 
 PRIMARY_ROOT_DEFAULT = r"C:\Repos\quant_trading_system_0510to0906"
 
@@ -118,6 +121,68 @@ def _load_json(path: Path | None) -> dict[str, Any] | None:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return None
+
+
+def _previous_nyse_session(date_str: str) -> str:
+    """date_str より前の直近 NYSE 立会日。"""
+    return previous_trading_day(date.fromisoformat(date_str)).isoformat()
+
+
+def check_all_exits_execution(results_dir: Path, date_str: str) -> CheckResult:
+    """満期 proposal と前営業日の full-scope execution 欠落を fail-closed で検知。"""
+    compact = date_str.replace("-", "")
+    proposal_path = results_dir / f"exit_orders_{compact}_proposal.json"
+    proposal = _load_json(proposal_path)
+    if proposal is None:
+        return CheckResult(
+            "exit_execution",
+            "info",
+            f"{proposal_path.name} 未生成 (daily チェック側で監視)",
+        )
+    try:
+        due = int(proposal.get("time_exit_due") or 0)
+    except (TypeError, ValueError):
+        due = 0
+    expected_date = _previous_nyse_session(date_str)
+    found = latest_execution(
+        results_dir,
+        on_or_before=expected_date,
+        max_scanned=60,
+        execution_scope="all_exits",
+        allow_unscoped_legacy=True,
+    )
+    found_path = found[0] if found else None
+    found_payload = found[1] if found else None
+    found_date = str((found_payload or {}).get("date") or "")
+    data = {
+        "proposal": proposal_path.name,
+        "time_exit_due": due,
+        "expected_execution_date": expected_date,
+        "latest_all_exits_execution": found_path.name if found_path else None,
+        "latest_all_exits_execution_date": found_date or None,
+    }
+    if found is not None and found_date == expected_date:
+        return CheckResult(
+            "exit_execution",
+            "ok",
+            f"前営業日 {expected_date} の all_exits execution を確認 (today due={due})",
+            data,
+        )
+    latest = found_date or "none"
+    if due > 0:
+        return CheckResult(
+            "exit_execution",
+            "crit",
+            f"OVERDUE EXIT BACKLOG: today time_exit_due={due} だが前営業日 "
+            f"{expected_date} の all_exits execution が無い (latest={latest})",
+            data,
+        )
+    return CheckResult(
+        "exit_execution",
+        "warn",
+        f"前営業日 {expected_date} の all_exits execution が無い (latest={latest})",
+        data,
+    )
 
 
 # --------------------------------------------------------------------------
@@ -890,6 +955,7 @@ def main(argv: list[str] | None = None) -> int:
         check_data_advance(data_cache_dir),
         check_signals(results_dir, args.min_signals),
         check_publish(repo, args.monitor_branch, args.max_age_hours, data_dir),
+        check_all_exits_execution(results_dir, date_str),
         check_open_run(logs_dir, results_dir, args.openrun_max_age_hours),
     ]
     worst = _aggregate(results)

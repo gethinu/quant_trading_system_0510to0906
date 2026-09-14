@@ -21,6 +21,7 @@ if str(ROOT) not in sys.path:
 from scripts.self_monitor_check import (  # noqa: E402
     _abort_reason,
     _latest_open_run_dir,
+    check_all_exits_execution,
     check_daily,
     check_data_advance,
     check_open_run,
@@ -729,3 +730,72 @@ def test_publish_falls_back_to_local_without_origin(tmp_path: Path):
     r = check_publish(work, head, max_age_hours=26, data_dir=work)
     assert r.data["basis"] == "local-fallback"
     assert r.status == "ok"
+
+
+# --- exit execution dead-man switch (2026-09-11 parse failure) ----------------
+def test_exit_execution_crit_when_due_and_previous_full_run_missing(
+    tmp_path: Path, monkeypatch
+):
+    rd = tmp_path / "results_csv"
+    _write(
+        rd / "exit_orders_20260914_proposal.json",
+        {"date": "2026-09-14", "role": "proposal", "time_exit_due": 4},
+    )
+    _write(
+        rd / "exit_orders_20260911_execution.json",
+        {
+            "date": "2026-09-11",
+            "role": "execution",
+            "mode": "submitted",
+            "execution_scope": "system5_migration_only",
+            "exits": [],
+        },
+    )
+    _write(
+        rd / "exit_orders_20260910_execution.json",
+        {"date": "2026-09-10", "role": "execution", "mode": "submitted", "exits": []},
+    )
+    monkeypatch.setattr(
+        "scripts.self_monitor_check._previous_nyse_session", lambda _date: "2026-09-11"
+    )
+    r = check_all_exits_execution(rd, "2026-09-14")
+    assert r.status == "crit", r.detail
+    assert r.data["time_exit_due"] == 4
+    assert r.data["latest_all_exits_execution_date"] == "2026-09-10"
+    assert "OVERDUE EXIT BACKLOG" in r.detail
+
+
+def test_exit_execution_ok_when_previous_full_run_exists_even_with_newer_sweep(
+    tmp_path: Path, monkeypatch
+):
+    rd = tmp_path / "results_csv"
+    _write(
+        rd / "exit_orders_20260914_proposal.json",
+        {"date": "2026-09-14", "role": "proposal", "time_exit_due": 6},
+    )
+    _write(
+        rd / "exit_orders_20260911_execution.json",
+        {
+            "date": "2026-09-11",
+            "role": "execution",
+            "mode": "submitted",
+            "execution_scope": "all_exits",
+            "exits": [],
+        },
+    )
+    _write(
+        rd / "exit_orders_20260913_post_entry_sweep_execution.json",
+        {
+            "date": "2026-09-13",
+            "role": "execution",
+            "mode": "submitted",
+            "execution_scope": "post_entry_protection_only",
+            "exits": [],
+        },
+    )
+    monkeypatch.setattr(
+        "scripts.self_monitor_check._previous_nyse_session", lambda _date: "2026-09-11"
+    )
+    r = check_all_exits_execution(rd, "2026-09-14")
+    assert r.status == "ok", r.detail
+    assert r.data["latest_all_exits_execution_date"] == "2026-09-11"
