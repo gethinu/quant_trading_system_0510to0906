@@ -16,7 +16,11 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scripts.exit_verify import _expected_time_exits, verify  # noqa: E402
+from scripts.exit_verify import (  # noqa: E402
+    _expected_execution_date,
+    _expected_time_exits,
+    verify,
+)
 
 
 def _pos(symbol, system, entry_date, side="long", qty=1.0):
@@ -150,6 +154,17 @@ def test_all_due_planned_and_filled_no_warn():
     v = verify(exit_orders, "2026-07-13", status_map={"o1": "filled"})
     assert v["n_filled_closes"] == 1
     assert v["n_warn"] == 0
+
+
+def test_expected_execution_date_is_session_on_or_before_requested_date():
+    # 07:20 JST on Tue 09-15 is still UTC date Mon 09-14.  The Monday
+    # execution is already complete and must be verified, not Friday 09-11.
+    assert _expected_execution_date("2026-09-14") == "2026-09-14"
+
+
+def test_expected_execution_date_rolls_weekend_and_holiday_back():
+    assert _expected_execution_date("2026-09-13") == "2026-09-11"  # Sunday
+    assert _expected_execution_date("2026-09-07") == "2026-09-04"  # Labor Day
 
 
 # --- artifact 選択: 朝の提案ではなく前営業日夜の実発注を検証する -------------

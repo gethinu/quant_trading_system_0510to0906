@@ -31,7 +31,7 @@ Exit codes: 0=乖離なし, 2=discrepancy あり (WARN), 1=検証対象の実発
 from __future__ import annotations
 
 import argparse
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 import json
 from pathlib import Path
 import sys
@@ -71,6 +71,12 @@ _CLOSE_REASONS = {"time_based", "spy_breakout", "flatten_all"}
 
 def _today_str() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def _expected_execution_date(requested_date: str) -> str:
+    """Return the latest NYSE session on or before requested_date."""
+    d0 = date.fromisoformat(requested_date)
+    return previous_trading_day(d0 + timedelta(days=1)).isoformat()
 
 
 def _norm_status(raw: Any) -> str:
@@ -344,9 +350,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"[error] exit_orders JSON を読めない: {exit_path}")
             return 1
     else:
-        expected_execution_date = previous_trading_day(
-            date.fromisoformat(date_str)
-        ).isoformat()
+        expected_execution_date = _expected_execution_date(date_str)
         # 当日の artifact を直に読むと、朝 07:20 の時点では daily_pipeline が
         # 06:00 に書いた **提案** を掴む (夜 22:35 の実発注はまだ)。提案を実発注
         # として検証すると毎日「未送信」に見えるので、role が execution の直近
