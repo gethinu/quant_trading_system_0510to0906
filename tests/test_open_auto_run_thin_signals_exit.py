@@ -88,6 +88,9 @@ def runner(tmp_path, monkeypatch):
         # --- 外部 I/O を全て封じる (paper でも発注させない) ---
         monkeypatch.setattr(r, "_assert_paper", lambda: None)
         monkeypatch.setattr(r, "_ntfy_warn", lambda *a, **k: None)
+        # Freshness itself is covered separately; default fixture keeps historical
+        # thin-signal tests focused on exit->entry orchestration.
+        monkeypatch.setattr(r, "_entry_data_fresh", lambda: True)
         monkeypatch.setattr(r, "equity", lambda: 100_000.0)
         monkeypatch.setattr(r, "wait_exit_fills", lambda ids: None)
         monkeypatch.setattr(r, "record_stage", lambda: None)
@@ -202,8 +205,55 @@ def test_threshold_boundary_exactly_at_min_allows_entry(runner):
     assert r.entry_allowed is True
 
 
+def test_entry_data_fresh_requires_exact_prior_session(tmp_path, monkeypatch):
+    """9/15 entry は 9/14 EOD が全 signal 銘柄に必要。"""
+    import pandas as pd
+    import common.cache_manager as cache_manager
+    import config.settings as settings_module
+
+    monkeypatch.setattr(oar, "ROOT", tmp_path)
+    _write_signals(tmp_path, "20260915", 2)
+    r = oar.Runner(_args(date="2026-09-15"))
+
+    class FakeCacheManager:
+        def __init__(self, _settings):
+            pass
+
+        def read(self, symbol, profile):
+            assert profile == "rolling"
+            day = "2026-09-14" if symbol == "S0" else "2026-09-11"
+            return pd.DataFrame({"date": [day]})
+
+    monkeypatch.setattr(cache_manager, "CacheManager", FakeCacheManager)
+    monkeypatch.setattr(settings_module, "get_settings", lambda create_dirs=False: object())
+
+    assert r._entry_data_fresh() is False
+    assert r.record["entry_data_expected_date"] == "2026-09-14"
+    assert r.record["entry_data_stale"] == {"S1": "2026-09-11"}
+
+
 # ---------------------------------------------------------------------------
-# 4) 切り戻しスイッチ
+# 4) stale data は entry だけ fail-closed、exit は継続
+# ---------------------------------------------------------------------------
+
+
+def test_stale_signal_data_skips_entry_but_still_runs_exit(runner, monkeypatch):
+    r, rec = runner(signal_count=44)
+    monkeypatch.setattr(r, "_entry_data_fresh", lambda: False)
+    r.record["entry_data_expected_date"] = "2026-07-24"
+    r.record["entry_data_stale"] = {"AAA": "2026-07-23"}
+
+    code = r.main()
+
+    assert code == 0
+    assert rec.calls == ["exit"]
+    assert r.entry_allowed is False
+    assert r.record["entry_skip_reason"] == "stale_signal_data:1"
+    assert r.record["entry_status"] == "skipped_stale_data"
+
+
+# ---------------------------------------------------------------------------
+# 5) 切り戻しスイッチ
 # ---------------------------------------------------------------------------
 
 

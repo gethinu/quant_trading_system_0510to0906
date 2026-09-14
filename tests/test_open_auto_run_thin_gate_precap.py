@@ -107,6 +107,7 @@ def runner(tmp_path, monkeypatch):
 
         monkeypatch.setattr(r, "_assert_paper", lambda: None)
         monkeypatch.setattr(r, "_ntfy_warn", lambda *a, **k: None)
+        monkeypatch.setattr(r, "_entry_data_fresh", lambda: True)
         monkeypatch.setattr(r, "equity", lambda: 100_000.0)
         monkeypatch.setattr(r, "wait_exit_fills", lambda ids: None)
         monkeypatch.setattr(r, "record_stage", lambda: None)

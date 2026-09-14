@@ -361,6 +361,80 @@ class Runner:
             seen = True
         return total if seen else None
 
+    def _entry_data_fresh(self) -> bool:
+        """Fail closed unless every submittable signal has prior-session rolling data."""
+        if not self.signals_json.exists():
+            self.record["entry_data_fresh"] = False
+            self.record["entry_data_freshness_error"] = "signals_json_missing"
+            return False
+        try:
+            payload = json.loads(self.signals_json.read_text(encoding="utf-8"))
+        except Exception as exc:
+            self.record["entry_data_fresh"] = False
+            self.record["entry_data_freshness_error"] = f"signals_json_unreadable:{exc}"
+            return False
+
+        signal_symbols: list[str] = []
+        for blk in ((payload or {}).get("systems") or {}).values():
+            if not isinstance(blk, dict):
+                continue
+            for row in blk.get("signals") or []:
+                if isinstance(row, dict) and row.get("symbol"):
+                    signal_symbols.append(str(row["symbol"]).upper())
+        signal_symbols = sorted(set(signal_symbols))
+        if not signal_symbols:
+            self.record["entry_data_fresh"] = True
+            self.record["entry_data_expected_date"] = None
+            self.record["entry_data_stale"] = {}
+            return True
+
+        try:
+            import pandas as pd
+            from common.cache_manager import CacheManager
+            from common.utils_spy import get_latest_nyse_trading_day
+            from config.settings import get_settings
+
+            entry_day = pd.Timestamp(self.date).normalize()
+            expected = pd.Timestamp(
+                get_latest_nyse_trading_day(entry_day - pd.Timedelta(days=1))
+            ).normalize()
+            cm = CacheManager(get_settings(create_dirs=False))
+        except Exception as exc:  # fail closed: freshness UNKNOWN is not PASS
+            self.record["entry_data_fresh"] = False
+            self.record["entry_data_freshness_error"] = f"freshness_setup_failed:{exc}"
+            return False
+
+        stale: dict[str, str] = {}
+        for symbol in signal_symbols:
+            try:
+                df = cm.read(symbol, "rolling")
+            except Exception as exc:
+                stale[symbol] = f"read_error:{type(exc).__name__}"
+                continue
+            if df is None or getattr(df, "empty", True):
+                stale[symbol] = "missing"
+                continue
+            dcol = next((c for c in ("date", "Date", "DATE") if c in df.columns), None)
+            if dcol is None:
+                stale[symbol] = "date_column_missing"
+                continue
+            try:
+                latest = pd.to_datetime(df[dcol], errors="coerce").max()
+            except Exception:
+                latest = pd.NaT
+            if pd.isna(latest):
+                stale[symbol] = "date_unparseable"
+                continue
+            latest_norm = pd.Timestamp(latest).normalize()
+            if latest_norm != expected:
+                stale[symbol] = str(latest_norm.date())
+
+        self.record["entry_data_expected_date"] = str(expected.date())
+        self.record["entry_data_checked_symbols"] = len(signal_symbols)
+        self.record["entry_data_stale"] = stale
+        self.record["entry_data_fresh"] = not stale
+        return not stale
+
     # -- stages ------------------------------------------------------------
     def gate(self) -> bool:
         # paper 断言 (最優先。live なら即 abort)
@@ -462,6 +536,29 @@ class Runner:
         # ため、建玉が積み上がると健全なデータでも閾値未満になり entry が恒久停止する。
         n_raw = self._count_candidates()
         self.record["candidate_count"] = n_raw
+
+        # New entries require exact prior-session data for every signal symbol.
+        # UNKNOWN is deliberately fail-closed.  Exits remain independent and continue.
+        if n_out > 0 and not self._entry_data_fresh():
+            self.entry_allowed = False
+            self.record["entry_allowed"] = False
+            stale = self.record.get("entry_data_stale") or {}
+            expected = self.record.get("entry_data_expected_date")
+            reason = f"stale_signal_data:{len(stale)}"
+            if self.record.get("entry_data_freshness_error"):
+                reason = "stale_signal_data:unknown"
+            self.record["entry_skip_reason"] = reason
+            self.log(
+                f"[gate] entry data freshness FAIL expected={expected} "
+                f"stale_or_unknown={len(stale)} -> entry SKIP; exit は継続"
+            )
+            self._ntfy_warn(
+                f"OpenAutoRun entry SKIP {self.date}",
+                f"signal data freshness failed (expected prior NYSE session={expected}, "
+                f"stale/unknown={len(stale)}). New entry is fail-closed; exits continue.",
+            )
+            return True
+
         n = n_out if n_raw is None else n_raw
         gate_basis = "signals(post-cap)" if n_raw is None else "candidates(pre-cap)"
         self.record["thin_gate_basis"] = gate_basis
@@ -1257,10 +1354,15 @@ class Runner:
                 f"[entry] SKIP: {self.record.get('entry_skip_reason')} "
                 "(exit は実行済み)"
             )
+            skip_reason = str(self.record.get("entry_skip_reason") or "")
             self.record["entry_status"] = (
                 "skipped_flatten_error"
                 if self.record.get("flatten_error")
-                else "skipped_thin_signals"
+                else (
+                    "skipped_stale_data"
+                    if skip_reason.startswith("stale_signal_data:")
+                    else "skipped_thin_signals"
+                )
             )
             self.record["entry_submitted"] = 0
         self.record_stage()
