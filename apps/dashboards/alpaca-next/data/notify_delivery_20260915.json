@@ -2,13 +2,13 @@
   "schema": "notify_delivery/v1",
   "kind": "execution_summary",
   "date": "2026-09-15",
-  "source_signals_run_id": "20260915_060612_1899d2",
-  "state": "not_attempted",
-  "attempted_at": null,
+  "source_signals_run_id": "20260915_144929_a4f0f8",
+  "state": "accepted",
+  "attempted_at": "2026-09-15T13:54:36+00:00",
   "channels": {
     "ntfy": {
-      "state": "not_attempted",
-      "status_code": null
+      "state": "accepted",
+      "status_code": 200
     }
   }
 }
