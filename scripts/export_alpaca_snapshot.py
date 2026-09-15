@@ -16,7 +16,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import sys
 from typing import Any
+
+_BOOTSTRAP_ROOT = Path(__file__).resolve().parents[1]
+if str(_BOOTSTRAP_ROOT) not in sys.path:
+    sys.path.insert(0, str(_BOOTSTRAP_ROOT))
 
 from common.alpaca_trading import PositionSnapshot, protective_stop_price
 from common.system5_live_exit import (

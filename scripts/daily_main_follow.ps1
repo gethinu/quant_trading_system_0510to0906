@@ -174,6 +174,19 @@ else {
 }
 
 # --- 3) generation via daily_pipeline.ps1 -SkipVercel (latest main code) --
+$pubDate = if ($Date) { $Date } else { Get-Date -Format "yyyy-MM-dd" }
+$pubCompact = $pubDate.Replace("-", "")
+$signalPath = Join-Path $WorktreeRoot "results_csv\today_signals_$pubCompact.json"
+function Get-SignalRunId([string]$Path) {
+    if (-not (Test-Path $Path)) { return "" }
+    try {
+        $obj = Get-Content -Raw -Path $Path | ConvertFrom-Json
+        if ($obj.meta.run_id) { return [string]$obj.meta.run_id }
+        if ($obj.run_id) { return [string]$obj.run_id }
+    } catch {}
+    return ""
+}
+$signalRunBefore = Get-SignalRunId $signalPath
 $pipeline = Join-Path $ScriptDir "daily_pipeline.ps1"
 $pArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $pipeline, "-SkipVercel")
 if ($Date) { $pArgs += @("-Date", $Date) }
@@ -188,9 +201,22 @@ Write-L "--- [generate] daily_pipeline.ps1 -SkipVercel (DryRun=$DryRun) ---"
 & powershell.exe @pArgs 2>&1 | ForEach-Object { Write-L "  | $_" }
 $genCode = $LASTEXITCODE
 Write-L "[generate] exit=$genCode"
+$signalRunAfter = Get-SignalRunId $signalPath
+Write-L "[generate] signal run_id before=$signalRunBefore after=$signalRunAfter"
+
+# Production must publish only an artifact produced by this invocation.
+# A failed atomic replace can leave yesterday's/current-day earlier JSON in place.
+if (-not $DryRun) {
+    $artifactFresh = (-not [string]::IsNullOrWhiteSpace($signalRunAfter)) -and
+        ($signalRunAfter -ne $signalRunBefore)
+    if (-not $artifactFresh) {
+        Write-L "ERROR: signal artifact was not refreshed; refusing stale-artifact publish"
+        Write-L "=== daily_main_follow done (generate exit=$genCode; publish blocked) ==="
+        if ($genCode -ne 0) { exit $genCode } else { exit 2 }
+    }
+}
 
 # --- 4) publish from PRIMARY (monitor-webapp) tree -----------------------
-$pubDate = if ($Date) { $Date } else { Get-Date -Format "yyyy-MM-dd" }
 $pubScript = Join-Path $PrimaryRoot "scripts\publish_data_to_vercel.ps1"
 if ($DryRun) {
     Write-L "[publish] DryRun: skip execution. Production would run:"

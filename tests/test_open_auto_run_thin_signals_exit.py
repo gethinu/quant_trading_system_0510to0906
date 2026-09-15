@@ -252,6 +252,22 @@ def test_stale_signal_data_skips_entry_but_still_runs_exit(runner, monkeypatch):
     assert r.record["entry_status"] == "skipped_stale_data"
 
 
+def test_signal_generation_failure_skips_entry_but_still_runs_exit(
+    runner, monkeypatch
+):
+    r, rec = runner(signal_count=44, skip_signals=False)
+    monkeypatch.setattr(r, "run_step", lambda *a, **k: (1, "", "locked"))
+
+    code = r.main()
+
+    assert code == 0
+    assert rec.calls == ["exit"]
+    assert r.entry_allowed is False
+    assert r.record["signal_generation_status"] == "failed"
+    assert r.record["entry_skip_reason"] == "signal_generation_failed:1"
+    assert r.record["entry_status"] == "skipped_signal_generation_failed"
+
+
 # ---------------------------------------------------------------------------
 # 5) 切り戻しスイッチ
 # ---------------------------------------------------------------------------

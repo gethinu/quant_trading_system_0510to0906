@@ -525,7 +525,21 @@ class Runner:
                 ],
             )
             if code != 0:
-                self.log(f"[signals] WARN exit={code} (JSON があれば継続)")
+                self.entry_allowed = False
+                self.record["entry_allowed"] = False
+                self.record["signal_generation_status"] = "failed"
+                self.record["signal_generation_exit_code"] = code
+                self.record["entry_skip_reason"] = f"signal_generation_failed:{code}"
+                self.log(
+                    f"[signals] FAIL exit={code} -> entry SKIP; exit は継続"
+                )
+                self._ntfy_warn(
+                    f"OpenAutoRun entry SKIP {self.date}",
+                    f"signal generation failed (exit={code}). Existing same-date JSON "
+                    "is not trusted for new entry; exits continue.",
+                )
+            else:
+                self.record["signal_generation_status"] = "ok"
 
         n_out = (
             self._count_signals()
@@ -536,6 +550,11 @@ class Runner:
         # ため、建玉が積み上がると健全なデータでも閾値未満になり entry が恒久停止する。
         n_raw = self._count_candidates()
         self.record["candidate_count"] = n_raw
+
+        # A failed current-run signal build must never fall back to an older
+        # same-date JSON for entry.  Risk-reducing exits remain independent.
+        if self.record.get("signal_generation_status") == "failed":
+            return True
 
         # New entries require exact prior-session data for every signal symbol.
         # UNKNOWN is deliberately fail-closed.  Exits remain independent and continue.
@@ -1361,7 +1380,11 @@ class Runner:
                 else (
                     "skipped_stale_data"
                     if skip_reason.startswith("stale_signal_data:")
-                    else "skipped_thin_signals"
+                    else (
+                        "skipped_signal_generation_failed"
+                        if skip_reason.startswith("signal_generation_failed:")
+                        else "skipped_thin_signals"
+                    )
                 )
             )
             self.record["entry_submitted"] = 0
