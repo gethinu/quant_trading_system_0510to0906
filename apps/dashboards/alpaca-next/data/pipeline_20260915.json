@@ -10,7 +10,7 @@
           "name": "Tgt",
           "label": "Tgt",
           "condition": "ユニバース対象銘柄数",
-          "count": 5152,
+          "count": 5200,
           "measured": true,
           "ratio_of_prev": null,
           "ratio_of_universe": 1.0
@@ -19,10 +19,10 @@
           "name": "FILpass",
           "label": "FILpass",
           "condition": "Close >= 5 かつ DollarVolume20 > 50M",
-          "count": 1318,
+          "count": 1327,
           "measured": true,
-          "ratio_of_prev": 0.255823,
-          "ratio_of_universe": 0.255823
+          "ratio_of_prev": 0.255192,
+          "ratio_of_universe": 0.255192
         },
         {
           "name": "STUpass",
@@ -30,8 +30,8 @@
           "condition": "SMA25 > SMA50 かつ ROC200 > 0",
           "count": 524,
           "measured": true,
-          "ratio_of_prev": 0.397572,
-          "ratio_of_universe": 0.101708,
+          "ratio_of_prev": 0.394876,
+          "ratio_of_universe": 0.100769,
           "source": "today_signals.funnel",
           "source_run_id": "20260915_060612_1899d2",
           "source_observed_at": "2026-09-15T06:19:55+09:00"
@@ -43,7 +43,7 @@
           "count": 10,
           "measured": true,
           "ratio_of_prev": 0.019084,
-          "ratio_of_universe": 0.001941,
+          "ratio_of_universe": 0.001923,
           "source": "today_signals.funnel",
           "source_run_id": "20260915_060612_1899d2",
           "source_observed_at": "2026-09-15T06:19:55+09:00"
@@ -55,7 +55,7 @@
           "count": 2,
           "measured": true,
           "ratio_of_prev": 0.2,
-          "ratio_of_universe": 0.000388,
+          "ratio_of_universe": 0.000385,
           "source": "today_signals.funnel",
           "source_run_id": "20260915_060612_1899d2",
           "source_observed_at": "2026-09-15T06:19:55+09:00"
@@ -95,7 +95,7 @@
           "name": "Tgt",
           "label": "Tgt",
           "condition": "ユニバース対象銘柄数",
-          "count": 5152,
+          "count": 5200,
           "measured": true,
           "ratio_of_prev": null,
           "ratio_of_universe": 1.0
@@ -104,10 +104,10 @@
           "name": "FILpass",
           "label": "FILpass",
           "condition": "Close >= 5 かつ DollarVolume20 > 25M かつ ATR_Ratio > 0.03",
-          "count": 1775,
+          "count": 1777,
           "measured": true,
-          "ratio_of_prev": 0.344526,
-          "ratio_of_universe": 0.344526
+          "ratio_of_prev": 0.341731,
+          "ratio_of_universe": 0.341731
         },
         {
           "name": "STUpass",
@@ -115,8 +115,8 @@
           "condition": "RSI3 > 90 かつ twodayup",
           "count": 11,
           "measured": true,
-          "ratio_of_prev": 0.006197,
-          "ratio_of_universe": 0.002135,
+          "ratio_of_prev": 0.00619,
+          "ratio_of_universe": 0.002115,
           "source": "today_signals.funnel",
           "source_run_id": "20260915_060612_1899d2",
           "source_observed_at": "2026-09-15T06:19:55+09:00"
@@ -128,7 +128,7 @@
           "count": 10,
           "measured": true,
           "ratio_of_prev": 0.909091,
-          "ratio_of_universe": 0.001941,
+          "ratio_of_universe": 0.001923,
           "source": "today_signals.funnel",
           "source_run_id": "20260915_060612_1899d2",
           "source_observed_at": "2026-09-15T06:19:55+09:00"
@@ -140,7 +140,7 @@
           "count": 9,
           "measured": true,
           "ratio_of_prev": 0.9,
-          "ratio_of_universe": 0.001747,
+          "ratio_of_universe": 0.001731,
           "source": "today_signals.funnel",
           "source_run_id": "20260915_060612_1899d2",
           "source_observed_at": "2026-09-15T06:19:55+09:00"
@@ -180,7 +180,7 @@
           "name": "Tgt",
           "label": "Tgt",
           "condition": "ユニバース対象銘柄数",
-          "count": 5152,
+          "count": 5200,
           "measured": true,
           "ratio_of_prev": null,
           "ratio_of_universe": 1.0
@@ -189,10 +189,10 @@
           "name": "FILpass",
           "label": "FILpass",
           "condition": "Close >= 5 かつ DollarVolume20 > 25M かつ ATR_Ratio >= 0.05",
-          "count": 1775,
+          "count": 1777,
           "measured": true,
-          "ratio_of_prev": 0.344526,
-          "ratio_of_universe": 0.344526
+          "ratio_of_prev": 0.341731,
+          "ratio_of_universe": 0.341731
         },
         {
           "name": "STUpass",
@@ -200,8 +200,8 @@
           "condition": "drop3d >= 0.125",
           "count": 22,
           "measured": true,
-          "ratio_of_prev": 0.012394,
-          "ratio_of_universe": 0.00427,
+          "ratio_of_prev": 0.01238,
+          "ratio_of_universe": 0.004231,
           "source": "today_signals.funnel",
           "source_run_id": "20260915_060612_1899d2",
           "source_observed_at": "2026-09-15T06:19:55+09:00"
@@ -213,7 +213,7 @@
           "count": 10,
           "measured": true,
           "ratio_of_prev": 0.454545,
-          "ratio_of_universe": 0.001941,
+          "ratio_of_universe": 0.001923,
           "source": "today_signals.funnel",
           "source_run_id": "20260915_060612_1899d2",
           "source_observed_at": "2026-09-15T06:19:55+09:00"
@@ -225,7 +225,7 @@
           "count": 8,
           "measured": true,
           "ratio_of_prev": 0.8,
-          "ratio_of_universe": 0.001553,
+          "ratio_of_universe": 0.001538,
           "source": "today_signals.funnel",
           "source_run_id": "20260915_060612_1899d2",
           "source_observed_at": "2026-09-15T06:19:55+09:00"
@@ -265,7 +265,7 @@
           "name": "Tgt",
           "label": "Tgt",
           "condition": "ユニバース対象銘柄数",
-          "count": 5152,
+          "count": 5200,
           "measured": true,
           "ratio_of_prev": null,
           "ratio_of_universe": 1.0
@@ -276,8 +276,8 @@
           "condition": "DollarVolume50 > 100M かつ HV50 in [10,40]",
           "count": 930,
           "measured": true,
-          "ratio_of_prev": 0.180512,
-          "ratio_of_universe": 0.180512
+          "ratio_of_prev": 0.178846,
+          "ratio_of_universe": 0.178846
         },
         {
           "name": "STUpass",
@@ -286,7 +286,7 @@
           "count": 293,
           "measured": true,
           "ratio_of_prev": 0.315054,
-          "ratio_of_universe": 0.056871,
+          "ratio_of_universe": 0.056346,
           "source": "today_signals.funnel",
           "source_run_id": "20260915_060612_1899d2",
           "source_observed_at": "2026-09-15T06:19:55+09:00"
@@ -298,7 +298,7 @@
           "count": 10,
           "measured": true,
           "ratio_of_prev": 0.03413,
-          "ratio_of_universe": 0.001941,
+          "ratio_of_universe": 0.001923,
           "source": "today_signals.funnel",
           "source_run_id": "20260915_060612_1899d2",
           "source_observed_at": "2026-09-15T06:19:55+09:00"
@@ -350,7 +350,7 @@
           "name": "Tgt",
           "label": "Tgt",
           "condition": "ユニバース対象銘柄数",
-          "count": 5152,
+          "count": 5200,
           "measured": true,
           "ratio_of_prev": null,
           "ratio_of_universe": 1.0
@@ -359,10 +359,10 @@
           "name": "FILpass",
           "label": "FILpass",
           "condition": "Close >= 5 かつ ADX7 > 55 かつ ATR_Pct > 0.04 かつ AvgVolume50 > 500k かつ DollarVolume50 > 2.5M",
-          "count": 3730,
+          "count": 3772,
           "measured": true,
-          "ratio_of_prev": 0.723991,
-          "ratio_of_universe": 0.723991
+          "ratio_of_prev": 0.725385,
+          "ratio_of_universe": 0.725385
         },
         {
           "name": "STUpass",
@@ -370,8 +370,8 @@
           "condition": "ADX7 > 55 かつ Close > SMA100+ATR10 かつ RSI3 < 50",
           "count": 3,
           "measured": true,
-          "ratio_of_prev": 0.000804,
-          "ratio_of_universe": 0.000582,
+          "ratio_of_prev": 0.000795,
+          "ratio_of_universe": 0.000577,
           "source": "today_signals.funnel",
           "source_run_id": "20260915_060612_1899d2",
           "source_observed_at": "2026-09-15T06:19:55+09:00"
@@ -383,7 +383,7 @@
           "count": 3,
           "measured": true,
           "ratio_of_prev": 1.0,
-          "ratio_of_universe": 0.000582,
+          "ratio_of_universe": 0.000577,
           "source": "today_signals.funnel",
           "source_run_id": "20260915_060612_1899d2",
           "source_observed_at": "2026-09-15T06:19:55+09:00"
@@ -395,7 +395,7 @@
           "count": 2,
           "measured": true,
           "ratio_of_prev": 0.666667,
-          "ratio_of_universe": 0.000388,
+          "ratio_of_universe": 0.000385,
           "source": "today_signals.funnel",
           "source_run_id": "20260915_060612_1899d2",
           "source_observed_at": "2026-09-15T06:19:55+09:00"
@@ -435,7 +435,7 @@
           "name": "Tgt",
           "label": "Tgt",
           "condition": "ユニバース対象銘柄数",
-          "count": 5152,
+          "count": 5200,
           "measured": true,
           "ratio_of_prev": null,
           "ratio_of_universe": 1.0
@@ -444,10 +444,10 @@
           "name": "FILpass",
           "label": "FILpass",
           "condition": "Low >= 5 かつ DollarVolume50 > 10M",
-          "count": 2317,
+          "count": 2316,
           "measured": true,
-          "ratio_of_prev": 0.449728,
-          "ratio_of_universe": 0.449728
+          "ratio_of_prev": 0.445385,
+          "ratio_of_universe": 0.445385
         },
         {
           "name": "STUpass",
@@ -603,8 +603,8 @@
     "phases are reference counts, not evaluation criteria.",
     "Tgt/FILpass prefer grouped-daily measurement; STUpass/TRDlist/Entry/Exit come from the signal engine funnel (today_signals funnel block).",
     "ratio_of_prev = count / previous phase; ratio_of_universe = count / Tgt.",
-    "Funnel (Tgt/FILpass/STUpass/TRDlist/Entry) = signal engine funnel (today_signals_YYYYMMDD.json), measured=True。別 source の実測 phase は 保護し、spy_only Tgt の共有 universe は未計測理由を明示する。",
-    "Exit = execution recon (recon_YYYYMMDD.json, ntfy と同一 source): count=fired(exit_submitted), close/protect は fired 分のみ, armed=未送信の提案 / rejected=broker 拒否 / suppressed=送れば確実に拒否されるため未送信 (いずれも別枠)。"
+    "Exit = execution recon (recon_YYYYMMDD.json, ntfy と同一 source): count=fired(exit_submitted), close/protect は fired 分のみ, armed=未送信の提案 / rejected=broker 拒否 / suppressed=送れば確実に拒否されるため未送信 (いずれも別枠)。",
+    "Funnel (Tgt/FILpass/STUpass/TRDlist/Entry) = signal engine funnel (today_signals_YYYYMMDD.json), measured=True。別 source の実測 phase は 保護し、spy_only Tgt の共有 universe は未計測理由を明示する。"
   ],
   "source_signals_run_id": "20260915_060612_1899d2",
   "source_signals_generated_at": "2026-09-15T06:19:55+09:00",
