@@ -72,6 +72,17 @@ def test_expected_time_exits_boundary_equal():
     assert len(due) == 1
 
 
+def test_expected_time_exits_system5_timeout_is_seventh_open():
+    # System5 holds through 6 trading sessions, then exits at the 7th open.
+    # YEXT entered 2026-09-04: 09-15 is 6/6 (not due), 09-16 is 7/6 (due).
+    positions = [_pos("YEXT", "system5", "2026-09-04")]
+    assert _expected_time_exits(positions, "2026-09-15") == []
+    due = _expected_time_exits(positions, "2026-09-16")
+    assert [row["symbol"] for row in due] == ["YEXT"]
+    assert due[0]["holding_days"] == 7
+    assert due[0]["max_holding_days"] == 6
+
+
 def test_expected_time_exits_does_not_count_the_weekend():
     """金曜エントリーが月曜に期限超過扱いされないこと (暦日換算の回帰ガード)。"""
     positions = [_pos("AAA", "system2", "2026-07-10")]  # 金

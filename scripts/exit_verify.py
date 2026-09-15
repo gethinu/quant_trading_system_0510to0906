@@ -105,7 +105,11 @@ def _expected_time_exits(
         hd = compute_holding_days(p.get("entry_date"), today)
         if hd is None:
             continue
-        if hd >= max_hold:
+        # System5 is intentionally different from the generic time-exit rule:
+        # it holds through max_holding_days sessions and exits at the next open.
+        # common/system5_live_exit.py therefore fires timeout at max_hold + 1.
+        due_threshold = max_hold + 1 if system == "system5" else max_hold
+        if hd >= due_threshold:
             due.append(
                 {
                     "symbol": str(p.get("symbol") or "").upper(),
