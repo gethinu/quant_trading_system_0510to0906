@@ -35,7 +35,7 @@ daily_pipeline.ps1 への配線は Phase 2 (別セッションと競合回避の
       # live equity と broker 日次系列の水準差を上場廃止建玉で分解 (残差も隠さない)。
       "equity_basis": {frozen_market_value, frozen_symbols, n_frozen, daily_series_gap,
                        residual_usd, last_daily_equity, last_daily_session},
-      # 当日損益を「実現 / 含み」に分解した唯一の定義 (同一基準のみ)。
+      # 当日損益。大幅変動は position/exit 証拠で sanity check し、矛盾時は fail-closed。
       "pnl_today": {...},
       "realized": {available, measured, stale, all_time, closed_trades, reason, ...},
       "exposure": {long_usd, short_usd, gross_usd, net_usd, gross_pct, net_pct,
@@ -831,6 +831,47 @@ def _realized_for_session(
     return 0.0
 
 
+def _session_closed_intraday_pl(
+    ledger: dict[str, Any] | None, session_date: str | None
+) -> float | None:
+    """Return exact intraday P&L for trades fully contained in the session.
+
+    If any exit belongs to a position opened before this session, its intraday
+    contribution cannot be recovered from full-lifecycle realized P&L alone.
+    Return None rather than guessing.
+    """
+    if not ledger or not session_date:
+        return None
+    if not ((ledger.get("measurement") or {}).get("measured")):
+        return None
+    ledger_date = str(ledger.get("date") or "")
+    if not ledger_date or session_date > ledger_date:
+        return None
+
+    session_realized = _realized_for_session(ledger, session_date)
+    if session_realized is None:
+        return None
+
+    matched = 0
+    total = 0.0
+    for row in ledger.get("closed_trades") or []:
+        if str(row.get("exit_session") or "") != session_date:
+            continue
+        matched += 1
+        if str(row.get("entry_session") or "") != session_date:
+            return None
+        pl = _f(row.get("realized_pl"))
+        if pl is None:
+            return None
+        total += pl
+
+    if matched == 0:
+        return 0.0 if session_realized == 0.0 else None
+    if abs(total - session_realized) > 0.01:
+        return None
+    return round(total, 2)
+
+
 def _realized_block(ledger: dict[str, Any] | None, date_str: str) -> dict[str, Any]:
     """snapshot に載せる realized セクション。台帳が無ければ未計測として返す。"""
     if not ledger:
@@ -1230,6 +1271,8 @@ def build_snapshot(
     long_usd = short_usd = 0.0
     by_system: dict[str, dict[str, Any]] = {}
     unrealized_total = 0.0
+    position_intraday_total = 0.0
+    position_intraday_complete = True
     n_win = n_loss = exit_soon = 0
     biggest_win: dict[str, Any] | None = None
     biggest_loss: dict[str, Any] | None = None
@@ -1358,6 +1401,10 @@ def build_snapshot(
         else:
             short_usd += abs_mv
         unrealized_total += upl
+        if intr is None:
+            position_intraday_complete = False
+        else:
+            position_intraday_total += intr
         if upl > 0:
             n_win += 1
         elif upl < 0:
@@ -1412,12 +1459,18 @@ def build_snapshot(
     session_date = _fetch_session_date(client)
     ledger = _load_exit_ledger(results_dir, date_str)
     session_realized = _realized_for_session(ledger, session_date)
+    session_closed_intraday_pl = _session_closed_intraday_pl(ledger, session_date)
+    position_intraday_pl = (
+        round(position_intraday_total, 2) if position_intraday_complete else None
+    )
 
     session_pnl = resolve_session_pnl(
         equity_now=equity,
         session_date=session_date,
         intraday_by_session=intraday_by_session,
         realized_pl=session_realized,
+        position_intraday_pl=position_intraday_pl,
+        session_closed_intraday_pl=session_closed_intraday_pl,
     )
     pnl_today_abs = session_pnl.total_pl
     pnl_today_pct = session_pnl.total_pl_pct
@@ -1492,7 +1545,7 @@ def build_snapshot(
         "equity_ranges": equity_ranges,
         # live equity と broker 日次系列の水準差を事実で分解したもの。
         "equity_basis": equity_basis,
-        # 当日損益を「実現 / 含み」に分解した唯一の定義。混ぜない。
+        # 当日損益。full-lifecycle realized を total から引いて含みとは呼ばない。
         "pnl_today": session_pnl.to_row(),
         # 決済済みトレードと実現損益 (scripts/build_exit_ledger.py の出力を取り込む)。
         "realized": _realized_block(ledger, date_str),
@@ -1590,7 +1643,8 @@ def main(argv: list[str] | None = None) -> int:
         pnl_desc = (
             f"pnl_today={pnl['total_pl']} ({pnl['total_pl_pct']}%) "
             f"[basis={pnl['basis']} baseline={pnl['baseline_equity']}@{pnl['baseline_session']} "
-            f"realized={pnl['realized_pl']} unrealized_delta={pnl['unrealized_delta']}] "
+            f"realized={pnl['realized_pl']} position_intraday={pnl.get('position_intraday_pl')} "
+            f"consistency={pnl.get('consistency_status')}] "
         )
     else:
         pnl_desc = f"pnl_today=UNMEASURED ({pnl['reason']}) "

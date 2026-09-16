@@ -365,10 +365,20 @@ export interface PnlToday {
   baseline_session: string | null;
   total_pl: number | null;
   total_pl_pct: number | null;
-  /** 確定分。exit 台帳が未計測なら null。 */
+  /** 当日 exit した trade の full-lifecycle 実現損益。exit 台帳が未計測なら null。 */
   realized_pl: number | null;
-  /** total − realized = 保有ポジションの当日値洗い。 */
+  /** 後方互換。full-lifecycle realized は intraday total から差し引けないため新規生成では null。 */
   unrealized_delta: number | null;
+  /** 現在も保有中の broker unrealized_intraday_pl 合計。total との加法分解ではない。 */
+  position_intraday_pl?: number | null;
+  /** Exact intraday P&L for trades opened and closed in this session; carry-over exits => null. */
+  session_closed_intraday_pl?: number | null;
+  /** broker equity 差と現保有 intraday P&L の残差絶対値。 */
+  consistency_gap_abs?: number | null;
+  /** 上記残差に対する fail-closed 許容上限。 */
+  consistency_limit_abs?: number | null;
+  /** 大幅変動の component 突合結果。 */
+  consistency_status?: 'ok' | 'failed' | 'not_required' | 'unmeasured' | string;
   basis: string;
   measured: boolean;
   reason: string | null;

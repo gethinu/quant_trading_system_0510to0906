@@ -1077,6 +1077,14 @@ class SessionPnl:
     basis: str
     measured: bool
     reason: str | None = None
+    # Sum of broker unrealized_intraday_pl for positions still open now.
+    position_intraday_pl: float | None = None
+    # Exact intraday P&L for trades that both entered and exited this session.
+    # If any carry-over exit is present, this stays None: UNKNOWN is not zero/PASS.
+    session_closed_intraday_pl: float | None = None
+    consistency_gap_abs: float | None = None
+    consistency_limit_abs: float | None = None
+    consistency_status: str = "unmeasured"
 
     def to_row(self) -> dict[str, Any]:
         return {
@@ -1087,7 +1095,14 @@ class SessionPnl:
             "total_pl": self.total_pl,
             "total_pl_pct": self.total_pl_pct,
             "realized_pl": self.realized_pl,
+            # 後方互換フィールド。full-lifecycle realized を total から引いても
+            # intraday unrealized にはならないため、新規生成では常に None。
             "unrealized_delta": self.unrealized_delta,
+            "position_intraday_pl": self.position_intraday_pl,
+            "session_closed_intraday_pl": self.session_closed_intraday_pl,
+            "consistency_gap_abs": self.consistency_gap_abs,
+            "consistency_limit_abs": self.consistency_limit_abs,
+            "consistency_status": self.consistency_status,
             "basis": self.basis,
             "measured": self.measured,
             "reason": self.reason,
@@ -1116,11 +1131,20 @@ def resolve_session_pnl(
     session_date: str | None,
     intraday_by_session: Mapping[str, float],
     realized_pl: float | None = None,
+    position_intraday_pl: float | None = None,
+    session_closed_intraday_pl: float | None = None,
 ) -> SessionPnl:
-    """当日損益を **同一基準** で確定させる。出せない時は数字を出さない。
+    """Measure session P&L and fail closed on large, unverified moves.
 
-    basis は常に ``"prev_session_intraday"`` (= 前セッションの intraday 終値)。
-    ``last_equity`` / daily-close 系列は基準が違うので一切使わない。
+    total uses current equity minus the previous session close from the same
+    intraday portfolio-history basis. For moves above 1% of equity (minimum
+    $250), require independent intraday component evidence. A trade carried
+    from a prior session and closed today has no exact intraday P&L after it
+    disappears from broker positions; that component is UNKNOWN, so the result
+    is unmeasured rather than guessed.
+
+    realized_pl is full-lifecycle realized P&L for trades exiting today. It must
+    not be subtracted from intraday total and labeled as unrealized P&L.
     """
     unavailable = SessionPnl(
         session_date=session_date,
@@ -1133,27 +1157,94 @@ def resolve_session_pnl(
         unrealized_delta=None,
         basis="unavailable",
         measured=False,
+        position_intraday_pl=position_intraday_pl,
+        session_closed_intraday_pl=session_closed_intraday_pl,
+        consistency_status="unmeasured",
     )
 
     if equity_now is None or equity_now <= 0:
-        unavailable.reason = "equity_now が取得できない"
+        unavailable.reason = "equity_now unavailable"
         return unavailable
     if not session_date:
-        unavailable.reason = "現セッション日付が確定できない (broker clock 未取得)"
+        unavailable.reason = "session date unavailable (broker clock missing)"
         return unavailable
     if not intraday_by_session:
-        unavailable.reason = "intraday equity 系列が空 (portfolio-history 取得失敗)"
+        unavailable.reason = "intraday equity history unavailable"
         return unavailable
 
     baseline_session, baseline = pick_prev_session_close(
         intraday_by_session, session_date
     )
     if baseline is None or baseline <= 0:
-        unavailable.reason = f"同一基準の前セッション終値が無い (現セッション {session_date} より前の intraday point 不在)"
+        unavailable.reason = (
+            f"previous-session intraday close unavailable before {session_date}"
+        )
         return unavailable
 
     total = equity_now - baseline
-    realized = realized_pl
+    tolerance = max(250.0, abs(equity_now) * 0.01)
+    consistency_gap: float | None = None
+    consistency_limit: float | None = None
+    consistency_status = "not_required"
+
+    if abs(total) > tolerance:
+        if position_intraday_pl is None or session_closed_intraday_pl is None:
+            return SessionPnl(
+                session_date=session_date,
+                equity_now=round(equity_now, 2),
+                baseline_equity=round(baseline, 2),
+                baseline_session=baseline_session,
+                total_pl=None,
+                total_pl_pct=None,
+                realized_pl=round(realized_pl, 2) if realized_pl is not None else None,
+                unrealized_delta=None,
+                basis="unavailable",
+                measured=False,
+                reason=(
+                    "large session P&L cannot be fully reconciled: open-position "
+                    "or closed-trade intraday component is UNKNOWN; fail-closed"
+                ),
+                position_intraday_pl=(
+                    round(position_intraday_pl, 2)
+                    if position_intraday_pl is not None
+                    else None
+                ),
+                session_closed_intraday_pl=(
+                    round(session_closed_intraday_pl, 2)
+                    if session_closed_intraday_pl is not None
+                    else None
+                ),
+                consistency_status="unmeasured",
+            )
+
+        observed_components = position_intraday_pl + session_closed_intraday_pl
+        consistency_gap = abs(total - observed_components)
+        consistency_limit = tolerance
+        if consistency_gap > consistency_limit:
+            return SessionPnl(
+                session_date=session_date,
+                equity_now=round(equity_now, 2),
+                baseline_equity=round(baseline, 2),
+                baseline_session=baseline_session,
+                total_pl=None,
+                total_pl_pct=None,
+                realized_pl=round(realized_pl, 2) if realized_pl is not None else None,
+                unrealized_delta=None,
+                basis="unavailable",
+                measured=False,
+                reason=(
+                    "session P&L reconciliation failed: residual "
+                    f"${consistency_gap:,.2f} exceeds ${consistency_limit:,.2f}; "
+                    "accounting-basis mismatch or unobserved component cannot be ruled out"
+                ),
+                position_intraday_pl=round(position_intraday_pl, 2),
+                session_closed_intraday_pl=round(session_closed_intraday_pl, 2),
+                consistency_gap_abs=round(consistency_gap, 2),
+                consistency_limit_abs=round(consistency_limit, 2),
+                consistency_status="failed",
+            )
+        consistency_status = "ok"
+
     return SessionPnl(
         session_date=session_date,
         equity_now=round(equity_now, 2),
@@ -1161,8 +1252,23 @@ def resolve_session_pnl(
         baseline_session=baseline_session,
         total_pl=round(total, 2),
         total_pl_pct=round(total / baseline * 100.0, 3),
-        realized_pl=round(realized, 2) if realized is not None else None,
-        unrealized_delta=round(total - realized, 2) if realized is not None else None,
+        realized_pl=round(realized_pl, 2) if realized_pl is not None else None,
+        unrealized_delta=None,
         basis="prev_session_intraday",
         measured=True,
+        position_intraday_pl=(
+            round(position_intraday_pl, 2) if position_intraday_pl is not None else None
+        ),
+        session_closed_intraday_pl=(
+            round(session_closed_intraday_pl, 2)
+            if session_closed_intraday_pl is not None
+            else None
+        ),
+        consistency_gap_abs=(
+            round(consistency_gap, 2) if consistency_gap is not None else None
+        ),
+        consistency_limit_abs=(
+            round(consistency_limit, 2) if consistency_limit is not None else None
+        ),
+        consistency_status=consistency_status,
     )
