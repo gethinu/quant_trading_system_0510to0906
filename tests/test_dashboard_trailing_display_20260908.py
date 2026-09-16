@@ -69,6 +69,23 @@ def test_non_trailing_stops_keep_canonical_execution_math():
     assert stop is not None
 
 
+
+def test_non_trailing_estimator_does_not_recurse_while_wrapper_is_installed():
+    """build_snapshot temporarily installs the wrapper; delegation must stay on the original."""
+    rules = SYSTEM_TRADE_RULES["system3"]
+    original = ex._legacy._estimate_stop_target
+    ex._legacy._estimate_stop_target = ex._estimate_stop_target
+    try:
+        stop, _ = ex._estimate_stop_target(
+            side="long",
+            avg_entry=100.0,
+            rules=rules,
+            atr={int(rules.stop_atr_period): 2.0},
+        )
+    finally:
+        ex._legacy._estimate_stop_target = original
+    assert stop is not None
+
 def test_dashboard_surfaces_authoritative_protection_states():
     text = COMPONENT.read_text(encoding="utf-8")
     assert "trail ${pct} ✓ broker · stop ${stop}" in text

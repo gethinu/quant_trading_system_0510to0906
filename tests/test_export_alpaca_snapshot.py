@@ -7,6 +7,7 @@ live URL 混入は tests/test_alpaca_no_live_url.py が別途 global scan で守
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -441,6 +442,59 @@ def test_realized_for_session_is_none_when_unmeasured_or_absent():
     assert ex._realized_for_session(_ledger(), None) is None
 
 
+def test_session_closed_intraday_pl_uses_same_session_realized_exactly():
+    ledger = _ledger(
+        date="2026-09-16",
+        by_day=[{"t": "2026-09-16", "realized_pl": -20.0}],
+    )
+    ledger["closed_trades"] = [
+        {
+            "symbol": "AAA",
+            "entry_session": "2026-09-16",
+            "exit_session": "2026-09-16",
+            "realized_pl": -30.0,
+        },
+        {
+            "symbol": "BBB",
+            "entry_session": "2026-09-16",
+            "exit_session": "2026-09-16",
+            "realized_pl": 10.0,
+        },
+    ]
+    assert ex._session_closed_intraday_pl(ledger, "2026-09-16") == -20.0
+
+
+def test_session_closed_intraday_pl_is_unknown_for_carryover_exit():
+    ledger = _ledger(
+        date="2026-09-16",
+        by_day=[{"t": "2026-09-16", "realized_pl": -34.87}],
+    )
+    ledger["closed_trades"] = [
+        {
+            "symbol": "DAIC",
+            "entry_session": "2026-09-15",
+            "exit_session": "2026-09-16",
+            "realized_pl": 8.56,
+        }
+    ]
+    assert ex._session_closed_intraday_pl(ledger, "2026-09-16") is None
+
+
+def test_session_closed_intraday_pl_zero_only_when_ledger_proves_no_exit():
+    ledger = _ledger(date="2026-09-16", by_day=[])
+    ledger["closed_trades"] = []
+    assert ex._session_closed_intraday_pl(ledger, "2026-09-16") == 0.0
+
+
+def test_session_closed_intraday_pl_refuses_missing_trade_rows():
+    ledger = _ledger(
+        date="2026-09-16",
+        by_day=[{"t": "2026-09-16", "realized_pl": -34.87}],
+    )
+    ledger["closed_trades"] = []
+    assert ex._session_closed_intraday_pl(ledger, "2026-09-16") is None
+
+
 # --- ledger reconciliation (pure) -----------------------------------------
 def test_ledger_recon_all_consistent():
     """position が台帳ネットと一致すれば desync_free、mismatch 0。"""
@@ -563,3 +617,20 @@ def test_exit_execution_never_uses_a_stale_day(tmp_path):
     assert health["measured"] is False
     assert health["execution_health"] == "unmeasured"
     assert by_symbol == {}
+
+
+def test_dashboard_never_labels_total_minus_realized_as_intraday_unrealized():
+    """UI must present broker component evidence without inventing an additive split."""
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "apps"
+        / "dashboards"
+        / "alpaca-next"
+        / "components"
+        / "AlpacaSectionLegacy.tsx"
+    ).read_text(encoding="utf-8")
+    assert "含みの当日変動" not in source
+    assert "総額 = 実現 (決済で確定) + 含みの当日変動" not in source
+    assert "現保有の当日値動き" in source
+    assert "consistency_status" in source
+    assert "当日損益 — 計測不能" in source

@@ -34,6 +34,7 @@ from common.trade_management import SYSTEM_TRADE_RULES
 from scripts import export_alpaca_snapshot_legacy as _legacy
 
 _LEGACY_BUILD_SNAPSHOT = _legacy.build_snapshot
+_LEGACY_ESTIMATE_STOP_TARGET = _legacy._estimate_stop_target
 ROOT = _legacy.ROOT
 PAPER_BASE = _legacy.PAPER_BASE
 SCHEMA = _legacy.SCHEMA
@@ -73,7 +74,7 @@ def _is_fractional(qty: Any) -> bool:
 def _target_only(
     *, side: str, avg_entry: float, rules: Any, atr: dict[int, float]
 ) -> float | None:
-    _legacy_stop, target = _legacy._estimate_stop_target(
+    _legacy_stop, target = _LEGACY_ESTIMATE_STOP_TARGET(
         side=side, avg_entry=avg_entry, rules=rules, atr=atr
     )
     return target
@@ -96,7 +97,7 @@ def _estimate_stop_target(
     compatibility only and is never used to fabricate a trailing threshold.
     """
     if not getattr(rules, "use_trailing_stop", False):
-        return _legacy._estimate_stop_target(
+        return _LEGACY_ESTIMATE_STOP_TARGET(
             side=side, avg_entry=avg_entry, rules=rules, atr=atr
         )
 

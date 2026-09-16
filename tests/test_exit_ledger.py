@@ -403,6 +403,9 @@ def test_session_pnl_uses_intraday_baseline_not_last_equity():
         session_date="2026-07-20",
         intraday_by_session=intraday,
         realized_pl=-2333.06,
+        # 大幅変動なので broker position / exit ledger の検証証拠も与える。
+        position_intraday_pl=-1200.0,
+        session_closed_intraday_pl=-216.44,
     )
 
     assert pnl.measured is True
@@ -415,7 +418,8 @@ def test_session_pnl_uses_intraday_baseline_not_last_equity():
     assert pnl.total_pl < 0
 
 
-def test_session_pnl_splits_realized_and_unrealized():
+def test_session_pnl_does_not_fabricate_unrealized_from_total_minus_realized():
+    """Exit realized is full-lifecycle P&L, so total-realized is not intraday unrealized."""
     pnl = resolve_session_pnl(
         equity_now=1100.0,
         session_date="2026-07-20",
@@ -424,7 +428,80 @@ def test_session_pnl_splits_realized_and_unrealized():
     )
     assert pnl.total_pl == 100.0
     assert pnl.realized_pl == 40.0
-    assert pnl.unrealized_delta == 60.0  # 実現と含みを混ぜない
+    assert pnl.unrealized_delta is None
+
+
+def test_session_pnl_fail_closes_20260916_ghost_equity_gap():
+    """Real 2026-09-16 shape: carry-over exits make the large move unmeasurable."""
+    pnl = resolve_session_pnl(
+        equity_now=93426.93,
+        session_date="2026-09-16",
+        intraday_by_session={"2026-09-15": 97519.21},
+        realized_pl=-34.87,
+        position_intraday_pl=-43.02,
+        session_closed_intraday_pl=None,
+    )
+    assert pnl.measured is False
+    assert pnl.total_pl is None
+    assert pnl.total_pl_pct is None
+    assert pnl.consistency_status == "unmeasured"
+    assert pnl.consistency_gap_abs is None
+    assert pnl.reason and "UNKNOWN" in pnl.reason
+
+
+def test_session_pnl_large_move_fails_when_complete_components_disagree():
+    pnl = resolve_session_pnl(
+        equity_now=93426.93,
+        session_date="2026-09-16",
+        intraday_by_session={"2026-09-15": 97519.21},
+        realized_pl=0.0,
+        position_intraday_pl=-43.02,
+        session_closed_intraday_pl=0.0,
+    )
+    assert pnl.measured is False
+    assert pnl.total_pl is None
+    assert pnl.consistency_status == "failed"
+    assert pnl.consistency_gap_abs == pytest.approx(4049.26, abs=0.01)
+    assert pnl.consistency_limit_abs is not None
+    assert pnl.consistency_gap_abs > pnl.consistency_limit_abs
+
+
+def test_session_pnl_large_move_passes_when_position_evidence_explains_it():
+    pnl = resolve_session_pnl(
+        equity_now=95000.0,
+        session_date="2026-09-16",
+        intraday_by_session={"2026-09-15": 100000.0},
+        realized_pl=-200.0,
+        position_intraday_pl=-4800.0,
+        session_closed_intraday_pl=-200.0,
+    )
+    assert pnl.measured is True
+    assert pnl.total_pl == -5000.0
+    assert pnl.consistency_status == "ok"
+
+
+def test_session_pnl_large_move_without_component_evidence_fails_closed():
+    pnl = resolve_session_pnl(
+        equity_now=95000.0,
+        session_date="2026-09-16",
+        intraday_by_session={"2026-09-15": 100000.0},
+        realized_pl=None,
+    )
+    assert pnl.measured is False
+    assert pnl.total_pl is None
+    assert pnl.consistency_status == "unmeasured"
+    assert pnl.reason and "UNKNOWN" in pnl.reason
+
+
+def test_session_pnl_small_move_does_not_require_component_reconciliation():
+    pnl = resolve_session_pnl(
+        equity_now=99500.0,
+        session_date="2026-09-16",
+        intraday_by_session={"2026-09-15": 100000.0},
+    )
+    assert pnl.measured is True
+    assert pnl.total_pl == -500.0
+    assert pnl.consistency_status == "not_required"
 
 
 def test_session_pnl_leaves_unrealized_none_when_realized_unmeasured():
@@ -444,9 +521,9 @@ def test_session_pnl_leaves_unrealized_none_when_realized_unmeasured():
     ("kwargs", "needle"),
     [
         ({"equity_now": None}, "equity_now"),
-        ({"session_date": None}, "セッション"),
+        ({"session_date": None}, "session date"),
         ({"intraday_by_session": {}}, "intraday"),
-        ({"intraday_by_session": {"2026-07-20": 1.0}}, "前セッション"),
+        ({"intraday_by_session": {"2026-07-20": 1.0}}, "previous-session"),
     ],
 )
 def test_session_pnl_refuses_to_guess(kwargs, needle):

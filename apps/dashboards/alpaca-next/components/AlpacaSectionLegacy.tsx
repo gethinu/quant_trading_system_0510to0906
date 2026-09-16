@@ -888,34 +888,60 @@ function PositionsTable({ positions }: { positions: AlpacaPosition[] }) {
 }
 
 // --------------------------------------------------------------------------
-// 当日損益 — 定義は 1 つだけ:
-//   総額 = 現在 equity − 前セッション終値 equity (どちらも intraday 系列 = 同一基準)
-//   総額 = 実現 (決済で確定) + 含みの当日変動
-// 基準が取れない時は「未計測」と出す。数字は出さない。注釈で誤魔化さない。
+// 当日損益 — baseline は intraday 系列同士だけで比較する。
+// ただし broker portfolio-history 自体が会計基準を跨いで跳ぶ事故があるため、
+// 大幅変動は現保有 position の intraday P&L + exit 台帳で sanity check する。
+// realized_pl は「当日 exit した trade の full-lifecycle P&L」なので、
+// total - realized を「含み」と呼ばない。証拠不足/不整合は fail-closed で数字を出さない。
 // --------------------------------------------------------------------------
 function TodayPnl({ snap }: { snap: AlpacaSnapshot }) {
   const p = snap.pnl_today ?? null;
+  const evidence = p ? (
+    <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] tabular-nums text-muted">
+      {p.position_intraday_pl != null ? (
+        <span>
+          現保有の当日値動き{' '}
+          <span className={pnlText(p.position_intraday_pl)}>
+            {fmtSignedUsd(p.position_intraday_pl)}
+          </span>
+        </span>
+      ) : null}
+      {p.realized_pl != null ? (
+        <span>
+          当日決済トレード実現{' '}
+          <span className={pnlText(p.realized_pl)}>{fmtSignedUsd(p.realized_pl)}</span>
+        </span>
+      ) : null}
+      {p.consistency_status === 'ok' ? (
+        <span className="text-ok/80">大幅変動の内訳 sanity check 済み</span>
+      ) : null}
+    </div>
+  ) : null;
 
   if (!p || !p.measured || p.total_pl == null) {
     const reason =
       p?.reason ??
       'この snapshot は当日損益の基準情報を持ちません（旧 exporter が生成）。';
+    const summary =
+      p?.consistency_status === 'failed'
+        ? 'broker P&L の内訳突合に失敗したため数字を出しません'
+        : p?.consistency_status === 'unmeasured'
+          ? '大幅変動を検証する証拠が不足しているため数字を出しません'
+          : '損益基準を検証できないため数字を出しません';
     return (
       <div className="flex flex-col gap-1">
         <div className="flex items-center gap-2 text-sm">
-          <span className="px-1.5 py-0.5 rounded bg-white/[0.06] text-muted font-medium">
-            当日損益 — 未計測
+          <span className="px-1.5 py-0.5 rounded bg-warn/15 text-warn font-medium">
+            当日損益 — 計測不能
           </span>
-          <span className="text-muted text-[11px]">
-            同一基準の前セッション終値が取れないため数字を出しません
-          </span>
+          <span className="text-muted text-[11px]">{summary}</span>
         </div>
         <div className="text-[11px] text-muted/80 leading-relaxed">{reason}</div>
+        {evidence}
       </div>
     );
   }
 
-  const hasSplit = p.realized_pl != null && p.unrealized_delta != null;
   return (
     <div className="flex flex-col gap-1">
       <div className="flex flex-wrap items-center gap-2 text-sm tabular-nums">
@@ -929,7 +955,7 @@ function TodayPnl({ snap }: { snap: AlpacaSnapshot }) {
           )} − 前セッション(${p.baseline_session}) 終値 ${fmtUsd(
             p.baseline_equity,
             0,
-          )}。どちらも intraday 系列 (同一基準)。`}
+          )}。大幅変動時は position/exit 台帳でも整合確認。`}
         >
           {fmtSignedUsd(p.total_pl)} ({fmtPct(p.total_pl_pct)})
         </span>
@@ -940,33 +966,32 @@ function TodayPnl({ snap }: { snap: AlpacaSnapshot }) {
           </span>
         </span>
       </div>
-      {hasSplit ? (
-        <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] tabular-nums text-muted">
-          <span>
-            実現{' '}
-            <span className={pnlText(p.realized_pl)}>{fmtSignedUsd(p.realized_pl)}</span>
-          </span>
-          <span className="text-muted/40">+</span>
-          <span>
-            含みの当日変動{' '}
-            <span className={pnlText(p.unrealized_delta)}>
-              {fmtSignedUsd(p.unrealized_delta)}
-            </span>
-          </span>
-        </div>
-      ) : (
-        <div className="text-[11px] text-muted/80">
-          実現／含みの内訳は未計測（exit 台帳がこのセッションに届いていません）。
-        </div>
-      )}
+      {evidence}
     </div>
   );
 }
 
-// live equity と broker 日次系列の水準差を事実で説明する 1 行。
+// live equity / broker history の水準差。通常はノイズを増やさず、
+// P&L consistency が fail した時または上場廃止建玉がある時だけ開示する。
 function EquityBasisNote({ snap }: { snap: AlpacaSnapshot }) {
   const b = snap.equity_basis ?? null;
-  if (!b || b.n_frozen === 0 || !b.frozen_market_value) return null;
+  if (!b) return null;
+  const consistencyGuarded =
+    snap.pnl_today?.consistency_status === 'failed' ||
+    snap.pnl_today?.consistency_status === 'unmeasured';
+  const hasFrozen = b.n_frozen > 0 && Boolean(b.frozen_market_value);
+  if (!consistencyGuarded && !hasFrozen) return null;
+
+  if (consistencyGuarded && !hasFrozen) {
+    return (
+      <div className="mt-2 text-[11px] leading-relaxed text-warn">
+        broker の equity 系列と live equity に水準差 {fmtUsd(b.daily_series_gap, 0)}、
+        説明できない残差 {fmtUsd(b.residual_usd, 0)} を検出しました。これは診断値であり、
+        当日損益としては採用していません。
+      </div>
+    );
+  }
+
   return (
     <div className="mt-2 text-[11px] leading-relaxed text-muted">
       equity {fmtUsd(snap.account.equity, 0)} のうち{' '}
@@ -975,9 +1000,8 @@ function EquityBasisNote({ snap }: { snap: AlpacaSnapshot }) {
       エクイティ系列と <code className="text-cardfg">last_equity</code>（
       {fmtUsd(b.last_daily_equity, 0)} @ {b.last_daily_session ?? '—'}）はこの分を計上
       しないため、live equity とは水準が {fmtUsd(b.daily_series_gap, 0)} ずれます。うち
-      上場廃止分で説明できない残り{fmtUsd(b.residual_usd, 0)}は、日次系列の最終点（
-      {b.last_daily_session ?? '—'}）以降の値動きです。当日損益はこのずれを避けるため
-      intraday 系列同士でのみ計算しています。
+      上場廃止分で説明できない残り {fmtUsd(b.residual_usd, 0)} は診断値として保持し、
+      当日損益の数値には直接使いません。
     </div>
   );
 }
