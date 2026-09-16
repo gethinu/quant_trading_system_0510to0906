@@ -871,6 +871,7 @@ def _session_closed_intraday_pl(
         return None
     return round(total, 2)
 
+
 def _realized_block(ledger: dict[str, Any] | None, date_str: str) -> dict[str, Any]:
     """snapshot に載せる realized セクション。台帳が無ければ未計測として返す。"""
     if not ledger:
