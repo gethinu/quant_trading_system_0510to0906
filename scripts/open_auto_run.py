@@ -390,6 +390,7 @@ class Runner:
 
         try:
             import pandas as pd
+
             from common.cache_manager import CacheManager
             from common.utils_spy import get_latest_nyse_trading_day
             from config.settings import get_settings
@@ -530,9 +531,7 @@ class Runner:
                 self.record["signal_generation_status"] = "failed"
                 self.record["signal_generation_exit_code"] = code
                 self.record["entry_skip_reason"] = f"signal_generation_failed:{code}"
-                self.log(
-                    f"[signals] FAIL exit={code} -> entry SKIP; exit は継続"
-                )
+                self.log(f"[signals] FAIL exit={code} -> entry SKIP; exit は継続")
                 self._ntfy_warn(
                     f"OpenAutoRun entry SKIP {self.date}",
                     f"signal generation failed (exit={code}). Existing same-date JSON "
