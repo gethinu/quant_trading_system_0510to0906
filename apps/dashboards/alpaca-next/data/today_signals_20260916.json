@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "date": "2026-09-16",
-  "generated_at": "2026-09-16T06:20:23+09:00",
+  "generated_at": "2026-09-16T14:32:54+09:00",
   "provider": "polygon",
   "systems": {
     "sys1": {
@@ -9,65 +9,65 @@
         {
           "symbol": "ASST",
           "side": "BUY",
-          "entry_price": 29.03,
+          "entry_price": 27.57,
           "limit_price": null,
-          "weight": 0.0393,
+          "weight": 0.033,
           "rank": 1,
-          "reason": "ROC200が1位（全1298銘柄中）のため"
+          "reason": "ROC200が1位（全1296銘柄中）のため"
         },
         {
           "symbol": "BNY",
           "side": "BUY",
-          "entry_price": 157.66,
+          "entry_price": 154.67,
           "limit_price": null,
-          "weight": 0.065,
+          "weight": 0.0589,
           "rank": 2,
-          "reason": "ROC200が2位（全1298銘柄中）のため"
+          "reason": "ROC200が2位（全1296銘柄中）のため"
+        },
+        {
+          "symbol": "VEEA",
+          "side": "BUY",
+          "entry_price": 5.71,
+          "limit_price": null,
+          "weight": 0.0292,
+          "rank": 3,
+          "reason": "ROC200が3位（全1296銘柄中）のため"
         },
         {
           "symbol": "SLS",
           "side": "BUY",
-          "entry_price": 11.72,
+          "entry_price": 11.29,
           "limit_price": null,
-          "weight": 0.0235,
-          "rank": 3,
-          "reason": "ROC200が3位（全1298銘柄中）のため"
-        },
-        {
-          "symbol": "FTFT",
-          "side": "BUY",
-          "entry_price": 8.04,
-          "limit_price": null,
-          "weight": 0.0261,
+          "weight": 0.0203,
           "rank": 4,
-          "reason": "ROC200が4位（全1298銘柄中）のため"
+          "reason": "ROC200が4位（全1296銘柄中）のため"
         },
         {
           "symbol": "AXTI",
           "side": "BUY",
-          "entry_price": 57.06,
+          "entry_price": 57.7,
           "limit_price": null,
-          "weight": 0.0168,
+          "weight": 0.0157,
           "rank": 5,
-          "reason": "ROC200が6位（全1298銘柄中）のため"
+          "reason": "ROC200が6位（全1296銘柄中）のため"
         },
         {
           "symbol": "MRNA",
           "side": "BUY",
-          "entry_price": 146.69,
+          "entry_price": 143.77,
           "limit_price": null,
-          "weight": 0.0173,
+          "weight": 0.0156,
           "rank": 6,
-          "reason": "ROC200が7位（全1298銘柄中）のため"
+          "reason": "ROC200が7位（全1296銘柄中）のため"
         }
       ],
       "n_candidates_input": 10,
       "n_signals_output": 6,
       "gate_survival_ratio": 0.6,
       "funnel": {
-        "target": 5249,
-        "filter_pass": 1329,
-        "setup_pass": 509,
+        "target": 5259,
+        "filter_pass": 1328,
+        "setup_pass": 489,
         "candidate_count": 10,
         "entry_count": 6,
         "exit_count": null
@@ -76,86 +76,86 @@
     "sys2": {
       "signals": [
         {
-          "symbol": "ASST",
+          "symbol": "ECO",
           "side": "SELL",
-          "entry_price": 30.19,
-          "limit_price": 30.19,
-          "weight": 0.1067,
+          "entry_price": 86.04,
+          "limit_price": 86.04,
+          "weight": 0.1076,
           "rank": 15,
           "reason": "モメンタムが強く過熱のため"
         },
         {
-          "symbol": "ECO",
+          "symbol": "ATRC",
           "side": "SELL",
-          "entry_price": 82.91,
-          "limit_price": 82.91,
-          "weight": 0.1026,
+          "entry_price": 58.47,
+          "limit_price": 58.47,
+          "weight": 0.0954,
           "rank": 16,
-          "reason": "モメンタムが強く過熱のため"
-        },
-        {
-          "symbol": "RBLX",
-          "side": "SELL",
-          "entry_price": 53.34,
-          "limit_price": 53.34,
-          "weight": 0.0943,
-          "rank": 17,
           "reason": "モメンタムが強く過熱のため"
         },
         {
           "symbol": "INSP",
           "side": "SELL",
-          "entry_price": 77.29,
-          "limit_price": 77.29,
-          "weight": 0.0865,
+          "entry_price": 77.58,
+          "limit_price": 77.58,
+          "weight": 0.0844,
+          "rank": 17,
+          "reason": "モメンタムが強く過熱のため"
+        },
+        {
+          "symbol": "TXG",
+          "side": "SELL",
+          "entry_price": 77.37,
+          "limit_price": 77.37,
+          "weight": 0.0799,
           "rank": 18,
           "reason": "モメンタムが強く過熱のため"
         },
         {
-          "symbol": "NUTX",
+          "symbol": "ATEN",
           "side": "SELL",
-          "entry_price": 225.7,
-          "limit_price": 225.7,
-          "weight": 0.0665,
+          "entry_price": 27.82,
+          "limit_price": 27.82,
+          "weight": 0.0711,
           "rank": 19,
           "reason": "モメンタムが強く過熱のため"
         },
         {
-          "symbol": "DJCO",
+          "symbol": "NAT",
           "side": "SELL",
-          "entry_price": 704.13,
-          "limit_price": 704.13,
-          "weight": 0.0415,
+          "entry_price": 8.16,
+          "limit_price": 8.16,
+          "weight": 0.0648,
           "rank": 20,
           "reason": "モメンタムが強く過熱のため"
         },
         {
-          "symbol": "FSLY",
+          "symbol": "ADPT",
           "side": "SELL",
-          "entry_price": 25.85,
-          "limit_price": 25.85,
-          "weight": 0.067,
+          "entry_price": 27.75,
+          "limit_price": 27.75,
+          "weight": 0.0573,
           "rank": 21,
           "reason": "モメンタムが強く過熱のため"
         },
         {
-          "symbol": "BBY",
+          "symbol": "SM",
           "side": "SELL",
-          "entry_price": 98.62,
-          "limit_price": 98.62,
-          "weight": 0.0581,
+          "entry_price": 42.94,
+          "limit_price": 42.94,
+          "weight": 0.0514,
           "rank": 22,
           "reason": "モメンタムが強く過熱のため"
         }
       ],
-      "n_candidates_input": 8,
+      "n_candidates_input": 10,
       "n_signals_output": 8,
-      "gate_survival_ratio": 1.0,
+      "gate_survival_ratio": 0.8,
       "funnel": {
-        "target": 5249,
-        "filter_pass": 1315,
-        "setup_pass": 8,
-        "candidate_count": 8,
+        "target": 5259,
+        "filter_pass": 1320,
+        "setup_pass": 15,
+        "candidate_count": 10,
         "entry_count": 8,
         "exit_count": null
       }
@@ -163,51 +163,60 @@
     "sys3": {
       "signals": [
         {
-          "symbol": "SGLY",
+          "symbol": "SWVL",
           "side": "BUY",
-          "entry_price": 1.26,
-          "limit_price": 1.26,
-          "weight": 0.0322,
+          "entry_price": 4.67,
+          "limit_price": 4.67,
+          "weight": 0.0175,
           "rank": 7,
-          "reason": "3日下落率が1位（全813銘柄中）のため"
+          "reason": "3日下落率が1位（全831銘柄中）のため"
         },
         {
-          "symbol": "SUNE",
+          "symbol": "DBGI",
           "side": "BUY",
-          "entry_price": 3.01,
-          "limit_price": 3.01,
-          "weight": 0.0301,
+          "entry_price": 4.19,
+          "limit_price": 4.19,
+          "weight": 0.0164,
           "rank": 8,
-          "reason": "3日下落率が2位（全813銘柄中）のため"
+          "reason": "3日下落率が2位（全831銘柄中）のため"
+        },
+        {
+          "symbol": "SGLY",
+          "side": "BUY",
+          "entry_price": 1.23,
+          "limit_price": 1.23,
+          "weight": 0.0276,
+          "rank": 9,
+          "reason": "3日下落率が3位（全831銘柄中）のため"
         },
         {
           "symbol": "AEHL",
           "side": "BUY",
-          "entry_price": 5.65,
-          "limit_price": 5.65,
-          "weight": 0.0146,
-          "rank": 9,
-          "reason": "3日下落率が4位（全813銘柄中）のため"
+          "entry_price": 4.8,
+          "limit_price": 4.8,
+          "weight": 0.0138,
+          "rank": 10,
+          "reason": "3日下落率が4位（全831銘柄中）のため"
         },
         {
-          "symbol": "DAIC",
+          "symbol": "GCTK",
           "side": "BUY",
-          "entry_price": 2.12,
-          "limit_price": 2.12,
-          "weight": 0.0159,
-          "rank": 10,
-          "reason": "3日下落率が7位（全813銘柄中）のため"
+          "entry_price": 2.11,
+          "limit_price": 2.11,
+          "weight": 0.0248,
+          "rank": 11,
+          "reason": "3日下落率が6位（全831銘柄中）のため"
         }
       ],
       "n_candidates_input": 10,
-      "n_signals_output": 4,
-      "gate_survival_ratio": 0.4,
+      "n_signals_output": 5,
+      "gate_survival_ratio": 0.5,
       "funnel": {
-        "target": 5249,
-        "filter_pass": 816,
-        "setup_pass": 22,
+        "target": 5259,
+        "filter_pass": 831,
+        "setup_pass": 21,
         "candidate_count": 10,
-        "entry_count": 4,
+        "entry_count": 5,
         "exit_count": null
       }
     },
@@ -217,9 +226,9 @@
       "n_signals_output": 0,
       "gate_survival_ratio": 0.0,
       "funnel": {
-        "target": 5249,
-        "filter_pass": 493,
-        "setup_pass": 290,
+        "target": 5259,
+        "filter_pass": 492,
+        "setup_pass": 275,
         "candidate_count": 10,
         "entry_count": 0,
         "exit_count": null
@@ -230,49 +239,40 @@
         {
           "symbol": "XHLD",
           "side": "BUY",
-          "entry_price": 8.65,
-          "limit_price": 8.65,
-          "weight": 0.0234,
-          "rank": 11,
-          "reason": "ADXが強く、反発期待のため"
-        },
-        {
-          "symbol": "SWVL",
-          "side": "BUY",
-          "entry_price": 5.34,
-          "limit_price": 5.34,
-          "weight": 0.0186,
+          "entry_price": 9.15,
+          "limit_price": 9.15,
+          "weight": 0.0224,
           "rank": 12,
           "reason": "ADXが強く、反発期待のため"
         },
         {
-          "symbol": "DFDV",
+          "symbol": "VMAR",
           "side": "BUY",
-          "entry_price": 5.06,
-          "limit_price": 5.06,
-          "weight": 0.0408,
+          "entry_price": 7.42,
+          "limit_price": 7.42,
+          "weight": 0.0351,
           "rank": 13,
           "reason": "ADXが強く、反発期待のため"
         },
         {
-          "symbol": "BIAF",
+          "symbol": "BLSH",
           "side": "BUY",
-          "entry_price": 7.69,
-          "limit_price": 7.69,
-          "weight": 0.0131,
+          "entry_price": 34.4,
+          "limit_price": 34.4,
+          "weight": 0.058,
           "rank": 14,
           "reason": "ADXが強く、反発期待のため"
         }
       ],
-      "n_candidates_input": 5,
-      "n_signals_output": 4,
-      "gate_survival_ratio": 0.8,
+      "n_candidates_input": 4,
+      "n_signals_output": 3,
+      "gate_survival_ratio": 0.75,
       "funnel": {
-        "target": 5249,
-        "filter_pass": 1063,
-        "setup_pass": 5,
-        "candidate_count": 5,
-        "entry_count": 4,
+        "target": 5259,
+        "filter_pass": 1080,
+        "setup_pass": 4,
+        "candidate_count": 4,
+        "entry_count": 3,
         "exit_count": null
       }
     },
@@ -282,8 +282,8 @@
       "n_signals_output": 0,
       "gate_survival_ratio": 0.0,
       "funnel": {
-        "target": 5249,
-        "filter_pass": 1159,
+        "target": 5259,
+        "filter_pass": 1161,
         "setup_pass": 0,
         "candidate_count": 0,
         "entry_count": 0,
@@ -307,9 +307,9 @@
   },
   "portfolio": {
     "total_signals": 22,
-    "total_notional_usd": 16973.69,
+    "total_notional_usd": 18393.06,
     "hedge": null,
-    "universe_target": 5249,
+    "universe_target": 5259,
     "caps": {
       "applied": true,
       "held": {
@@ -326,9 +326,9 @@
         "max_total": 70,
         "max_long": 40,
         "max_short": 30,
-        "gross_cap_usd": 97447.61,
-        "net_cap_usd": 48723.81,
-        "equity_base_usd": 97447.61,
+        "gross_cap_usd": 97401.78,
+        "net_cap_usd": 48700.89,
+        "equity_base_usd": 97401.78,
         "equity_source": "alpaca"
       },
       "allow": {
@@ -342,8 +342,8 @@
         "total": 22
       },
       "trimmed": {},
-      "new_long_usd": 6396.24,
-      "new_short_usd": 10577.45,
+      "new_long_usd": 7140.33,
+      "new_short_usd": 11252.73,
       "frozen_orphans": {
         "enabled": true,
         "count": {
@@ -361,25 +361,25 @@
       },
       "fair_trim": {
         "enabled": true,
-        "epoch": 739874,
-        "rotation": 2,
+        "epoch": 739875,
+        "rotation": 3,
         "deal_order": [
-          "system3",
           "system5",
           "system1",
-          "system2"
+          "system2",
+          "system3"
         ],
         "demand": {
           "system1": 6,
           "system2": 8,
-          "system3": 4,
-          "system5": 4
+          "system3": 5,
+          "system5": 3
         },
         "kept": {
           "system1": 6,
           "system2": 8,
-          "system3": 4,
-          "system5": 4
+          "system3": 5,
+          "system5": 3
         },
         "dropped": {
           "system1": 0,
@@ -392,11 +392,11 @@
   },
   "meta": {
     "cli_version": "0.1.0",
-    "run_id": "20260916_060617_d767ab",
-    "elapsed_seconds": 845.8,
+    "run_id": "20260916_141917_a83d3b",
+    "elapsed_seconds": 817.3,
     "publish_delivery": {
       "state": "primary_accepted",
-      "attempted_at": "2026-09-15T21:23:05.431822+00:00",
+      "attempted_at": "2026-09-16T05:34:39.126696+00:00",
       "channels": {
         "ntfy": {
           "state": "accepted",

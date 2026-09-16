@@ -2,7 +2,7 @@
   "schema": "notify_delivery/v1",
   "kind": "execution_summary",
   "date": "2026-09-16",
-  "source_signals_run_id": "20260916_060617_d767ab",
+  "source_signals_run_id": "20260916_141917_a83d3b",
   "state": "not_attempted",
   "attempted_at": null,
   "channels": {

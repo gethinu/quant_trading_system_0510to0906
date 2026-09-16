@@ -1,47 +1,47 @@
 {
   "date": "2026-09-16",
   "provider": "polygon_grouped_daily",
-  "n_candidates_total": 5212,
+  "n_candidates_total": 5194,
   "survival_by_system": {
     "sys1": {
       "n_pass": 1328,
-      "n_total": 5212,
-      "ratio": 0.2548,
+      "n_total": 5194,
+      "ratio": 0.2557,
       "warn_threshold": 0.05,
       "status": "ok"
     },
     "sys2": {
-      "n_pass": 1778,
-      "n_total": 5212,
-      "ratio": 0.3411,
+      "n_pass": 1776,
+      "n_total": 5194,
+      "ratio": 0.3419,
       "warn_threshold": 0.06,
       "status": "ok"
     },
     "sys3": {
-      "n_pass": 1778,
-      "n_total": 5212,
-      "ratio": 0.3411,
+      "n_pass": 1776,
+      "n_total": 5194,
+      "ratio": 0.3419,
       "warn_threshold": 0.06,
       "status": "ok"
     },
     "sys4": {
-      "n_pass": 931,
-      "n_total": 5212,
-      "ratio": 0.1786,
+      "n_pass": 929,
+      "n_total": 5194,
+      "ratio": 0.1789,
       "warn_threshold": 0.04,
       "status": "ok"
     },
     "sys5": {
-      "n_pass": 3778,
-      "n_total": 5212,
-      "ratio": 0.7249,
+      "n_pass": 3745,
+      "n_total": 5194,
+      "ratio": 0.721,
       "warn_threshold": 0.15,
       "status": "ok"
     },
     "sys6": {
-      "n_pass": 2317,
-      "n_total": 5212,
-      "ratio": 0.4446,
+      "n_pass": 2316,
+      "n_total": 5194,
+      "ratio": 0.4459,
       "warn_threshold": 0.1,
       "status": "ok"
     },
@@ -55,66 +55,65 @@
   },
   "rejected_top10": [
     {
-      "symbol": "VMRK",
-      "reason": "no_dv20_cache"
+      "symbol": "RETO",
+      "reason": "price_below_5"
     },
     {
-      "symbol": "DV",
+      "symbol": "TRMD",
       "reason": "dv20_below_50m"
     },
     {
-      "symbol": "ELMT",
-      "reason": "dv20_below_50m"
-    },
-    {
-      "symbol": "BMGL",
-      "reason": "dv20_below_50m"
-    },
-    {
-      "symbol": "RUM",
-      "reason": "dv20_below_50m"
+      "symbol": "PDSB",
+      "reason": "price_below_5"
     },
     {
       "symbol": "GRAB",
       "reason": "price_below_5"
     },
     {
-      "symbol": "NCT",
-      "reason": "price_below_5"
-    },
-    {
-      "symbol": "PBA",
+      "symbol": "MEOH",
       "reason": "dv20_below_50m"
     },
     {
-      "symbol": "PLUG",
-      "reason": "price_below_5"
+      "symbol": "XMTR",
+      "reason": "dv20_below_50m"
     },
     {
-      "symbol": "OPEN",
-      "reason": "price_below_5"
+      "symbol": "SWMR",
+      "reason": "dv20_below_50m"
+    },
+    {
+      "symbol": "AAMI",
+      "reason": "dv20_below_50m"
+    },
+    {
+      "symbol": "PDM",
+      "reason": "dv20_below_50m"
+    },
+    {
+      "symbol": "PLAY",
+      "reason": "dv20_below_50m"
     }
   ],
   "delta_vs_previous": {
-    "sys1": -0.0004,
-    "sys2": -0.0006,
-    "sys3": -0.0006,
-    "sys4": -0.0002,
-    "sys5": -0.0005,
-    "sys6": -0.0008,
+    "sys1": 0.0005,
+    "sys2": 0.0002,
+    "sys3": 0.0002,
+    "sys4": 0.0001,
+    "sys5": -0.0044,
+    "sys6": 0.0005,
     "sys7": 0.0
   },
   "consecutive_drops": {
-    "sys1": 3,
-    "sys2": 3,
-    "sys3": 3,
-    "sys4": 3,
+    "sys1": 0,
+    "sys2": 0,
+    "sys3": 0,
+    "sys4": 0,
     "sys5": 1,
-    "sys6": 3,
+    "sys6": 0,
     "sys7": 0
   },
   "notes": [
-    "grouped_asof=2026-09-14 (target 2026-09-16 was non-trading)",
-    "consecutive_declines_3d: {'sys1': 3, 'sys2': 3, 'sys3': 3, 'sys4': 3, 'sys6': 3}"
+    "grouped_asof=2026-09-15 (target 2026-09-16 was non-trading)"
   ]
 }
