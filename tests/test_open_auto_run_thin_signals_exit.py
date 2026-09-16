@@ -208,6 +208,7 @@ def test_threshold_boundary_exactly_at_min_allows_entry(runner):
 def test_entry_data_fresh_requires_exact_prior_session(tmp_path, monkeypatch):
     """9/15 entry は 9/14 EOD が全 signal 銘柄に必要。"""
     import pandas as pd
+
     import common.cache_manager as cache_manager
     import config.settings as settings_module
 
@@ -225,7 +226,9 @@ def test_entry_data_fresh_requires_exact_prior_session(tmp_path, monkeypatch):
             return pd.DataFrame({"date": [day]})
 
     monkeypatch.setattr(cache_manager, "CacheManager", FakeCacheManager)
-    monkeypatch.setattr(settings_module, "get_settings", lambda create_dirs=False: object())
+    monkeypatch.setattr(
+        settings_module, "get_settings", lambda create_dirs=False: object()
+    )
 
     assert r._entry_data_fresh() is False
     assert r.record["entry_data_expected_date"] == "2026-09-14"
@@ -252,9 +255,7 @@ def test_stale_signal_data_skips_entry_but_still_runs_exit(runner, monkeypatch):
     assert r.record["entry_status"] == "skipped_stale_data"
 
 
-def test_signal_generation_failure_skips_entry_but_still_runs_exit(
-    runner, monkeypatch
-):
+def test_signal_generation_failure_skips_entry_but_still_runs_exit(runner, monkeypatch):
     r, rec = runner(signal_count=44, skip_signals=False)
     monkeypatch.setattr(r, "run_step", lambda *a, **k: (1, "", "locked"))
 
