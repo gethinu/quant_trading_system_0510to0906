@@ -2,6 +2,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from scripts.pipeline.benchmark import LightweightBenchmark
 import tools.auto_benchmark as auto_benchmark
 
@@ -134,4 +136,84 @@ def test_history_scope_git_common_uses_git_metadata(tmp_path, monkeypatch):
 
     assert auto_benchmark._resolve_history_path("git-common") == (
         common_dir / "auto_benchmark_history.jsonl"
+    )
+
+
+def test_compare_ignores_relative_noise_below_absolute_phase_floor():
+    baseline = {"phase_times": {"tiny": 0.02}, "total_time": 10.0}
+    current = {"phase_times": {"tiny": 0.04}, "total_time": 10.0}
+
+    assert (
+        auto_benchmark.compare_with_baseline(
+            current,
+            baseline,
+            threshold=0.10,
+            min_phase_regression_sec=0.5,
+        )
+        == []
+    )
+
+
+def test_compare_flags_phase_when_relative_and_absolute_limits_are_exceeded():
+    baseline = {"phase_times": {"signal": 3.0}, "total_time": 10.0}
+    current = {"phase_times": {"signal": 3.7}, "total_time": 10.0}
+
+    regressions = auto_benchmark.compare_with_baseline(
+        current,
+        baseline,
+        threshold=0.10,
+        min_phase_regression_sec=0.5,
+    )
+
+    assert [row["phase"] for row in regressions] == ["signal"]
+    assert regressions[0]["delta_sec"] == pytest.approx(0.7)
+
+
+def test_total_regression_is_not_suppressed_by_phase_floor():
+    baseline = {"phase_times": {"tiny": 0.02}, "total_time": 10.0}
+    current = {"phase_times": {"tiny": 0.04}, "total_time": 11.2}
+
+    regressions = auto_benchmark.compare_with_baseline(
+        current,
+        baseline,
+        threshold=0.10,
+        min_phase_regression_sec=0.5,
+    )
+
+    assert [row["phase"] for row in regressions] == ["TOTAL"]
+    assert regressions[0]["delta_sec"] == pytest.approx(1.2)
+
+
+def test_observed_same_main_noise_shape_does_not_block_when_total_improves():
+    baseline = {
+        "phase_times": {
+            "phase0_initialization": 1.034822,
+            "phase1_symbol_universe": 0.023667,
+            "phase2_data_loading": 46.562672,
+            "phase3_filtering": 0.006432,
+            "phase4_signal_generation": 3.022753,
+            "phase5_allocation": 1.171627,
+        },
+        "total_time": 59.762028,
+    }
+    current = {
+        "phase_times": {
+            "phase0_initialization": 1.277723,
+            "phase1_symbol_universe": 0.040788,
+            "phase2_data_loading": 43.753735,
+            "phase3_filtering": 0.008461,
+            "phase4_signal_generation": 3.453516,
+            "phase5_allocation": 1.310667,
+        },
+        "total_time": 49.84489,
+    }
+
+    assert (
+        auto_benchmark.compare_with_baseline(
+            current,
+            baseline,
+            threshold=0.10,
+            min_phase_regression_sec=0.5,
+        )
+        == []
     )
