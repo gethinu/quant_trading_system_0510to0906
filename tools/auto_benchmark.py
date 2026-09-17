@@ -10,6 +10,7 @@
 
 from datetime import datetime
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -27,13 +28,39 @@ for _stream in (sys.stdout, sys.stderr):
         pass
 # ------------------------------------------------------------------------
 
-BENCHMARK_HISTORY = Path("benchmarks/history.jsonl")
+
+DEFAULT_BENCHMARK_HISTORY = Path("benchmarks/history.jsonl")
+BENCHMARK_HISTORY = DEFAULT_BENCHMARK_HISTORY
 BENCHMARK_DIR = Path("benchmarks")
 
 
+def _resolve_history_path(scope: str) -> Path:
+    """Resolve benchmark history without changing the manual-run default."""
+    if scope == "repo":
+        return DEFAULT_BENCHMARK_HISTORY
+    if scope != "git-common":
+        raise ValueError(f"unsupported history scope: {scope}")
+
+    raw = subprocess.check_output(
+        ["git", "rev-parse", "--git-common-dir"],
+        text=True,
+        encoding="utf-8",
+        stderr=subprocess.DEVNULL,
+    ).strip()
+    common_dir = Path(raw)
+    if not common_dir.is_absolute():
+        common_dir = (Path.cwd() / common_dir).resolve()
+    return common_dir / "auto_benchmark_history.jsonl"
+
+
 def run_benchmark() -> Optional[Dict]:
-    """ベンチマーク実行"""
-    print("🔍 Running performance benchmark...")
+    """Run the mini benchmark and read only this invocation's report."""
+    print("[benchmark] running performance benchmark...")
+
+    report_dir = Path("results_csv_test")
+    report_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    report_path = report_dir / f"benchmark_auto_{stamp}_{os.getpid()}.json"
 
     result = subprocess.run(
         [
@@ -43,6 +70,8 @@ def run_benchmark() -> Optional[Dict]:
             "mini",
             "--skip-external",
             "--benchmark",
+            "--benchmark-output",
+            str(report_path),
         ],
         capture_output=True,
         text=True,
@@ -50,18 +79,15 @@ def run_benchmark() -> Optional[Dict]:
     )
 
     if result.returncode != 0:
-        print("❌ Benchmark failed:")
-        print(result.stderr)
+        print("[benchmark] failed:")
+        print(result.stderr or result.stdout)
         return None
 
-    # ベンチマーク結果を読み込み
-    benchmark_files = list(Path("results_csv_test").glob("benchmark_*.json"))
-    if not benchmark_files:
-        print("⚠️  No benchmark file found")
+    if not report_path.exists():
+        print(f"[benchmark] report was not produced: {report_path}")
         return None
 
-    latest_benchmark = max(benchmark_files, key=lambda p: p.stat().st_mtime)
-    with open(latest_benchmark, encoding="utf-8") as f:
+    with report_path.open(encoding="utf-8") as f:
         data = json.load(f)
 
     return data
@@ -208,7 +234,16 @@ def main():
     parser.add_argument(
         "--skip-interactive", action="store_true", help="対話的確認をスキップ"
     )
+    parser.add_argument(
+        "--history-scope",
+        choices=("repo", "git-common"),
+        default="repo",
+        help="benchmark history location; pre-push should use git-common",
+    )
     args = parser.parse_args()
+
+    global BENCHMARK_HISTORY
+    BENCHMARK_HISTORY = _resolve_history_path(args.history_scope)
 
     # ベンチマーク実行
     current = run_benchmark()

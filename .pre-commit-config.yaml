@@ -57,7 +57,7 @@ repos:
 
       - id: auto-benchmark
         name: Performance Regression Check
-        entry: python tools/auto_benchmark.py --threshold 0.10 --skip-interactive
+        entry: python tools/auto_benchmark.py --threshold 0.10 --skip-interactive --history-scope git-common
         language: system
         files: ^(core/|common/|scripts/run_all_systems_today\.py)
         pass_filenames: false

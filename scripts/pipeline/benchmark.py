@@ -54,14 +54,27 @@ class LightweightBenchmark:
     def get_report(self) -> dict[str, Any]:
         """ベンチマークレポートを取得。"""
         if not self.enabled:
-            return {"enabled": False, "phases": {}, "total_duration_sec": 0.0}
+            return {
+                "enabled": False,
+                "phases": {},
+                "phase_times": {},
+                "total_duration_sec": 0.0,
+                "total_time": 0.0,
+            }
 
-        total_duration = sum(p["duration_sec"] for p in self.phases.values())
+        phase_times = {
+            name: float(values.get("duration_sec", 0.0))
+            for name, values in self.phases.items()
+        }
+        total_duration = sum(phase_times.values())
+        total_duration = round(total_duration, 6)
         return {
             "enabled": True,
             "timestamp": datetime.now().isoformat(),
             "phases": self.phases,
-            "total_duration_sec": round(total_duration, 6),
+            "phase_times": phase_times,
+            "total_duration_sec": total_duration,
+            "total_time": total_duration,
             "extras": self.extras,
         }
 
