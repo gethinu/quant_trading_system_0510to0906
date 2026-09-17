@@ -33,8 +33,8 @@
           "ratio_of_prev": 0.341791,
           "ratio_of_universe": 0.088537,
           "source": "today_signals.funnel",
-          "source_run_id": "20260917_141839_cbabc8",
-          "source_observed_at": "2026-09-17T14:32:25+09:00"
+          "source_run_id": "20260917_223505_ad9bf5",
+          "source_observed_at": "2026-09-17T22:48:48+09:00"
         },
         {
           "name": "TRDlist",
@@ -45,8 +45,8 @@
           "ratio_of_prev": 0.021834,
           "ratio_of_universe": 0.001933,
           "source": "today_signals.funnel",
-          "source_run_id": "20260917_141839_cbabc8",
-          "source_observed_at": "2026-09-17T14:32:25+09:00"
+          "source_run_id": "20260917_223505_ad9bf5",
+          "source_observed_at": "2026-09-17T22:48:48+09:00"
         },
         {
           "name": "Entry",
@@ -57,8 +57,8 @@
           "ratio_of_prev": 0.3,
           "ratio_of_universe": 0.00058,
           "source": "today_signals.funnel",
-          "source_run_id": "20260917_141839_cbabc8",
-          "source_observed_at": "2026-09-17T14:32:25+09:00"
+          "source_run_id": "20260917_223505_ad9bf5",
+          "source_observed_at": "2026-09-17T22:48:48+09:00"
         },
         {
           "name": "Exit",
@@ -69,7 +69,7 @@
           "ratio_of_prev": 0.0,
           "ratio_of_universe": 0.0,
           "source": "execution_recon",
-          "source_observed_at": "2026-09-17T05:34:16+00:00",
+          "source_observed_at": "2026-09-17T13:54:52+00:00",
           "fired": 0,
           "exit_close": 0,
           "exit_protect": 0,
@@ -86,7 +86,7 @@
       ],
       "final_signals": 3,
       "final_signals_source": "today_signals.funnel",
-      "final_signals_source_run_id": "20260917_141839_cbabc8"
+      "final_signals_source_run_id": "20260917_223505_ad9bf5"
     },
     "sys2": {
       "system_id": "sys2",
@@ -118,8 +118,8 @@
           "ratio_of_prev": 0.00783,
           "ratio_of_universe": 0.002706,
           "source": "today_signals.funnel",
-          "source_run_id": "20260917_141839_cbabc8",
-          "source_observed_at": "2026-09-17T14:32:25+09:00"
+          "source_run_id": "20260917_223505_ad9bf5",
+          "source_observed_at": "2026-09-17T22:48:48+09:00"
         },
         {
           "name": "TRDlist",
@@ -130,8 +130,8 @@
           "ratio_of_prev": 0.714286,
           "ratio_of_universe": 0.001933,
           "source": "today_signals.funnel",
-          "source_run_id": "20260917_141839_cbabc8",
-          "source_observed_at": "2026-09-17T14:32:25+09:00"
+          "source_run_id": "20260917_223505_ad9bf5",
+          "source_observed_at": "2026-09-17T22:48:48+09:00"
         },
         {
           "name": "Entry",
@@ -142,24 +142,24 @@
           "ratio_of_prev": 0.8,
           "ratio_of_universe": 0.001546,
           "source": "today_signals.funnel",
-          "source_run_id": "20260917_141839_cbabc8",
-          "source_observed_at": "2026-09-17T14:32:25+09:00"
+          "source_run_id": "20260917_223505_ad9bf5",
+          "source_observed_at": "2026-09-17T22:48:48+09:00"
         },
         {
           "name": "Exit",
           "label": "Exit",
-          "condition": "本日手仕舞い発火 (close 0 / protect 0) · 1 armed",
-          "count": 0,
+          "condition": "本日手仕舞い発火 (close 1 / protect 0)",
+          "count": 1,
           "measured": true,
-          "ratio_of_prev": 0.0,
-          "ratio_of_universe": 0.0,
+          "ratio_of_prev": 0.125,
+          "ratio_of_universe": 0.000193,
           "source": "execution_recon",
-          "source_observed_at": "2026-09-17T05:34:16+00:00",
-          "fired": 0,
-          "exit_close": 0,
+          "source_observed_at": "2026-09-17T13:54:52+00:00",
+          "fired": 1,
+          "exit_close": 1,
           "exit_protect": 0,
-          "armed": 1,
-          "armed_close": 1,
+          "armed": 0,
+          "armed_close": 0,
           "armed_protect": 0,
           "rejected": 0,
           "rejected_close": 0,
@@ -171,7 +171,7 @@
       ],
       "final_signals": 8,
       "final_signals_source": "today_signals.funnel",
-      "final_signals_source_run_id": "20260917_141839_cbabc8"
+      "final_signals_source_run_id": "20260917_223505_ad9bf5"
     },
     "sys3": {
       "system_id": "sys3",
@@ -203,8 +203,8 @@
           "ratio_of_prev": 0.012304,
           "ratio_of_universe": 0.004253,
           "source": "today_signals.funnel",
-          "source_run_id": "20260917_141839_cbabc8",
-          "source_observed_at": "2026-09-17T14:32:25+09:00"
+          "source_run_id": "20260917_223505_ad9bf5",
+          "source_observed_at": "2026-09-17T22:48:48+09:00"
         },
         {
           "name": "TRDlist",
@@ -215,8 +215,8 @@
           "ratio_of_prev": 0.454545,
           "ratio_of_universe": 0.001933,
           "source": "today_signals.funnel",
-          "source_run_id": "20260917_141839_cbabc8",
-          "source_observed_at": "2026-09-17T14:32:25+09:00"
+          "source_run_id": "20260917_223505_ad9bf5",
+          "source_observed_at": "2026-09-17T22:48:48+09:00"
         },
         {
           "name": "Entry",
@@ -227,8 +227,8 @@
           "ratio_of_prev": 0.6,
           "ratio_of_universe": 0.00116,
           "source": "today_signals.funnel",
-          "source_run_id": "20260917_141839_cbabc8",
-          "source_observed_at": "2026-09-17T14:32:25+09:00"
+          "source_run_id": "20260917_223505_ad9bf5",
+          "source_observed_at": "2026-09-17T22:48:48+09:00"
         },
         {
           "name": "Exit",
@@ -239,7 +239,7 @@
           "ratio_of_prev": 0.0,
           "ratio_of_universe": 0.0,
           "source": "execution_recon",
-          "source_observed_at": "2026-09-17T05:34:16+00:00",
+          "source_observed_at": "2026-09-17T13:54:52+00:00",
           "fired": 0,
           "exit_close": 0,
           "exit_protect": 0,
@@ -256,7 +256,7 @@
       ],
       "final_signals": 6,
       "final_signals_source": "today_signals.funnel",
-      "final_signals_source_run_id": "20260917_141839_cbabc8"
+      "final_signals_source_run_id": "20260917_223505_ad9bf5"
     },
     "sys4": {
       "system_id": "sys4",
@@ -288,8 +288,8 @@
           "ratio_of_prev": 0.272629,
           "ratio_of_universe": 0.048908,
           "source": "today_signals.funnel",
-          "source_run_id": "20260917_141839_cbabc8",
-          "source_observed_at": "2026-09-17T14:32:25+09:00"
+          "source_run_id": "20260917_223505_ad9bf5",
+          "source_observed_at": "2026-09-17T22:48:48+09:00"
         },
         {
           "name": "TRDlist",
@@ -300,48 +300,48 @@
           "ratio_of_prev": 0.039526,
           "ratio_of_universe": 0.001933,
           "source": "today_signals.funnel",
-          "source_run_id": "20260917_141839_cbabc8",
-          "source_observed_at": "2026-09-17T14:32:25+09:00"
+          "source_run_id": "20260917_223505_ad9bf5",
+          "source_observed_at": "2026-09-17T22:48:48+09:00"
         },
         {
           "name": "Entry",
           "label": "Entry",
           "condition": "allocation 後エントリ発火",
-          "count": 1,
-          "measured": true,
-          "ratio_of_prev": 0.1,
-          "ratio_of_universe": 0.000193,
-          "source": "today_signals.funnel",
-          "source_run_id": "20260917_141839_cbabc8",
-          "source_observed_at": "2026-09-17T14:32:25+09:00"
-        },
-        {
-          "name": "Exit",
-          "label": "Exit",
-          "condition": "本日手仕舞い発火 (close 0 / protect 0) · 2 armed · 3 suppressed",
           "count": 0,
           "measured": true,
           "ratio_of_prev": 0.0,
           "ratio_of_universe": 0.0,
+          "source": "today_signals.funnel",
+          "source_run_id": "20260917_223505_ad9bf5",
+          "source_observed_at": "2026-09-17T22:48:48+09:00"
+        },
+        {
+          "name": "Exit",
+          "label": "Exit",
+          "condition": "本日手仕舞い発火 (close 0 / protect 2) · 4 suppressed",
+          "count": 2,
+          "measured": true,
+          "ratio_of_prev": null,
+          "ratio_of_universe": 0.000387,
           "source": "execution_recon",
-          "source_observed_at": "2026-09-17T05:34:16+00:00",
-          "fired": 0,
+          "source_observed_at": "2026-09-17T13:54:52+00:00",
+          "fired": 2,
           "exit_close": 0,
-          "exit_protect": 0,
-          "armed": 2,
+          "exit_protect": 2,
+          "armed": 0,
           "armed_close": 0,
-          "armed_protect": 2,
+          "armed_protect": 0,
           "rejected": 0,
           "rejected_close": 0,
           "rejected_protect": 0,
-          "suppressed": 3,
+          "suppressed": 4,
           "suppressed_close": 0,
-          "suppressed_protect": 3
+          "suppressed_protect": 4
         }
       ],
-      "final_signals": 1,
+      "final_signals": 0,
       "final_signals_source": "today_signals.funnel",
-      "final_signals_source_run_id": "20260917_141839_cbabc8"
+      "final_signals_source_run_id": "20260917_223505_ad9bf5"
     },
     "sys5": {
       "system_id": "sys5",
@@ -373,8 +373,8 @@
           "ratio_of_prev": 0.000806,
           "ratio_of_universe": 0.00058,
           "source": "today_signals.funnel",
-          "source_run_id": "20260917_141839_cbabc8",
-          "source_observed_at": "2026-09-17T14:32:25+09:00"
+          "source_run_id": "20260917_223505_ad9bf5",
+          "source_observed_at": "2026-09-17T22:48:48+09:00"
         },
         {
           "name": "TRDlist",
@@ -385,8 +385,8 @@
           "ratio_of_prev": 1.0,
           "ratio_of_universe": 0.00058,
           "source": "today_signals.funnel",
-          "source_run_id": "20260917_141839_cbabc8",
-          "source_observed_at": "2026-09-17T14:32:25+09:00"
+          "source_run_id": "20260917_223505_ad9bf5",
+          "source_observed_at": "2026-09-17T22:48:48+09:00"
         },
         {
           "name": "Entry",
@@ -397,24 +397,24 @@
           "ratio_of_prev": 0.666667,
           "ratio_of_universe": 0.000387,
           "source": "today_signals.funnel",
-          "source_run_id": "20260917_141839_cbabc8",
-          "source_observed_at": "2026-09-17T14:32:25+09:00"
+          "source_run_id": "20260917_223505_ad9bf5",
+          "source_observed_at": "2026-09-17T22:48:48+09:00"
         },
         {
           "name": "Exit",
           "label": "Exit",
-          "condition": "本日手仕舞い発火 (close 0 / protect 0) · 1 armed",
-          "count": 0,
+          "condition": "本日手仕舞い発火 (close 2 / protect 0)",
+          "count": 2,
           "measured": true,
-          "ratio_of_prev": 0.0,
-          "ratio_of_universe": 0.0,
+          "ratio_of_prev": 1.0,
+          "ratio_of_universe": 0.000387,
           "source": "execution_recon",
-          "source_observed_at": "2026-09-17T05:34:16+00:00",
-          "fired": 0,
-          "exit_close": 0,
+          "source_observed_at": "2026-09-17T13:54:52+00:00",
+          "fired": 2,
+          "exit_close": 2,
           "exit_protect": 0,
-          "armed": 1,
-          "armed_close": 1,
+          "armed": 0,
+          "armed_close": 0,
           "armed_protect": 0,
           "rejected": 0,
           "rejected_close": 0,
@@ -426,7 +426,7 @@
       ],
       "final_signals": 2,
       "final_signals_source": "today_signals.funnel",
-      "final_signals_source_run_id": "20260917_141839_cbabc8"
+      "final_signals_source_run_id": "20260917_223505_ad9bf5"
     },
     "sys6": {
       "system_id": "sys6",
@@ -458,8 +458,8 @@
           "ratio_of_prev": 0.0,
           "ratio_of_universe": 0.0,
           "source": "today_signals.funnel",
-          "source_run_id": "20260917_141839_cbabc8",
-          "source_observed_at": "2026-09-17T14:32:25+09:00"
+          "source_run_id": "20260917_223505_ad9bf5",
+          "source_observed_at": "2026-09-17T22:48:48+09:00"
         },
         {
           "name": "TRDlist",
@@ -470,8 +470,8 @@
           "ratio_of_prev": null,
           "ratio_of_universe": 0.0,
           "source": "today_signals.funnel",
-          "source_run_id": "20260917_141839_cbabc8",
-          "source_observed_at": "2026-09-17T14:32:25+09:00"
+          "source_run_id": "20260917_223505_ad9bf5",
+          "source_observed_at": "2026-09-17T22:48:48+09:00"
         },
         {
           "name": "Entry",
@@ -482,8 +482,8 @@
           "ratio_of_prev": null,
           "ratio_of_universe": 0.0,
           "source": "today_signals.funnel",
-          "source_run_id": "20260917_141839_cbabc8",
-          "source_observed_at": "2026-09-17T14:32:25+09:00"
+          "source_run_id": "20260917_223505_ad9bf5",
+          "source_observed_at": "2026-09-17T22:48:48+09:00"
         },
         {
           "name": "Exit",
@@ -494,7 +494,7 @@
           "ratio_of_prev": null,
           "ratio_of_universe": 0.0,
           "source": "execution_recon",
-          "source_observed_at": "2026-09-17T05:34:16+00:00",
+          "source_observed_at": "2026-09-17T13:54:52+00:00",
           "fired": 0,
           "exit_close": 0,
           "exit_protect": 0,
@@ -511,7 +511,7 @@
       ],
       "final_signals": 0,
       "final_signals_source": "today_signals.funnel",
-      "final_signals_source_run_id": "20260917_141839_cbabc8"
+      "final_signals_source_run_id": "20260917_223505_ad9bf5"
     },
     "sys7": {
       "system_id": "sys7",
@@ -543,8 +543,8 @@
           "ratio_of_prev": 0.0,
           "ratio_of_universe": 0.0,
           "source": "today_signals.funnel",
-          "source_run_id": "20260917_141839_cbabc8",
-          "source_observed_at": "2026-09-17T14:32:25+09:00"
+          "source_run_id": "20260917_223505_ad9bf5",
+          "source_observed_at": "2026-09-17T22:48:48+09:00"
         },
         {
           "name": "TRDlist",
@@ -555,8 +555,8 @@
           "ratio_of_prev": null,
           "ratio_of_universe": 0.0,
           "source": "today_signals.funnel",
-          "source_run_id": "20260917_141839_cbabc8",
-          "source_observed_at": "2026-09-17T14:32:25+09:00"
+          "source_run_id": "20260917_223505_ad9bf5",
+          "source_observed_at": "2026-09-17T22:48:48+09:00"
         },
         {
           "name": "Entry",
@@ -567,8 +567,8 @@
           "ratio_of_prev": null,
           "ratio_of_universe": 0.0,
           "source": "today_signals.funnel",
-          "source_run_id": "20260917_141839_cbabc8",
-          "source_observed_at": "2026-09-17T14:32:25+09:00"
+          "source_run_id": "20260917_223505_ad9bf5",
+          "source_observed_at": "2026-09-17T22:48:48+09:00"
         },
         {
           "name": "Exit",
@@ -579,7 +579,7 @@
           "ratio_of_prev": null,
           "ratio_of_universe": 0.0,
           "source": "execution_recon",
-          "source_observed_at": "2026-09-17T05:34:16+00:00",
+          "source_observed_at": "2026-09-17T13:54:52+00:00",
           "fired": 0,
           "exit_close": 0,
           "exit_protect": 0,
@@ -596,7 +596,7 @@
       ],
       "final_signals": 0,
       "final_signals_source": "today_signals.funnel",
-      "final_signals_source_run_id": "20260917_141839_cbabc8"
+      "final_signals_source_run_id": "20260917_223505_ad9bf5"
     }
   },
   "notes": [
@@ -606,10 +606,10 @@
     "Funnel (Tgt/FILpass/STUpass/TRDlist/Entry) = signal engine funnel (today_signals_YYYYMMDD.json), measured=True。別 source の実測 phase は 保護し、spy_only Tgt の共有 universe は未計測理由を明示する。",
     "Exit = execution recon (recon_YYYYMMDD.json, ntfy と同一 source): count=fired(exit_submitted), close/protect は fired 分のみ, armed=未送信の提案 / rejected=broker 拒否 / suppressed=送れば確実に拒否されるため未送信 (いずれも別枠)。"
   ],
-  "source_signals_run_id": "20260917_141839_cbabc8",
-  "source_signals_generated_at": "2026-09-17T14:32:25+09:00",
-  "source_signals_sha256": "9623579ea98624c966434b8b867b4384d7feed3d2c6a109283f3a9a03dcf3c06",
-  "source_recon_sha256": "2ce0ed05721c9ce05dc3adb8c9a22369423ee489400ad2997c26734eebb699dc",
-  "source_recon_generated_at": "2026-09-17T05:34:16+00:00",
-  "materialized_at": "2026-09-17T05:34:16+00:00"
+  "source_signals_run_id": "20260917_223505_ad9bf5",
+  "source_signals_generated_at": "2026-09-17T22:48:48+09:00",
+  "source_signals_sha256": "2c0addc4b56fc40eda467f5c1255c5fe6404668df2a8a523514d8bbb2267b339",
+  "source_recon_sha256": "726f14541c8bb377a77f1c25231c8995d0237106f751e275d42d1cfc8f9d8578",
+  "source_recon_generated_at": "2026-09-17T13:54:52+00:00",
+  "materialized_at": "2026-09-17T13:54:52+00:00"
 }
