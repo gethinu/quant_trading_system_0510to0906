@@ -10,10 +10,6 @@ on:
   pull_request:
     branches:
       [main, develop, branch0906, "claude/monitor-webapp", "claude/open-auto-run"]
-    paths-ignore:
-      - "docs/**"
-      - "**/*.md"
-      - ".github/ISSUE_TEMPLATE/**"
   workflow_dispatch:
     inputs:
       reason:
@@ -29,7 +25,42 @@ permissions:
   contents: read
 
 jobs:
+  ci-scope:
+    name: CI change scope
+    runs-on: ubuntu-latest
+    outputs:
+      run_full: ${{ steps.scope.outputs.run_full }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Resolve CI scope
+        id: scope
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" != "pull_request" ]]; then
+            echo "run_full=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git diff --name-only \
+            "${{ github.event.pull_request.base.sha }}" \
+            "${{ github.event.pull_request.head.sha }}" > "$RUNNER_TEMP/changed-files.txt"
+
+          run_full=false
+          while IFS= read -r path; do
+            case "$path" in
+              docs/* | *.md | .github/ISSUE_TEMPLATE/*) ;;
+              *) run_full=true; break ;;
+            esac
+          done < "$RUNNER_TEMP/changed-files.txt"
+
+          echo "run_full=$run_full" >> "$GITHUB_OUTPUT"
+
   dashboard-build:
+    needs: ci-scope
+    if: needs.ci-scope.outputs.run_full == 'true'
     name: Dashboard build & typecheck
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -53,6 +84,8 @@ jobs:
         run: npm run build
 
   powershell-contract:
+    needs: ci-scope
+    if: needs.ci-scope.outputs.run_full == 'true'
     name: Windows publish contract
     runs-on: windows-latest
     timeout-minutes: 10
@@ -90,6 +123,8 @@ jobs:
           python -m pytest tests/system/test_publish_data_ps1_contract.py -o addopts='' -q
 
   lint-and-format:
+    needs: ci-scope
+    if: needs.ci-scope.outputs.run_full == 'true'
     name: Lint & Format
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -175,7 +210,8 @@ jobs:
     name: Test & Coverage
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    needs: [lint-and-format]
+    needs: [ci-scope, lint-and-format]
+    if: needs.ci-scope.outputs.run_full == 'true' && needs.lint-and-format.result == 'success'
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: 1
       PYTHONUNBUFFERED: 1
@@ -281,3 +317,47 @@ jobs:
           path: coverage.json
           if-no-files-found: warn
           retention-days: 30
+
+  ci-required:
+    name: CI Required
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - ci-scope
+      - dashboard-build
+      - powershell-contract
+      - lint-and-format
+      - test-and-coverage
+    steps:
+      - name: Evaluate required CI
+        shell: bash
+        env:
+          RUN_FULL: ${{ needs.ci-scope.outputs.run_full }}
+          SCOPE_RESULT: ${{ needs.ci-scope.result }}
+          DASHBOARD_RESULT: ${{ needs.dashboard-build.result }}
+          POWERSHELL_RESULT: ${{ needs.powershell-contract.result }}
+          LINT_RESULT: ${{ needs.lint-and-format.result }}
+          TEST_RESULT: ${{ needs.test-and-coverage.result }}
+        run: |
+          if [[ "$SCOPE_RESULT" != "success" ]]; then
+            echo "CI scope resolution failed: $SCOPE_RESULT"
+            exit 1
+          fi
+
+          if [[ "$RUN_FULL" != "true" ]]; then
+            echo "Docs-only change: full CI not required."
+            exit 0
+          fi
+
+          failed=0
+          for result in \
+            "$DASHBOARD_RESULT" \
+            "$POWERSHELL_RESULT" \
+            "$LINT_RESULT" \
+            "$TEST_RESULT"; do
+            if [[ "$result" != "success" ]]; then
+              echo "Required CI job did not succeed: $result"
+              failed=1
+            fi
+          done
+          exit "$failed"

@@ -128,3 +128,5 @@ pip-wheel-metadata/
 memory/
 apps/dashboards/alpaca-next/tsconfig.tsbuildinfo
 
+# Local linked worktrees
+.worktrees/
