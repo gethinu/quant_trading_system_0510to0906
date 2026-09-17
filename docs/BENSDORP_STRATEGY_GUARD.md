@@ -41,7 +41,10 @@ workflow) is itself approval-gated after the bootstrap merge.
 For pull requests, the dedicated workflow uses `pull_request_target`, checks out
 only the trusted base commit, and fetches the PR head only as Git objects. The
 trusted base copy of the guard evaluates the candidate ref; PR code is never
-executed by this security-sensitive job.
+executed by this security-sensitive job. Changed paths are computed from the PR
+merge base, not the moving base-branch tip, so unrelated old PRs are not falsely
+classified when main receives a newer guard baseline. Label add/remove events
+rerun the gate so approval state is re-evaluated immediately.
 
 ## Normal maintenance
 

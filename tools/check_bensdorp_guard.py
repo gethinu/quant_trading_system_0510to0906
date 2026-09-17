@@ -217,23 +217,31 @@ def _protected_config_changed(base: str, head: str) -> bool:
     ) != _protected_config_subset(_load_yaml_text(after))
 
 
+def _merge_base(base: str, head: str) -> str:
+    value = _git("merge-base", base, head).strip()
+    if not value:
+        raise RuntimeError(f"no merge base found for {base} and {head}")
+    return value.splitlines()[0]
+
+
 def protected_changes(base: str, head: str) -> list[str]:
+    origin = _merge_base(base, head)
     names = set(
         line.strip()
         for line in _git(
-            "diff", "--name-only", "--diff-filter=ACMRD", base, head, "--"
+            "diff", "--name-only", "--diff-filter=ACMRD", origin, head, "--"
         ).splitlines()
         if line.strip()
     )
     changed = sorted(names.intersection(PROTECTED_FILES))
 
-    if CONFIG_REL in names and _protected_config_changed(base, head):
+    if CONFIG_REL in names and _protected_config_changed(origin, head):
         changed.append(f"{CONFIG_REL}::bensdorp-sections")
 
     # The first guard PR bootstraps the control plane. Once each control-plane
-    # file exists on the base branch, changing or deleting it is itself gated.
+    # file exists at the PR merge base, changing or deleting it is itself gated.
     for path in CONTROL_PLANE_FILES:
-        if path in names and _path_exists_at(base, path):
+        if path in names and _path_exists_at(origin, path):
             changed.append(path)
 
     return sorted(set(changed))
@@ -271,9 +279,15 @@ def command_verify() -> int:
 
 def command_gate(base: str, head: str, labels_json: str | None) -> int:
     changes = protected_changes(base, head)
-    labels = _labels_from_json(labels_json)
+    if not changes:
+        # Old branches may predate the guard manifest. If they do not change the
+        # protected surface relative to their own merge base, the eventual merge
+        # preserves the trusted base guard and needs no candidate manifest.
+        print("Bensdorp PR gate: no protected strategy/control-plane changes")
+        return 0
 
-    if changes and APPROVAL_LABEL not in labels:
+    labels = _labels_from_json(labels_json)
+    if APPROVAL_LABEL not in labels:
         _print_changes(changes)
         print(
             f"Bensdorp PR gate: BLOCKED. Add label '{APPROVAL_LABEL}' only after explicit owner approval.",
@@ -288,11 +302,8 @@ def command_gate(base: str, head: str, labels_json: str | None) -> int:
             print(f"  - {error}", file=sys.stderr)
         return 1
 
-    if changes:
-        _print_changes(changes)
-        print(f"Bensdorp PR gate: approved by label '{APPROVAL_LABEL}'")
-    else:
-        print("Bensdorp PR gate: no protected strategy/control-plane changes")
+    _print_changes(changes)
+    print(f"Bensdorp PR gate: approved by label '{APPROVAL_LABEL}'")
     return 0
 
 

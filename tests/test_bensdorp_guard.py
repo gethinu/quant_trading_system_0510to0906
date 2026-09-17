@@ -70,12 +70,42 @@ def test_source_fingerprint_is_line_ending_invariant(tmp_path):
     assert guard._sha256(lf) == guard._sha256(crlf)
 
 
-def test_head_ref_must_match_its_own_manifest(monkeypatch):
+def test_unrelated_old_branch_does_not_need_candidate_manifest(monkeypatch):
     monkeypatch.setattr(guard, "protected_changes", lambda _base, _head: [])
+
+    def should_not_run(_head):
+        raise AssertionError("verify_ref must not run for an unrelated old branch")
+
+    monkeypatch.setattr(guard, "verify_ref", should_not_run)
+    assert guard.command_gate("base", "old-head", "[]") == 0
+
+
+def test_approved_protected_change_must_match_candidate_manifest(monkeypatch):
+    monkeypatch.setattr(
+        guard, "protected_changes", lambda _base, _head: ["core/system2.py"]
+    )
     monkeypatch.setattr(
         guard, "verify_ref", lambda _head: ["protected source changed: core/system2.py"]
     )
-    assert guard.command_gate("base", "head", "[]") == 1
+    labels = json.dumps([guard.APPROVAL_LABEL])
+    assert guard.command_gate("base", "head", labels) == 1
+
+
+def test_protected_changes_diff_from_merge_base(monkeypatch):
+    calls = []
+
+    def fake_git(*args):
+        calls.append(args)
+        if args[0] == "merge-base":
+            return "merge-base-sha\n"
+        if args[0] == "diff":
+            return ""
+        raise AssertionError(args)
+
+    monkeypatch.setattr(guard, "_git", fake_git)
+    assert guard.protected_changes("moving-base-tip", "old-pr-head") == []
+    assert calls[0] == ("merge-base", "moving-base-tip", "old-pr-head")
+    assert calls[1][3:5] == ("merge-base-sha", "old-pr-head")
 
 
 def test_verify_ref_compares_manifest_with_git_object_payload(monkeypatch):
@@ -101,4 +131,5 @@ def test_github_gate_uses_pull_request_target_and_never_checks_out_head():
     assert "\n  pull_request:\n" not in workflow
     assert "Checkout trusted base" in workflow
     assert "Fetch untrusted PR head as Git object only" in workflow
+    assert "types: [opened, synchronize, reopened, labeled, unlabeled]" in workflow
     assert "--head FETCH_HEAD" in workflow
