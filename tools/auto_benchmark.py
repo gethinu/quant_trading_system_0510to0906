@@ -30,6 +30,7 @@ for _stream in (sys.stdout, sys.stderr):
 
 
 DEFAULT_BENCHMARK_HISTORY = Path("benchmarks/history.jsonl")
+DEFAULT_MIN_PHASE_REGRESSION_SEC = 0.5
 BENCHMARK_HISTORY = DEFAULT_BENCHMARK_HISTORY
 BENCHMARK_DIR = Path("benchmarks")
 
@@ -94,7 +95,10 @@ def run_benchmark() -> Optional[Dict]:
 
 
 def compare_with_baseline(
-    current: Dict, baseline: Dict, threshold: float = 0.10
+    current: Dict,
+    baseline: Dict,
+    threshold: float = 0.10,
+    min_phase_regression_sec: float = DEFAULT_MIN_PHASE_REGRESSION_SEC,
 ) -> List[Dict]:
     """ベースラインと比較（デフォルト10%以上の劣化を検出）"""
     regressions = []
@@ -107,14 +111,16 @@ def compare_with_baseline(
         baseline_time = baseline_phases.get(phase, 0)
 
         if baseline_time > 0:
-            regression_pct = (current_time - baseline_time) / baseline_time
+            delta_sec = current_time - baseline_time
+            regression_pct = delta_sec / baseline_time
 
-            if regression_pct > threshold:
+            if regression_pct > threshold and delta_sec >= min_phase_regression_sec:
                 regressions.append(
                     {
                         "phase": phase,
                         "baseline": baseline_time,
                         "current": current_time,
+                        "delta_sec": delta_sec,
                         "regression_pct": regression_pct,
                     }
                 )
@@ -124,7 +130,8 @@ def compare_with_baseline(
     baseline_total = baseline.get("total_time", 0)
 
     if baseline_total > 0:
-        total_regression = (current_total - baseline_total) / baseline_total
+        total_delta_sec = current_total - baseline_total
+        total_regression = total_delta_sec / baseline_total
 
         if total_regression > threshold:
             regressions.append(
@@ -132,6 +139,7 @@ def compare_with_baseline(
                     "phase": "TOTAL",
                     "baseline": baseline_total,
                     "current": current_total,
+                    "delta_sec": total_delta_sec,
                     "regression_pct": total_regression,
                 }
             )
@@ -240,7 +248,15 @@ def main():
         default="repo",
         help="benchmark history location; pre-push should use git-common",
     )
+    parser.add_argument(
+        "--min-phase-regression-sec",
+        type=float,
+        default=DEFAULT_MIN_PHASE_REGRESSION_SEC,
+        help="minimum absolute per-phase slowdown required to fail (default: 0.5s)",
+    )
     args = parser.parse_args()
+    if args.min_phase_regression_sec < 0:
+        parser.error("--min-phase-regression-sec must be >= 0")
 
     global BENCHMARK_HISTORY
     BENCHMARK_HISTORY = _resolve_history_path(args.history_scope)
@@ -257,7 +273,12 @@ def main():
 
     if baseline:
         # 回帰検出
-        regressions = compare_with_baseline(current, baseline, threshold=args.threshold)
+        regressions = compare_with_baseline(
+            current,
+            baseline,
+            threshold=args.threshold,
+            min_phase_regression_sec=args.min_phase_regression_sec,
+        )
 
         if regressions:
             print(
