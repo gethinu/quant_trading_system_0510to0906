@@ -1,0 +1,103 @@
+{
+  "approval_label": "bensdorp-strategy-change-approved",
+  "protected_config": {
+    "risk": {
+      "max_pct": 0.1,
+      "max_positions": 10,
+      "risk_pct": 0.02
+    },
+    "strategies": {
+      "system1": {
+        "atr_period": 20,
+        "rsi_buy": 30,
+        "rsi_period": 14,
+        "rsi_sell": 70,
+        "stop_loss_rr": 1.0,
+        "take_profit_rr": 2.0,
+        "top_n_rank": 10
+      },
+      "system2": {
+        "atr_period": 14,
+        "entry_min_gap_pct": 0.04,
+        "fast_sma": 20,
+        "max_hold_days": 2,
+        "profit_take_pct": 0.04,
+        "slow_sma": 50,
+        "stop_atr_multiple": 3.0,
+        "top_n_rank": 10
+      },
+      "system3": {
+        "ema_long": 26,
+        "ema_short": 12,
+        "entry_price_ratio_vs_prev_close": 0.93,
+        "max_hold_days": 3,
+        "profit_take_pct": 0.04,
+        "signal": 9,
+        "stop_atr_multiple": 2.5,
+        "top_n_rank": 10
+      },
+      "system4": {
+        "entry_price_ratio_vs_prev_close": 1.0,
+        "stop_atr_multiple": 1.5,
+        "top_n_rank": 10,
+        "trailing_pct": 0.2
+      },
+      "system5": {
+        "entry_price_ratio_vs_prev_close": 0.97,
+        "fallback_exit_after_days": 6,
+        "stop_atr_multiple": 3.0,
+        "target_atr_multiple": 1.0,
+        "top_n_rank": 10
+      },
+      "system6": {
+        "entry_price_ratio_vs_prev_close": 1.05,
+        "profit_take_max_days": 3,
+        "profit_take_pct": 0.05,
+        "stop_atr_multiple": 3.0,
+        "top_n_rank": 10
+      },
+      "system7": {
+        "max_pct": 0.2,
+        "risk_pct": 0.02,
+        "single_mode": false,
+        "stop_atr_multiple": 3.0,
+        "top_n_rank": 10,
+        "trailing_pct": 0.1
+      }
+    },
+    "ui": {
+      "long_allocations": {
+        "system1": 0.25,
+        "system3": 0.25,
+        "system4": 0.25,
+        "system5": 0.25
+      },
+      "short_allocations": {
+        "system2": 0.4,
+        "system6": 0.4,
+        "system7": 0.2
+      }
+    }
+  },
+  "protected_files": {
+    "common/profit_protection.py": "90ffa4614c763e22640b0cb5f26491f01e2a67a943e42fdc170e1de772c255ce",
+    "common/system_setup_predicates.py": "df3df994728ba60ab5a99fffeb6acc5a37e75c6ce9a5e7cb4cbe67e0c94e04d9",
+    "common/trade_management.py": "d9b369ccb0a3146e43bee8a901bd7879bec94c6e18c1fdf954e6d44dd61cb78f",
+    "core/system1.py": "936dc40b5e73220915797debf22e6b5aedfe536f5be25b593dd924b65680a7e8",
+    "core/system2.py": "1b13cf8d4ce54caf871e3d7ad9b2064c34b205a4db4efbcdb4d999ef7bec3a88",
+    "core/system3.py": "c5b6edd4c15e44fcec5a6c5920a02ad0360c2ab48066e190b1e56d73d4fb0980",
+    "core/system4.py": "f46200c2de37c87451eabdf1dfb09cfdef1fcd055c4b25d510201c714e54bd16",
+    "core/system5.py": "d364e916606eff950f14b6839707b6d252c891c92b4b4216e1b20607612479f6",
+    "core/system6.py": "73fee6f6a5187d41180d2d340f16820a52e69352fc8e65989a48ddacdd75b770",
+    "core/system7.py": "f0f1b60aae3b67d5e68b3705c56992caebf51f519831d2046ff565a91872f04d",
+    "strategies/constants.py": "633de2a7a5fb759db5bf9d334a64ddb26c8022fd463dd9099ce4f1a969fa42f6",
+    "strategies/system1_strategy.py": "c72d04d128c8b4f26ec5bc73ee391af034f358512e178c581beedd93d7e1f059",
+    "strategies/system2_strategy.py": "4814418145aa3ccdc648061ac295f57c1f555b33d5ff91ce67d919dc57de7fa2",
+    "strategies/system3_strategy.py": "0e587c9437c4c6f4d25d66fa3d4ede4f7ad52daa9e53efa99e33fcd05b53a73b",
+    "strategies/system4_strategy.py": "43759c5c5216a047aa852509198ee040d469cdab3e4191a1fafeddc8b6e9096f",
+    "strategies/system5_strategy.py": "04c7c555327e96b2ce65c02a7b0ead6ff91474b7319414ff206846165a2ee303",
+    "strategies/system6_strategy.py": "088611b86bf2d7941f801deea1f35a301017bcfb6fe466fc605e956568d4b1c2",
+    "strategies/system7_strategy.py": "02cff9fe87664ba96e6d7bbabf8029e0c1a46bb9efd5ed432037cd68edb3f8eb"
+  },
+  "version": 1
+}

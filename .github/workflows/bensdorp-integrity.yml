@@ -1,0 +1,44 @@
+name: Bensdorp Strategy Integrity
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main, develop, branch0906]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  guard:
+    name: Protect System1-7 book logic
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install guard dependency
+        run: python -m pip install --disable-pip-version-check pyyaml
+
+      - name: Verify frozen Bensdorp fingerprint
+        run: python tools/check_bensdorp_guard.py verify
+
+      - name: Require explicit approval for protected PR changes
+        if: github.event_name == 'pull_request'
+        env:
+          BENSDORP_PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+        run: >-
+          python tools/check_bensdorp_guard.py gate
+          --base "${{ github.event.pull_request.base.sha }}"
+          --head "${{ github.event.pull_request.head.sha }}"
+          --labels-json "$BENSDORP_PR_LABELS"
