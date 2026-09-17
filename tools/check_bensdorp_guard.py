@@ -16,12 +16,20 @@ MANIFEST_PATH = ROOT / "config" / "bensdorp_guard_manifest.json"
 CONFIG_PATH = ROOT / "config" / "config.yaml"
 APPROVAL_LABEL = "bensdorp-strategy-change-approved"
 APPROVAL_ENV = "BENSDORP_STRATEGY_CHANGE_APPROVED"
+MANIFEST_REL = "config/bensdorp_guard_manifest.json"
+CONFIG_REL = "config/config.yaml"
+CONTROL_PLANE_FILES = (
+    ".github/workflows/bensdorp-integrity.yml",
+    "tools/check_bensdorp_guard.py",
+    MANIFEST_REL,
+)
 
 PROTECTED_FILES = tuple(
     [f"core/system{i}.py" for i in range(1, 8)]
     + [f"strategies/system{i}_strategy.py" for i in range(1, 8)]
     + [
         "common/system_setup_predicates.py",
+        "common/system_constants.py",
         "common/trade_management.py",
         "common/profit_protection.py",
         "strategies/constants.py",
@@ -29,10 +37,14 @@ PROTECTED_FILES = tuple(
 )
 
 
+def _sha256_bytes(data: bytes) -> str:
+    """Hash text-like source bytes after normalizing line endings."""
+    normalized = data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    return hashlib.sha256(normalized).hexdigest()
+
+
 def _sha256(path: Path) -> str:
-    # Normalize line endings so the frozen fingerprint is stable on Windows/Linux.
-    data = path.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
-    return hashlib.sha256(data).hexdigest()
+    return _sha256_bytes(path.read_bytes())
 
 
 def _load_yaml_text(text: str) -> dict[str, Any]:
@@ -80,11 +92,8 @@ def _load_manifest() -> dict[str, Any]:
     return value
 
 
-def verify_manifest() -> list[str]:
-    expected = _load_manifest()
-    current = _current_manifest_payload()
+def _compare_manifest(expected: dict[str, Any], current: dict[str, Any]) -> list[str]:
     errors: list[str] = []
-
     if expected.get("version") != current["version"]:
         errors.append("manifest version mismatch")
     if expected.get("approval_label") != APPROVAL_LABEL:
@@ -107,8 +116,11 @@ def verify_manifest() -> list[str]:
 
     if expected.get("protected_config") != current["protected_config"]:
         errors.append("protected Bensdorp config values changed")
-
     return errors
+
+
+def verify_manifest() -> list[str]:
+    return _compare_manifest(_load_manifest(), _current_manifest_payload())
 
 
 def _git(*args: str) -> str:
@@ -141,13 +153,63 @@ def _git_show(ref: str, path: str) -> str | None:
     return proc.stdout
 
 
-def _manifest_exists_at(ref: str) -> bool:
-    return _git_show(ref, "config/bensdorp_guard_manifest.json") is not None
+def _git_show_bytes(ref: str, path: str) -> bytes | None:
+    proc = subprocess.run(
+        ["git", "show", f"{ref}:{path}"],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+    )
+    if proc.returncode != 0:
+        return None
+    return proc.stdout
+
+
+def _path_exists_at(ref: str, path: str) -> bool:
+    return _git_show_bytes(ref, path) is not None
+
+
+def _manifest_payload_at(ref: str) -> dict[str, Any]:
+    config_text = _git_show(ref, CONFIG_REL)
+    protected_config: Any
+    if config_text is None:
+        protected_config = "__MISSING__"
+    else:
+        protected_config = _protected_config_subset(_load_yaml_text(config_text))
+
+    protected_files: dict[str, str] = {}
+    for path in sorted(PROTECTED_FILES):
+        data = _git_show_bytes(ref, path)
+        protected_files[path] = "__MISSING__" if data is None else _sha256_bytes(data)
+
+    return {
+        "version": 1,
+        "approval_label": APPROVAL_LABEL,
+        "protected_files": protected_files,
+        "protected_config": protected_config,
+    }
+
+
+def _load_manifest_at(ref: str) -> dict[str, Any] | None:
+    text = _git_show(ref, MANIFEST_REL)
+    if text is None:
+        return None
+    value = json.loads(text)
+    if not isinstance(value, dict):
+        raise ValueError(f"Bensdorp guard manifest at {ref} must be a JSON object")
+    return value
+
+
+def verify_ref(ref: str) -> list[str]:
+    expected = _load_manifest_at(ref)
+    if expected is None:
+        return [f"missing Bensdorp guard manifest at {ref}"]
+    return _compare_manifest(expected, _manifest_payload_at(ref))
 
 
 def _protected_config_changed(base: str, head: str) -> bool:
-    before = _git_show(base, "config/config.yaml")
-    after = _git_show(head, "config/config.yaml")
+    before = _git_show(base, CONFIG_REL)
+    after = _git_show(head, CONFIG_REL)
     if before is None or after is None:
         return before != after
     return _protected_config_subset(
@@ -165,14 +227,14 @@ def protected_changes(base: str, head: str) -> list[str]:
     )
     changed = sorted(names.intersection(PROTECTED_FILES))
 
-    if "config/config.yaml" in names and _protected_config_changed(base, head):
-        changed.append("config/config.yaml::bensdorp-sections")
+    if CONFIG_REL in names and _protected_config_changed(base, head):
+        changed.append(f"{CONFIG_REL}::bensdorp-sections")
 
-    manifest_rel = "config/bensdorp_guard_manifest.json"
-    # Bootstrap PR is allowed to add the first manifest. After that, manifest
-    # edits are themselves approval-gated so the baseline cannot drift quietly.
-    if manifest_rel in names and _manifest_exists_at(base):
-        changed.append(manifest_rel)
+    # The first guard PR bootstraps the control plane. Once each control-plane
+    # file exists on the base branch, changing or deleting it is itself gated.
+    for path in CONTROL_PLANE_FILES:
+        if path in names and _path_exists_at(base, path):
+            changed.append(path)
 
     return sorted(set(changed))
 
@@ -209,21 +271,29 @@ def command_verify() -> int:
 
 def command_gate(base: str, head: str, labels_json: str | None) -> int:
     changes = protected_changes(base, head)
-    if not changes:
-        print("Bensdorp PR gate: no protected strategy changes")
-        return 0
-
-    _print_changes(changes)
     labels = _labels_from_json(labels_json)
-    if APPROVAL_LABEL in labels:
-        print(f"Bensdorp PR gate: approved by label '{APPROVAL_LABEL}'")
-        return 0
 
-    print(
-        f"Bensdorp PR gate: BLOCKED. Add label '{APPROVAL_LABEL}' only after explicit owner approval.",
-        file=sys.stderr,
-    )
-    return 1
+    if changes and APPROVAL_LABEL not in labels:
+        _print_changes(changes)
+        print(
+            f"Bensdorp PR gate: BLOCKED. Add label '{APPROVAL_LABEL}' only after explicit owner approval.",
+            file=sys.stderr,
+        )
+        return 1
+
+    head_errors = verify_ref(head)
+    if head_errors:
+        print("Bensdorp PR gate: candidate fingerprint mismatch", file=sys.stderr)
+        for error in head_errors:
+            print(f"  - {error}", file=sys.stderr)
+        return 1
+
+    if changes:
+        _print_changes(changes)
+        print(f"Bensdorp PR gate: approved by label '{APPROVAL_LABEL}'")
+    else:
+        print("Bensdorp PR gate: no protected strategy/control-plane changes")
+    return 0
 
 
 def command_local_gate(base: str, head: str) -> int:

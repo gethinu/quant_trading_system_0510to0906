@@ -11,6 +11,7 @@ The guard freezes the current source fingerprints for:
 - `core/system1.py` ... `core/system7.py`
 - `strategies/system1_strategy.py` ... `strategies/system7_strategy.py`
 - `common/system_setup_predicates.py`
+- `common/system_constants.py`
 - `common/trade_management.py`
 - `common/profit_protection.py`
 - `strategies/constants.py`
@@ -33,7 +34,14 @@ unless the manifest still matches and `BENSDORP_STRATEGY_CHANGE_APPROVED=1` is
 set for that push.
 
 The frozen manifest is `config/bensdorp_guard_manifest.json`. Rewriting an
-existing manifest also requires `BENSDORP_STRATEGY_CHANGE_APPROVED=1`.
+existing manifest also requires `BENSDORP_STRATEGY_CHANGE_APPROVED=1`. The
+control plane (`tools/check_bensdorp_guard.py`, this manifest, and the dedicated
+workflow) is itself approval-gated after the bootstrap merge.
+
+For pull requests, the dedicated workflow uses `pull_request_target`, checks out
+only the trusted base commit, and fetches the PR head only as Git objects. The
+trusted base copy of the guard evaluates the candidate ref; PR code is never
+executed by this security-sensitive job.
 
 ## Normal maintenance
 

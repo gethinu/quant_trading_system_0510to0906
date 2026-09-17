@@ -81,6 +81,7 @@
   },
   "protected_files": {
     "common/profit_protection.py": "90ffa4614c763e22640b0cb5f26491f01e2a67a943e42fdc170e1de772c255ce",
+    "common/system_constants.py": "3240b2c10d6377a087436c295a4de55137b4f854216b5eb71d6d3a05acac30a8",
     "common/system_setup_predicates.py": "df3df994728ba60ab5a99fffeb6acc5a37e75c6ce9a5e7cb4cbe67e0c94e04d9",
     "common/trade_management.py": "d9b369ccb0a3146e43bee8a901bd7879bec94c6e18c1fdf954e6d44dd61cb78f",
     "core/system1.py": "936dc40b5e73220915797debf22e6b5aedfe536f5be25b593dd924b65680a7e8",

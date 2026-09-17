@@ -16,6 +16,7 @@ def test_protected_surface_contains_all_system1_to_7_implementations():
         assert f"strategies/system{idx}_strategy.py" in protected
 
     assert "common/system_setup_predicates.py" in protected
+    assert "common/system_constants.py" in protected
     assert "common/trade_management.py" in protected
     assert "common/profit_protection.py" in protected
     assert "strategies/constants.py" in protected
@@ -40,6 +41,7 @@ def test_pr_gate_accepts_exact_owner_approval_label(monkeypatch):
     monkeypatch.setattr(
         guard, "protected_changes", lambda _base, _head: ["core/system1.py"]
     )
+    monkeypatch.setattr(guard, "verify_ref", lambda _head: [])
     labels = json.dumps([guard.APPROVAL_LABEL])
     assert guard.command_gate("base", "head", labels) == 0
 
@@ -66,3 +68,37 @@ def test_source_fingerprint_is_line_ending_invariant(tmp_path):
     lf.write_bytes(b"a = 1\nb = 2\n")
     crlf.write_bytes(b"a = 1\r\nb = 2\r\n")
     assert guard._sha256(lf) == guard._sha256(crlf)
+
+
+def test_head_ref_must_match_its_own_manifest(monkeypatch):
+    monkeypatch.setattr(guard, "protected_changes", lambda _base, _head: [])
+    monkeypatch.setattr(
+        guard, "verify_ref", lambda _head: ["protected source changed: core/system2.py"]
+    )
+    assert guard.command_gate("base", "head", "[]") == 1
+
+
+def test_verify_ref_compares_manifest_with_git_object_payload(monkeypatch):
+    payload = guard._current_manifest_payload()
+    monkeypatch.setattr(guard, "_load_manifest_at", lambda _ref: payload)
+    monkeypatch.setattr(guard, "_manifest_payload_at", lambda _ref: payload)
+    assert guard.verify_ref("candidate") == []
+
+
+def test_guard_control_plane_is_self_protected_after_bootstrap():
+    assert set(guard.CONTROL_PLANE_FILES) == {
+        ".github/workflows/bensdorp-integrity.yml",
+        "tools/check_bensdorp_guard.py",
+        "config/bensdorp_guard_manifest.json",
+    }
+
+
+def test_github_gate_uses_pull_request_target_and_never_checks_out_head():
+    workflow = (guard.ROOT / ".github/workflows/bensdorp-integrity.yml").read_text(
+        encoding="utf-8"
+    )
+    assert "pull_request_target:" in workflow
+    assert "\n  pull_request:\n" not in workflow
+    assert "Checkout trusted base" in workflow
+    assert "Fetch untrusted PR head as Git object only" in workflow
+    assert "--head FETCH_HEAD" in workflow
