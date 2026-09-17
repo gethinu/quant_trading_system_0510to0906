@@ -1,0 +1,51 @@
+name: Bensdorp Strategy Integrity
+
+on:
+  push:
+    branches: [main]
+  pull_request_target:
+    branches: [main]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  guard:
+    name: Protect System1-7 book logic
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout trusted base
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Fetch untrusted PR head as Git object only
+        if: github.event_name == 'pull_request_target'
+        shell: bash
+        run: git fetch --no-tags origin "pull/${{ github.event.pull_request.number }}/head"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install guard dependency
+        run: python -m pip install --disable-pip-version-check pyyaml
+
+      - name: Verify trusted base fingerprint
+        run: python tools/check_bensdorp_guard.py verify
+
+      - name: Gate PR candidate using trusted base code
+        if: github.event_name == 'pull_request_target'
+        env:
+          BENSDORP_PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+        run: >-
+          python tools/check_bensdorp_guard.py gate
+          --base "${{ github.event.pull_request.base.sha }}"
+          --head FETCH_HEAD
+          --labels-json "$BENSDORP_PR_LABELS"

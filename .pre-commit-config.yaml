@@ -63,6 +63,14 @@ repos:
         pass_filenames: false
         stages: [pre-push]
 
+      - id: bensdorp-strategy-guard
+        name: Bensdorp System1-7 strategy guard
+        entry: python tools/check_bensdorp_guard.py local-gate --base origin/main --head HEAD
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+
       - id: auto-snapshot
         name: Snapshot Test (Core Changes)
         entry: python tools/auto_snapshot.py --compare
