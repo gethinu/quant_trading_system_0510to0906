@@ -6527,6 +6527,11 @@ def build_cli_parser() -> argparse.ArgumentParser:
         help="パイプライン全体のフェーズ別実行時間を計測し logs/perf にレポート保存",
     )
     parser.add_argument(
+        "--benchmark-output",
+        default=None,
+        help="Optional JSON output path for --benchmark",
+    )
+    parser.add_argument(
         "--detailed-perf",
         action="store_true",
         help="詳細パフォーマンス測定（メモリ、CPU、ディスクI/O）を有効化し logs/perf に保存",
@@ -6587,6 +6592,29 @@ def configure_logging_for_cli(args: argparse.Namespace) -> None:
         _log(f"📝 ログ保存先: {sel_path}", ui=False)
     except Exception:
         pass
+
+
+def _persist_lightweight_benchmark_report(args: argparse.Namespace) -> Path | None:
+    """Persist the current lightweight benchmark using the CLI output contract."""
+    benchmark = _LIGHTWEIGHT_BENCHMARK
+    if benchmark is None or not benchmark.enabled:
+        return None
+
+    requested = getattr(args, "benchmark_output", None)
+    if requested:
+        output_path = Path(str(requested))
+    else:
+        base_dir = (
+            Path("results_csv_test")
+            if getattr(args, "test_mode", None)
+            else Path("logs") / "perf"
+        )
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        output_path = base_dir / f"benchmark_{stamp}_{os.getpid()}.json"
+
+    benchmark.save_report(output_path)
+    _log(f"[benchmark] report saved: {output_path}")
+    return output_path
 
 
 def run_signal_pipeline(
@@ -6655,6 +6683,9 @@ def run_signal_pipeline(
             skip_external=getattr(args, "skip_external", False),
             skip_latest_check=getattr(args, "skip_latest_check", False),
         )
+
+    if getattr(args, "benchmark", False):
+        _persist_lightweight_benchmark_report(args)
 
     # 戻り値がNoneの場合のフォールバック
     if result is None:
