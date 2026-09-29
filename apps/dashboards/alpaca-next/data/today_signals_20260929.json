@@ -1,0 +1,389 @@
+{
+  "version": "1.0",
+  "date": "2026-09-29",
+  "generated_at": "2026-09-29T14:35:38+09:00",
+  "provider": "polygon",
+  "systems": {
+    "sys1": {
+      "signals": [
+        {
+          "symbol": "ASST",
+          "side": "BUY",
+          "entry_price": 29.0,
+          "limit_price": null,
+          "weight": 0.037,
+          "rank": 1,
+          "reason": "ROC200が1位（全1361銘柄中）のため"
+        },
+        {
+          "symbol": "MRNA",
+          "side": "BUY",
+          "entry_price": 197.28,
+          "limit_price": null,
+          "weight": 0.042,
+          "rank": 2,
+          "reason": "ROC200が4位（全1361銘柄中）のため"
+        }
+      ],
+      "n_candidates_input": 10,
+      "n_signals_output": 2,
+      "gate_survival_ratio": 0.2,
+      "funnel": {
+        "target": 5228,
+        "filter_pass": 1400,
+        "setup_pass": 359,
+        "candidate_count": 10,
+        "entry_count": 2,
+        "exit_count": null
+      }
+    },
+    "sys2": {
+      "signals": [
+        {
+          "symbol": "CDNA",
+          "side": "SELL",
+          "entry_price": 67.18,
+          "limit_price": 67.18,
+          "weight": 0.1037,
+          "rank": 11,
+          "reason": "モメンタムが強く過熱のため"
+        },
+        {
+          "symbol": "GRAL",
+          "side": "SELL",
+          "entry_price": 137.94,
+          "limit_price": 137.94,
+          "weight": 0.0807,
+          "rank": 12,
+          "reason": "モメンタムが強く過熱のため"
+        },
+        {
+          "symbol": "P",
+          "side": "SELL",
+          "entry_price": 134.58,
+          "limit_price": 134.58,
+          "weight": 0.0859,
+          "rank": 13,
+          "reason": "モメンタムが強く過熱のため"
+        },
+        {
+          "symbol": "DDOG",
+          "side": "SELL",
+          "entry_price": 279.45,
+          "limit_price": 279.45,
+          "weight": 0.0743,
+          "rank": 14,
+          "reason": "モメンタムが強く過熱のため"
+        },
+        {
+          "symbol": "AEO",
+          "side": "SELL",
+          "entry_price": 18.0,
+          "limit_price": 18.0,
+          "weight": 0.0718,
+          "rank": 15,
+          "reason": "モメンタムが強く過熱のため"
+        },
+        {
+          "symbol": "ABCL",
+          "side": "SELL",
+          "entry_price": 14.48,
+          "limit_price": 14.48,
+          "weight": 0.0647,
+          "rank": 16,
+          "reason": "モメンタムが強く過熱のため"
+        },
+        {
+          "symbol": "AMAT",
+          "side": "SELL",
+          "entry_price": 506.23,
+          "limit_price": 506.23,
+          "weight": 0.0539,
+          "rank": 17,
+          "reason": "モメンタムが強く過熱のため"
+        },
+        {
+          "symbol": "JBL",
+          "side": "SELL",
+          "entry_price": 331.69,
+          "limit_price": 331.69,
+          "weight": 0.0353,
+          "rank": 18,
+          "reason": "モメンタムが強く過熱のため"
+        }
+      ],
+      "n_candidates_input": 10,
+      "n_signals_output": 8,
+      "gate_survival_ratio": 0.8,
+      "funnel": {
+        "target": 5228,
+        "filter_pass": 1333,
+        "setup_pass": 12,
+        "candidate_count": 10,
+        "entry_count": 8,
+        "exit_count": null
+      }
+    },
+    "sys3": {
+      "signals": [
+        {
+          "symbol": "IPDN",
+          "side": "BUY",
+          "entry_price": 3.62,
+          "limit_price": 3.62,
+          "weight": 0.0154,
+          "rank": 3,
+          "reason": "3日下落率が7位（全832銘柄中）のため"
+        },
+        {
+          "symbol": "WHLR",
+          "side": "BUY",
+          "entry_price": 3.8,
+          "limit_price": 3.8,
+          "weight": 0.0129,
+          "rank": 4,
+          "reason": "3日下落率が9位（全832銘柄中）のため"
+        },
+        {
+          "symbol": "OPTT",
+          "side": "BUY",
+          "entry_price": 1.55,
+          "limit_price": 1.55,
+          "weight": 0.0272,
+          "rank": 5,
+          "reason": "3日下落率が12位（全832銘柄中）のため"
+        },
+        {
+          "symbol": "MDB",
+          "side": "BUY",
+          "entry_price": 311.25,
+          "limit_price": 311.25,
+          "weight": 0.0497,
+          "rank": 6,
+          "reason": "3日下落率が14位（全832銘柄中）のため"
+        },
+        {
+          "symbol": "MSS",
+          "side": "BUY",
+          "entry_price": 1.54,
+          "limit_price": 1.54,
+          "weight": 0.0229,
+          "rank": 7,
+          "reason": "3日下落率が16位（全832銘柄中）のため"
+        },
+        {
+          "symbol": "VWAV",
+          "side": "BUY",
+          "entry_price": 4.25,
+          "limit_price": 4.25,
+          "weight": 0.0158,
+          "rank": 8,
+          "reason": "3日下落率が19位（全832銘柄中）のため"
+        }
+      ],
+      "n_candidates_input": 10,
+      "n_signals_output": 6,
+      "gate_survival_ratio": 0.6,
+      "funnel": {
+        "target": 5228,
+        "filter_pass": 834,
+        "setup_pass": 20,
+        "candidate_count": 10,
+        "entry_count": 6,
+        "exit_count": null
+      }
+    },
+    "sys4": {
+      "signals": [],
+      "n_candidates_input": 10,
+      "n_signals_output": 0,
+      "gate_survival_ratio": 0.0,
+      "funnel": {
+        "target": 5228,
+        "filter_pass": 508,
+        "setup_pass": 228,
+        "candidate_count": 10,
+        "entry_count": 0,
+        "exit_count": null
+      }
+    },
+    "sys5": {
+      "signals": [
+        {
+          "symbol": "BNC",
+          "side": "BUY",
+          "entry_price": 5.46,
+          "limit_price": 5.46,
+          "weight": 0.0424,
+          "rank": 9,
+          "reason": "ADXが強く、反発期待のため"
+        },
+        {
+          "symbol": "ODD",
+          "side": "BUY",
+          "entry_price": 17.07,
+          "limit_price": 17.07,
+          "weight": 0.0609,
+          "rank": 10,
+          "reason": "ADXが強く、反発期待のため"
+        }
+      ],
+      "n_candidates_input": 3,
+      "n_signals_output": 2,
+      "gate_survival_ratio": 0.6667,
+      "funnel": {
+        "target": 5228,
+        "filter_pass": 1081,
+        "setup_pass": 3,
+        "candidate_count": 3,
+        "entry_count": 2,
+        "exit_count": null
+      }
+    },
+    "sys6": {
+      "signals": [
+        {
+          "symbol": "HHH",
+          "side": "SELL",
+          "entry_price": 77.65,
+          "limit_price": 77.65,
+          "weight": 0.1033,
+          "rank": 19,
+          "reason": "過去6日騰落率が1位（全1銘柄中）のため"
+        }
+      ],
+      "n_candidates_input": 1,
+      "n_signals_output": 1,
+      "gate_survival_ratio": 1.0,
+      "funnel": {
+        "target": 5228,
+        "filter_pass": 1203,
+        "setup_pass": 1,
+        "candidate_count": 1,
+        "entry_count": 1,
+        "exit_count": null
+      }
+    },
+    "sys7": {
+      "signals": [],
+      "n_candidates_input": 0,
+      "n_signals_output": 0,
+      "gate_survival_ratio": 0.0,
+      "funnel": {
+        "target": 1,
+        "filter_pass": 1,
+        "setup_pass": 0,
+        "candidate_count": 0,
+        "entry_count": 0,
+        "exit_count": null
+      }
+    }
+  },
+  "portfolio": {
+    "total_signals": 19,
+    "total_notional_usd": 18793.9,
+    "hedge": null,
+    "universe_target": 5228,
+    "caps": {
+      "applied": true,
+      "held": {
+        "long": 19,
+        "short": 1,
+        "total": 20
+      },
+      "held_unmapped": {
+        "long": 0,
+        "short": 0,
+        "total": 0
+      },
+      "caps": {
+        "max_total": 70,
+        "max_long": 40,
+        "max_short": 30,
+        "gross_cap_usd": 98543.43,
+        "net_cap_usd": 49271.71,
+        "equity_base_usd": 98543.43,
+        "equity_source": "alpaca"
+      },
+      "allow": {
+        "long": 21,
+        "short": 29,
+        "total": 50
+      },
+      "kept": {
+        "long": 10,
+        "short": 9,
+        "total": 19
+      },
+      "trimmed": {},
+      "new_long_usd": 6132.72,
+      "new_short_usd": 12661.18,
+      "frozen_orphans": {
+        "enabled": true,
+        "count": {
+          "long": 0,
+          "short": 0,
+          "total": 0
+        },
+        "exposure_usd": {
+          "long": 0.0,
+          "short": 0.0,
+          "gross": 0.0
+        },
+        "unpriced_kept_in_slots": 0,
+        "symbols": []
+      },
+      "fair_trim": {
+        "enabled": true,
+        "epoch": 739888,
+        "rotation": 3,
+        "deal_order": [
+          "system5",
+          "system6",
+          "system1",
+          "system2",
+          "system3"
+        ],
+        "demand": {
+          "system1": 2,
+          "system2": 8,
+          "system3": 6,
+          "system5": 2,
+          "system6": 1
+        },
+        "kept": {
+          "system1": 2,
+          "system2": 8,
+          "system3": 6,
+          "system5": 2,
+          "system6": 1
+        },
+        "dropped": {
+          "system1": 0,
+          "system2": 0,
+          "system3": 0,
+          "system5": 0,
+          "system6": 0
+        }
+      }
+    }
+  },
+  "meta": {
+    "cli_version": "0.1.0",
+    "run_id": "20260929_142147_d127ca",
+    "elapsed_seconds": 830.9,
+    "publish_delivery": {
+      "state": "primary_accepted",
+      "attempted_at": "2026-09-29T05:38:39.666476+00:00",
+      "channels": {
+        "ntfy": {
+          "state": "accepted",
+          "status_code": 200
+        }
+      }
+    },
+    "status": "ok",
+    "abort_reason": null,
+    "publish_status": "ok"
+  }
+}
