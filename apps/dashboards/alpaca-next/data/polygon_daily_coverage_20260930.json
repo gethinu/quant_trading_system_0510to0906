@@ -1,47 +1,47 @@
 {
-  "date": "2026-09-13",
+  "date": "2026-09-30",
   "provider": "polygon_grouped_daily",
-  "n_candidates_total": 5152,
+  "n_candidates_total": 5171,
   "survival_by_system": {
     "sys1": {
-      "n_pass": 1318,
-      "n_total": 5152,
-      "ratio": 0.2558,
+      "n_pass": 1398,
+      "n_total": 5171,
+      "ratio": 0.2704,
       "warn_threshold": 0.05,
       "status": "ok"
     },
     "sys2": {
-      "n_pass": 1775,
-      "n_total": 5152,
-      "ratio": 0.3445,
+      "n_pass": 1838,
+      "n_total": 5171,
+      "ratio": 0.3554,
       "warn_threshold": 0.06,
       "status": "ok"
     },
     "sys3": {
-      "n_pass": 1775,
-      "n_total": 5152,
-      "ratio": 0.3445,
+      "n_pass": 1838,
+      "n_total": 5171,
+      "ratio": 0.3554,
       "warn_threshold": 0.06,
       "status": "ok"
     },
     "sys4": {
-      "n_pass": 930,
-      "n_total": 5152,
-      "ratio": 0.1805,
+      "n_pass": 945,
+      "n_total": 5171,
+      "ratio": 0.1827,
       "warn_threshold": 0.04,
       "status": "ok"
     },
     "sys5": {
-      "n_pass": 3730,
-      "n_total": 5152,
-      "ratio": 0.724,
+      "n_pass": 3694,
+      "n_total": 5171,
+      "ratio": 0.7144,
       "warn_threshold": 0.15,
       "status": "ok"
     },
     "sys6": {
-      "n_pass": 2317,
-      "n_total": 5152,
-      "ratio": 0.4497,
+      "n_pass": 2333,
+      "n_total": 5171,
+      "ratio": 0.4512,
       "warn_threshold": 0.1,
       "status": "ok"
     },
@@ -55,11 +55,11 @@
   },
   "rejected_top10": [
     {
-      "symbol": "VMRK",
-      "reason": "no_dv20_cache"
+      "symbol": "SDEV",
+      "reason": "price_below_5"
     },
     {
-      "symbol": "TRUG",
+      "symbol": "BKYI",
       "reason": "price_below_5"
     },
     {
@@ -67,53 +67,53 @@
       "reason": "price_below_5"
     },
     {
-      "symbol": "FTFT",
+      "symbol": "PWP",
+      "reason": "dv20_below_50m"
+    },
+    {
+      "symbol": "XERS",
+      "reason": "dv20_below_50m"
+    },
+    {
+      "symbol": "STLA",
       "reason": "price_below_5"
     },
     {
-      "symbol": "SPSC",
-      "reason": "dv20_below_50m"
+      "symbol": "SLND",
+      "reason": "price_below_5"
     },
     {
-      "symbol": "INGM",
-      "reason": "dv20_below_50m"
+      "symbol": "MSGY",
+      "reason": "price_below_5"
     },
     {
-      "symbol": "FEIM",
-      "reason": "dv20_below_50m"
+      "symbol": "AMC",
+      "reason": "price_below_5"
     },
     {
-      "symbol": "RCUS",
-      "reason": "dv20_below_50m"
-    },
-    {
-      "symbol": "KBH",
-      "reason": "dv20_below_50m"
-    },
-    {
-      "symbol": "RWT",
+      "symbol": "DXST",
       "reason": "price_below_5"
     }
   ],
   "delta_vs_previous": {
-    "sys1": -0.0014,
-    "sys2": -0.003,
-    "sys3": -0.003,
-    "sys4": -0.002,
-    "sys5": 0.001,
-    "sys6": -0.0003,
+    "sys1": -0.0008,
+    "sys2": -0.0003,
+    "sys3": -0.0003,
+    "sys4": 0.0001,
+    "sys5": -0.0007,
+    "sys6": -0.001,
     "sys7": 0.0
   },
   "consecutive_drops": {
     "sys1": 1,
     "sys2": 1,
     "sys3": 1,
-    "sys4": 1,
-    "sys5": 0,
+    "sys4": 0,
+    "sys5": 2,
     "sys6": 1,
     "sys7": 0
   },
   "notes": [
-    "grouped_asof=2026-09-11 (target 2026-09-13 was non-trading)"
+    "grouped_asof=2026-09-29 (target 2026-09-30 was non-trading)"
   ]
 }
