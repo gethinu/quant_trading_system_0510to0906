@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "date": "2026-09-30",
-  "generated_at": "2026-09-30T14:35:07+09:00",
+  "generated_at": "2026-09-30T22:49:05+09:00",
   "provider": "polygon",
   "systems": {
     "sys1": {
@@ -13,7 +13,7 @@
           "limit_price": null,
           "weight": 0.0498,
           "rank": 1,
-          "reason": "ROC200が1位（全1360銘柄中）のため"
+          "reason": "ROC200が1位（全1359銘柄中）のため"
         },
         {
           "symbol": "MRNA",
@@ -22,16 +22,16 @@
           "limit_price": null,
           "weight": 0.0415,
           "rank": 2,
-          "reason": "ROC200が4位（全1360銘柄中）のため"
+          "reason": "ROC200が4位（全1359銘柄中）のため"
         }
       ],
       "n_candidates_input": 10,
       "n_signals_output": 2,
       "gate_survival_ratio": 0.2,
       "funnel": {
-        "target": 5222,
-        "filter_pass": 1398,
-        "setup_pass": 344,
+        "target": 5218,
+        "filter_pass": 1397,
+        "setup_pass": 343,
         "candidate_count": 10,
         "entry_count": 2,
         "exit_count": null
@@ -98,7 +98,7 @@
       "n_signals_output": 6,
       "gate_survival_ratio": 0.6,
       "funnel": {
-        "target": 5222,
+        "target": 5218,
         "filter_pass": 1319,
         "setup_pass": 22,
         "candidate_count": 10,
@@ -149,7 +149,7 @@
       "n_signals_output": 4,
       "gate_survival_ratio": 0.4,
       "funnel": {
-        "target": 5222,
+        "target": 5218,
         "filter_pass": 818,
         "setup_pass": 17,
         "candidate_count": 10,
@@ -173,7 +173,7 @@
       "n_signals_output": 1,
       "gate_survival_ratio": 0.1,
       "funnel": {
-        "target": 5222,
+        "target": 5218,
         "filter_pass": 513,
         "setup_pass": 222,
         "candidate_count": 10,
@@ -206,7 +206,7 @@
       "n_signals_output": 2,
       "gate_survival_ratio": 1.0,
       "funnel": {
-        "target": 5222,
+        "target": 5218,
         "filter_pass": 1060,
         "setup_pass": 2,
         "candidate_count": 2,
@@ -220,7 +220,7 @@
       "n_signals_output": 0,
       "gate_survival_ratio": 0.0,
       "funnel": {
-        "target": 5222,
+        "target": 5218,
         "filter_pass": 1211,
         "setup_pass": 0,
         "candidate_count": 0,
@@ -247,13 +247,13 @@
     "total_signals": 15,
     "total_notional_usd": 14722.89,
     "hedge": null,
-    "universe_target": 5222,
+    "universe_target": 5218,
     "caps": {
       "applied": true,
       "held": {
-        "long": 21,
+        "long": 20,
         "short": 4,
-        "total": 25
+        "total": 24
       },
       "held_unmapped": {
         "long": 0,
@@ -264,15 +264,15 @@
         "max_total": 70,
         "max_long": 40,
         "max_short": 30,
-        "gross_cap_usd": 97772.43,
-        "net_cap_usd": 48886.21,
-        "equity_base_usd": 97772.43,
+        "gross_cap_usd": 97598.06,
+        "net_cap_usd": 48799.03,
+        "equity_base_usd": 97598.06,
         "equity_source": "alpaca"
       },
       "allow": {
-        "long": 19,
+        "long": 20,
         "short": 26,
-        "total": 45
+        "total": 46
       },
       "kept": {
         "long": 9,
@@ -334,20 +334,14 @@
   },
   "meta": {
     "cli_version": "0.1.0",
-    "run_id": "20260930_142125_d719ea",
-    "elapsed_seconds": 821.9,
+    "run_id": "20260930_223508_a2538f",
+    "elapsed_seconds": 836.6,
     "publish_delivery": {
-      "state": "primary_accepted",
-      "attempted_at": "2026-09-30T05:37:59.231188+00:00",
-      "channels": {
-        "ntfy": {
-          "state": "accepted",
-          "status_code": 200
-        }
-      }
+      "state": "not_attempted",
+      "attempted_at": null,
+      "channels": {}
     },
     "status": "ok",
-    "abort_reason": null,
-    "publish_status": "ok"
+    "abort_reason": null
   }
 }
