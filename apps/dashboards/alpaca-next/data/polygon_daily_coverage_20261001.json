@@ -1,47 +1,47 @@
 {
-  "date": "2026-09-14",
+  "date": "2026-10-01",
   "provider": "polygon_grouped_daily",
-  "n_candidates_total": 5152,
+  "n_candidates_total": 5172,
   "survival_by_system": {
     "sys1": {
-      "n_pass": 1318,
-      "n_total": 5152,
-      "ratio": 0.2558,
+      "n_pass": 1400,
+      "n_total": 5172,
+      "ratio": 0.2707,
       "warn_threshold": 0.05,
       "status": "ok"
     },
     "sys2": {
-      "n_pass": 1775,
-      "n_total": 5152,
-      "ratio": 0.3445,
+      "n_pass": 1837,
+      "n_total": 5172,
+      "ratio": 0.3552,
       "warn_threshold": 0.06,
       "status": "ok"
     },
     "sys3": {
-      "n_pass": 1775,
-      "n_total": 5152,
-      "ratio": 0.3445,
+      "n_pass": 1837,
+      "n_total": 5172,
+      "ratio": 0.3552,
       "warn_threshold": 0.06,
       "status": "ok"
     },
     "sys4": {
-      "n_pass": 930,
-      "n_total": 5152,
-      "ratio": 0.1805,
+      "n_pass": 941,
+      "n_total": 5172,
+      "ratio": 0.1819,
       "warn_threshold": 0.04,
       "status": "ok"
     },
     "sys5": {
-      "n_pass": 3730,
-      "n_total": 5152,
-      "ratio": 0.724,
+      "n_pass": 3699,
+      "n_total": 5172,
+      "ratio": 0.7152,
       "warn_threshold": 0.15,
       "status": "ok"
     },
     "sys6": {
-      "n_pass": 2317,
-      "n_total": 5152,
-      "ratio": 0.4497,
+      "n_pass": 2331,
+      "n_total": 5172,
+      "ratio": 0.4507,
       "warn_threshold": 0.1,
       "status": "ok"
     },
@@ -55,65 +55,65 @@
   },
   "rejected_top10": [
     {
-      "symbol": "VMRK",
-      "reason": "no_dv20_cache"
+      "symbol": "TGE",
+      "reason": "price_below_5"
     },
     {
-      "symbol": "TRUG",
+      "symbol": "TNON",
       "reason": "price_below_5"
+    },
+    {
+      "symbol": "CAPR",
+      "reason": "dv20_below_50m"
     },
     {
       "symbol": "GRAB",
       "reason": "price_below_5"
     },
     {
-      "symbol": "FTFT",
+      "symbol": "PACB",
       "reason": "price_below_5"
     },
     {
-      "symbol": "SPSC",
+      "symbol": "CNTB",
+      "reason": "price_below_5"
+    },
+    {
+      "symbol": "ROG",
       "reason": "dv20_below_50m"
     },
     {
-      "symbol": "INGM",
+      "symbol": "MUX",
       "reason": "dv20_below_50m"
     },
     {
-      "symbol": "FEIM",
+      "symbol": "RDN",
       "reason": "dv20_below_50m"
     },
     {
-      "symbol": "RCUS",
-      "reason": "dv20_below_50m"
-    },
-    {
-      "symbol": "KBH",
-      "reason": "dv20_below_50m"
-    },
-    {
-      "symbol": "RWT",
+      "symbol": "VBIO",
       "reason": "price_below_5"
     }
   ],
   "delta_vs_previous": {
-    "sys1": -0.0014,
-    "sys2": -0.003,
-    "sys3": -0.003,
-    "sys4": -0.002,
-    "sys5": 0.001,
-    "sys6": -0.0003,
+    "sys1": 0.0003,
+    "sys2": -0.0002,
+    "sys3": -0.0002,
+    "sys4": -0.0008,
+    "sys5": 0.0008,
+    "sys6": -0.0005,
     "sys7": 0.0
   },
   "consecutive_drops": {
-    "sys1": 1,
-    "sys2": 1,
-    "sys3": 1,
+    "sys1": 0,
+    "sys2": 2,
+    "sys3": 2,
     "sys4": 1,
     "sys5": 0,
-    "sys6": 1,
+    "sys6": 2,
     "sys7": 0
   },
   "notes": [
-    "grouped_asof=2026-09-11 (target 2026-09-14 was non-trading)"
+    "grouped_asof=2026-09-30 (target 2026-10-01 was non-trading)"
   ]
 }
