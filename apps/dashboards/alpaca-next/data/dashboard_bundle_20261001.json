@@ -1,16 +1,16 @@
 {
   "schema": "dashboard_bundle/v1",
   "date": "2026-10-01",
-  "source_run_id": "20261001_142320_418f73",
-  "materialized_at": "2026-10-01T05:40:55+00:00",
+  "source_run_id": "20261001_223506_055822",
+  "materialized_at": "2026-10-01T13:54:51+00:00",
   "files": {
     "today_signals": {
       "name": "today_signals_20261001.json",
-      "sha256": "bc3037e725d44716a2788aae6cfd7a1385cb2143fc502f2d81a757f52faa80c5"
+      "sha256": "b03a56851cbebe2622ca5776e1689b6ea1919284145c3d083be7a467ca63ff7f"
     },
     "pipeline": {
       "name": "pipeline_20261001.json",
-      "sha256": "0ffd399b7fe49b4e45038104435ac0378f170ebc5c1a3e4128f40301dd6d0ff3"
+      "sha256": "fbbf5e8602a0f4871f096d39414494ec3aa374f007afd9a0b625a1bc1bf35532"
     },
     "narrative": {
       "name": "narrative_20261001.json",
@@ -18,17 +18,17 @@
     },
     "alpaca_snapshot": {
       "name": "alpaca_snapshot_20261001.json",
-      "sha256": "af4e377040a519177a7b0f4a6a5fb8419252993d54d78b560acfb853c48d7b9b"
+      "sha256": "febdbcc85a7df675129b3b77e048082935cc56f3a367d9b21066dab31629ad94"
     },
     "notify_delivery": {
       "name": "notify_delivery_20261001.json",
-      "sha256": "955e929cea5e775a940c9e3f832020516e2ab5df163ae14cfe6bfefc9a1f8cec"
+      "sha256": "9713f7f777c1ffff7020fe60d1832fefb6b257ba317045afdc4d7244763364d0"
     }
   },
   "sources": {
     "recon": {
       "name": "recon_20261001.json",
-      "sha256": "c78979954b16f6eed20e555e34ac1f1e2abcc1eaa9f7628a56f4591237fe7429"
+      "sha256": "8b989118485568d96478f41df1e15e7a8a3afe6b0361457432943cde84736129"
     }
   },
   "measurement": {
